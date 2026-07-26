@@ -1,6 +1,6 @@
 // Case B — through-hole mouth (cube - cylinder), a CONVEX ring edge -> round_tool
 // (the caller subtracts). Closed-chain coverage. Reference tool is the classic
-// annulus_prism - torus idiom (fillet-operator-plan.md §1).
+// annulus_prism - torus idiom (../fillet-feature-design/fillet-operator-plan.md).
 //
 // Vertical thin-slab section through the axis (y = 0). Read as:
 //   columns -> [ base model ] [ applied (mouth rounded) ] [ isolated tool ]

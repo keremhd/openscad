@@ -2,7 +2,7 @@
 
 Tessellation-independent, **automated** checks that the fillet operator's output
 matches the hand-written reference geometry in `../fillet-visual-tests/`. This is
-the "drop the operator in and test it" mechanism from `../detailed-milestones.md`
+the "drop the operator in and test it" mechanism from `../fillet-feature-design/detailed-milestones.md`
 (milestone **M6**), staged early so the tests exist *before* the operator does.
 
 ## The idea: equivalence-by-emptiness

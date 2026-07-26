@@ -1,5 +1,5 @@
 // -----------------------------------------------------------------------------
-// M6-prep — automated equivalence harness (see ../detailed-milestones.md, M6)
+// M6-prep — automated equivalence harness (see ../fillet-feature-design/, M6)
 //
 // Proves two solids are the SAME shape to within a tolerance t, tessellation-
 // independently. Used to check a fillet operator's output against the hand-

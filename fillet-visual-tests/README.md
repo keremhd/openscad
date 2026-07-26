@@ -1,7 +1,7 @@
 # Fillet operator — M1 visual test harness
 
 Hand-written, **operator-independent** reference cases for the fillet/round/
-chamfer work (see `../fillet-operator-plan.md` and `../detailed-milestones.md`).
+chamfer work (see `../fillet-feature-design/`).
 Every tool here is built from the classic OpenSCAD idioms (annulus − torus,
 wedge − cylinder, …), so these render with a stock OpenSCAD today and define the
 known-good target that milestones **M5** (chamfer/bevel) and **M7** (fillet/round)
