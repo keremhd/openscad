@@ -15,6 +15,7 @@ class NodeVisitor : public BaseVisitor,
                     public Visitor<class RootNode>,
                     public Visitor<class LeafNode>,
                     public Visitor<class CgalAdvNode>,
+                    public Visitor<class FilletNode>,
                     public Visitor<class CsgOpNode>,
                     public Visitor<class LinearExtrudeNode>,
                     public Visitor<class RotateExtrudeNode>,
@@ -60,6 +61,10 @@ public:
     return visit(state, (const AbstractPolyNode&)node);
   }
   Response visit(State& state, const CgalAdvNode& node) override
+  {
+    return visit(state, (const AbstractNode&)node);
+  }
+  Response visit(State& state, const FilletNode& node) override
   {
     return visit(state, (const AbstractNode&)node);
   }

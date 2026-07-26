@@ -1015,6 +1015,7 @@ set(CORE_SOURCES
   src/core/ContextMemoryManager.cc
   src/core/CsgOpNode.cc
   src/core/CurveDiscretizer.cc
+  src/core/FilletNode.cc
   src/core/DrawingCallback.cc
   src/core/EvaluationSession.cc
   src/core/Expression.cc

@@ -14,6 +14,7 @@
 #include "core/ColorNode.h"
 #include "core/CsgOpNode.h"
 #include "core/CurveDiscretizer.h"
+#include "core/FilletNode.h"
 #include "core/LinearExtrudeNode.h"
 #include "core/ModuleInstantiation.h"
 #include "core/OffsetNode.h"
@@ -977,6 +978,33 @@ Response GeometryEvaluator::visit(State& state, const CgalAdvNode& node)
       }
       default: assert(false && "not implemented");
       }
+    } else {
+      geom = smartCacheGet(node, state.preferNef());
+    }
+    addToParent(state, node, geom);
+    node.progress_report();
+  }
+  return Response::ContinueTraversal;
+}
+
+/*!
+   input: List of 3D objects (child 0 = target, children 1+ = brushes)
+   output: a tool solid (empty for now)
+   operation:
+    o M0: no-op. Collect children (forcing their evaluation, which is inherent to
+      any mesh-inspecting fillet operator) and return empty geometry. Edge
+      classification and tool construction land in later milestones.
+ */
+Response GeometryEvaluator::visit(State& state, const FilletNode& node)
+{
+  if (state.isPrefix() && isSmartCached(node)) return Response::PruneTraversal;
+  if (state.isPostfix()) {
+    std::shared_ptr<const Geometry> geom;
+    if (!isSmartCached(node)) {
+      // Consume the already-evaluated children so the visitedchildren map stays
+      // clean; their geometry is not used yet.
+      collectChildren3D(node);
+      geom = nullptr;
     } else {
       geom = smartCacheGet(node, state.preferNef());
     }

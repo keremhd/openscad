@@ -11,6 +11,7 @@
 #include "core/BaseVisitable.h"
 #include "core/CSGNode.h"
 #include "core/CgalAdvNode.h"
+#include "core/FilletNode.h"
 #include "core/ColorNode.h"
 #include "core/CsgOpNode.h"
 #include "core/ModuleInstantiation.h"
@@ -324,6 +325,31 @@ Response CSGTreeEvaluator::visit(State& state, const CgalAdvNode& node)
   if (state.isPostfix()) {
     std::shared_ptr<CSGNode> t1;
     // FIXME: Calling evaluator directly since we're not a PolyNode. Generalize this.
+    std::shared_ptr<const Geometry> geom;
+    if (this->geomevaluator) {
+      geom = this->geomevaluator->evaluateGeometry(node, false);
+      if (geom) {
+        t1 = evaluateCSGNodeFromGeometry(state, geom, node.modinst, node);
+      } else {
+        t1 = CSGNode::createEmptySet();
+      }
+      node.progress_report();
+    }
+    this->stored_term[node.index()] = t1;
+    applyBackgroundAndHighlight(state, node);
+    addToParent(state, node);
+  }
+  return Response::ContinueTraversal;
+}
+
+// A fillet tool inspects its child's mesh, so — like CgalAdvNode — it cannot be
+// expressed as a CSG union/difference of its children. Force geometry evaluation
+// and insert the result as a single leaf, so preview matches render instead of
+// falling back to unioning the children (which would show the untouched child).
+Response CSGTreeEvaluator::visit(State& state, const FilletNode& node)
+{
+  if (state.isPostfix()) {
+    std::shared_ptr<CSGNode> t1;
     std::shared_ptr<const Geometry> geom;
     if (this->geomevaluator) {
       geom = this->geomevaluator->evaluateGeometry(node, false);
