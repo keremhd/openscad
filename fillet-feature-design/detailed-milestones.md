@@ -230,6 +230,23 @@ one `ECHO` line of counts per invocation on both the render and preview paths
 - **Acceptance:** on cube − cylinder, hole mouth lit, bore seams rejected;
   visually confirmed against M1 viewer.
 
+**Status: done.** `buildFilletTool` now returns a colored debug `PolySet`
+instead of empty geometry: `fillet::detail::debugEdgeMarkers` straddles every
+real edge with a thin box marker, colored **red** (concave feature), **green**
+(convex feature), or **grey** (rejected tessellation seam), via per-polygon
+`PolySet` colors. Coplanar triangulation diagonals (dihedral `< 1°`) are omitted
+so flat faces stay clean; marker thickness is `1.2 %` of the mesh bounding-box
+diagonal so it reads at any scale. Verified by eye on three cases:
+
+- cube → 12 green edges, no diagonals drawn.
+- `cube − cylinder($fn=32)` → both hole-mouth rims green (convex), vertical bore
+  seams grey (rejected), outer cube edges green — the acceptance case.
+- inner-corner union → the single reflex edge red, all others green.
+
+The markers are the operator's whole output at this milestone; a later milestone
+swaps in the real tool solid and gates the markers behind a debug flag (the
+`$fillet_debug`-keeper decision, still open).
+
 ### M4 — Chain walking + spine
 
 - Walk accepted edges into chains via shared vertices (open / closed / branch),

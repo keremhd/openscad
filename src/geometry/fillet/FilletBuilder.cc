@@ -40,6 +40,8 @@
 
 #include "core/FilletNode.h"
 #include "geometry/Geometry.h"
+#include "geometry/PolySet.h"
+#include "geometry/PolySetBuilder.h"
 #include "geometry/fillet/FilletBuilder_internal.h"
 #include "geometry/linalg.h"
 #include "geometry/manifold/ManifoldGeometry.h"
@@ -154,6 +156,87 @@ ClassCounts classifyEdges(const MergedMesh& m,
   return c;
 }
 
+std::unique_ptr<PolySet> debugEdgeMarkers(
+  const MergedMesh& m, const std::map<EdgeKey, std::vector<int>>& adj, double thresholdDeg)
+{
+  if (m.pos.empty()) return nullptr;
+
+  // Marker thickness scaled to the model so it reads at any size; the bounding-
+  // box diagonal is a stable proxy for overall extent.
+  Vector3d lo = m.pos[0], hi = m.pos[0];
+  for (const auto& p : m.pos) {
+    lo = lo.cwiseMin(p);
+    hi = hi.cwiseMax(p);
+  }
+  const double diag = (hi - lo).norm();
+  const double half = 0.5 * std::max(diag * 0.012, 1e-6);
+
+  // Below this dihedral a "crease" is really a triangulation diagonal inside a
+  // flat face, not an edge of the shape — skip it so flat faces stay clean.
+  constexpr double kCoplanarDeg = 1.0;
+
+  const Color4f concaveColor(0.90f, 0.20f, 0.20f, 1.0f);
+  const Color4f convexColor(0.25f, 0.80f, 0.30f, 1.0f);
+  const Color4f seamColor(0.55f, 0.55f, 0.62f, 1.0f);
+
+  PolySetBuilder builder(0, 0, 3, /*convex=*/false);
+  bool any = false;
+
+  for (const auto& [key, ts] : adj) {
+    if (ts.size() != 2) continue;
+    const Tri& A = m.tris[ts[0]];
+    const Tri& B = m.tris[ts[1]];
+    const EdgeClass ec = classifyEdge(m, key, A, B);
+
+    if (ec.dihedralDeg < kCoplanarDeg) continue;  // flat-face diagonal
+    const Color4f color = ec.dihedralDeg < thresholdDeg ? seamColor
+                          : ec.concave                  ? concaveColor
+                                                        : convexColor;
+
+    const Vector3d p0 = m.pos[key.first];
+    const Vector3d p1 = m.pos[key.second];
+    Vector3d dir = p1 - p0;
+    const double len = dir.norm();
+    if (len < 1e-9) continue;
+    dir /= len;
+
+    // Two perpendicular axes spanning the marker's square cross-section.
+    const Vector3d ref = std::abs(dir.x()) < 0.9 ? Vector3d::UnitX() : Vector3d::UnitY();
+    const Vector3d u = dir.cross(ref).normalized();
+    const Vector3d w = dir.cross(u);
+
+    // Eight corners: a[] around p0, b[] around p1, sharing the cross-section.
+    const Vector3d off[4] = {-half * u - half * w, half * u - half * w, half * u + half * w,
+                             -half * u + half * w};
+    Vector3d a[4], b[4];
+    for (int i = 0; i < 4; ++i) {
+      a[i] = p0 + off[i];
+      b[i] = p1 + off[i];
+    }
+
+    auto quad = [&](const Vector3d& q0, const Vector3d& q1, const Vector3d& q2,
+                    const Vector3d& q3) {
+      builder.beginPolygon(4);
+      builder.addVertex(q0);
+      builder.addVertex(q1);
+      builder.addVertex(q2);
+      builder.addVertex(q3);
+      builder.endPolygon(color);
+    };
+
+    quad(a[0], a[3], a[2], a[1]);  // cap at p0 (facing -dir)
+    quad(b[0], b[1], b[2], b[3]);  // cap at p1 (facing +dir)
+    for (int i = 0; i < 4; ++i) {
+      const int j = (i + 1) % 4;
+      quad(a[i], a[j], b[j], b[i]);  // four sides
+    }
+    any = true;
+  }
+
+  if (!any) return nullptr;
+  return builder.build();
+}
+
 }  // namespace fillet::detail
 
 // Rebuild edge -> two-face adjacency from the target's triangle soup and
@@ -203,7 +286,10 @@ std::shared_ptr<const Geometry> buildFilletTool(
       static_cast<int>(c.featureSameSurface), static_cast<int>(selected),
       wantConcave ? "concave" : "convex", thresholdDeg);
 
-  // No geometry yet; the classified edges will feed spine construction and tool
-  // building.
-  return nullptr;
+  // The tool solid is not built yet. Until it is, the operator's output is a
+  // debug visualization of the classification: colored markers along every edge
+  // (concave/convex/rejected), so the selection can be checked by eye. Later
+  // milestones replace this with the real tool and gate the markers behind a
+  // debug flag.
+  return debugEdgeMarkers(m, adj, thresholdDeg);
 }

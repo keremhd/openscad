@@ -18,6 +18,8 @@
 
 #include "geometry/linalg.h"
 
+class PolySet;
+
 namespace fillet::detail {
 
 // One mesh triangle after MeshGL's per-run vertex duplicates have been merged by
@@ -86,5 +88,14 @@ struct ClassCounts
 ClassCounts classifyEdges(const MergedMesh& m,
                           const std::map<EdgeKey, std::vector<int>>& adj,
                           double thresholdDeg, bool useProvenance);
+
+// Build a colored debug solid: a thin box marker straddling each real edge,
+// colored by class — concave feature (red), convex feature (green), rejected
+// tessellation seam (grey). Coplanar triangulation diagonals (near-zero
+// dihedral) are omitted; they are not edges of the shape. Marker thickness is a
+// fraction of the mesh bounding-box diagonal so it reads at any scale. Returns
+// nullptr if there are no edges to draw.
+std::unique_ptr<PolySet> debugEdgeMarkers(
+  const MergedMesh& m, const std::map<EdgeKey, std::vector<int>>& adj, double thresholdDeg);
 
 }  // namespace fillet::detail
