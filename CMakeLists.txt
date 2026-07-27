@@ -1162,6 +1162,7 @@ set(CGAL_SOURCES
   )
 
 set(MANIFOLD_SOURCES
+  src/geometry/fillet/FilletBuilder.cc
   src/geometry/manifold/ManifoldGeometry.cc
   src/geometry/manifold/manifoldutils.cc
   src/geometry/manifold/manifold-applyops.cc

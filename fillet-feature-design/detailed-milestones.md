@@ -6,6 +6,13 @@ visual-inspection harness used to steer and verify the work.
 
 Each milestone below is intended to be **one compilable, mergeable PR**.
 
+> **Convention — no design-doc references in the source.** These design files
+> (`fillet-feature-design/`, `fillet-operator-plan.md`, milestone/section
+> numbers like "M2" or "§4.3") are scaffolding and get thrown away once the
+> feature merges. Do **not** cite them from `.cc`/`.h` comments — code comments
+> must stand on their own so they still make sense after the docs are gone.
+> Explain the *reasoning* inline instead of pointing at a section number.
+
 ---
 
 ## Feasibility notes (from a source dive)
@@ -44,6 +51,19 @@ Confirmed against the current tree; these shape or correct the plan.
 - **Tests auto-glob:** any `.scad` dropped in `tests/data/scad/3D/features/` is
   picked up by CTest (dump/render/preview/throwntogether). Baseline PNGs are
   committed per feature under `tests/regression/<dir>/`.
+
+---
+
+## Pre-existing test failures (not ours — do not chase)
+
+These fail on this machine on a **clean** `kerem-fillet` checkout, with our
+changes stashed; they are unrelated to the fillet work (SVG arc-path export
+text-diff, an environmental/precision issue). A full `ctest` run is otherwise
+green apart from these three — treat them as the expected baseline:
+
+- `export-svg_spec-paths-arcs01`
+- `export-svg-fill-stroke_spec-paths-arcs01`
+- `export-svg-fill-only_spec-paths-arcs01`
 
 ---
 
@@ -161,6 +181,36 @@ and Claude.
 - No geometry out; `LOG` counts.
 - **Acceptance:** cube → 12 edges / 6 faces, all convex; inside corner → concave.
   Counts match by hand.
+
+**Status: done.** `src/geometry/fillet/FilletBuilder.{h,cc}`, wired into
+`GeometryEvaluator::visit(FilletNode)` (converts child 0 via
+`ManifoldUtils::createManifoldFromGeometry`, guarded by `ENABLE_MANIFOLD`), plus
+a `CurveDiscretizer::getMaxSeamAngle()` accessor for the §4.3 threshold. Emits
+one `ECHO` line of counts per invocation on both the render and preview paths
+(cached, so it re-fires only on a cache miss). Verified:
+
+- cube → 18 edges (12 feature, all convex; 6 face-diagonals rejected at 0°).
+- inner-corner union → 1 concave feature edge (`fillet_tool` selects it), plus
+  convex outer edges (`round_tool` selects those).
+- `cube − cylinder($fn=32)` hole mouth → 64 convex rim edges; the mouth is
+  **convex** (rounded by subtraction), so `fillet_tool` correctly selects 0 and
+  `round_tool` would take the rim.
+
+**Two deviations from the plan, both deliberate:**
+
+1. *"6 faces" was loose wording.* MeshGL's `originalID` is **per source
+   primitive**, not per geometric face — a lone cube reports **1** surface, not
+   6. The meaningful count (12 feature edges, all convex) matches. Provenance
+   therefore keys on primitive, not face.
+2. *Provenance (§4.4) is reported, not used to override.* A hard-`skip` on
+   same-`originalID` edges wrongly drops a primitive's own sharp edges once it is
+   unioned with anything (e.g. an L made of two cubes loses its outer edges,
+   since each edge's two faces share that cube's id). The angle filter (§4.3) is
+   the sole accept/reject decision; the same-surface count is logged as a
+   diagnostic for later milestones. Same-id-but-sharp vs. same-id-coarse-curved-
+   seam are indistinguishable by id alone, so provenance can't be a hard gate
+   without curvature/continuity analysis — revisit in M3 if bore-seam rejection
+   at low `$fn` needs it.
 
 ### M3 — Debug visualization of classified edges
 

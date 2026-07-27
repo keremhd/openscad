@@ -37,6 +37,7 @@
 #include "geometry/Polygon2d.h"
 #include "geometry/boolean_utils.h"
 #include "geometry/cgal/cgal.h"
+#include "geometry/fillet/FilletBuilder.h"
 #include "geometry/linalg.h"
 #include "geometry/linear_extrude.h"
 #include "geometry/roof_ss.h"
@@ -991,9 +992,9 @@ Response GeometryEvaluator::visit(State& state, const CgalAdvNode& node)
    input: List of 3D objects (child 0 = target, children 1+ = brushes)
    output: a tool solid (empty for now)
    operation:
-    o M0: no-op. Collect children (forcing their evaluation, which is inherent to
-      any mesh-inspecting fillet operator) and return empty geometry. Edge
-      classification and tool construction land in later milestones.
+    o Extract child 0's mesh, rebuild edge adjacency and classify its edges.
+      Diagnostic counts are logged; no tool geometry is emitted yet. Brushes
+      (children 1+) are collected but not yet used.
  */
 Response GeometryEvaluator::visit(State& state, const FilletNode& node)
 {
@@ -1001,10 +1002,18 @@ Response GeometryEvaluator::visit(State& state, const FilletNode& node)
   if (state.isPostfix()) {
     std::shared_ptr<const Geometry> geom;
     if (!isSmartCached(node)) {
-      // Consume the already-evaluated children so the visitedchildren map stays
-      // clean; their geometry is not used yet.
-      collectChildren3D(node);
-      geom = nullptr;
+      // Collect children (child 0 = target); forcing their evaluation is
+      // inherent to any mesh-inspecting fillet operator.
+      Geometry::Geometries children = collectChildren3D(node);
+#ifdef ENABLE_MANIFOLD
+      if (!children.empty() && children.front().second) {
+        auto target = ManifoldUtils::createManifoldFromGeometry(children.front().second);
+        geom = buildFilletTool(node, target);
+      }
+#else
+      LOG(message_group::Warning, node.modinst->location(), this->tree.getDocumentPath(),
+          "fillet tools require the Manifold backend");
+#endif
     } else {
       geom = smartCacheGet(node, state.preferNef());
     }

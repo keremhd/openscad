@@ -39,9 +39,9 @@
 #include "core/Parameters.h"
 #include "core/module.h"
 
-// Child 0 is the target whose edges are analysed; children 1+ are brushes
-// (fillet-operator-plan.md §2). For M0 the node is a no-op that returns empty
-// geometry — it only proves the node parses, registers and evaluates.
+// Child 0 is the target whose edges are analysed; children 1+ are selection
+// brushes. The node parses its parameters here; the edge analysis and tool
+// construction happen when the geometry is evaluated.
 static std::shared_ptr<AbstractNode> builtin_fillet_impl(const ModuleInstantiation *inst,
                                                          Arguments arguments,
                                                          const Children& children, FilletType type)
