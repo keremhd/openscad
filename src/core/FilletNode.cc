@@ -45,8 +45,8 @@ static std::shared_ptr<AbstractNode> builtin_fillet_impl(const ModuleInstantiati
   const bool isChamfer = (type == FilletType::CHAMFER || type == FilletType::BEVEL);
   Parameters parameters =
     Parameters::parse(std::move(arguments), inst->location(),
-                      isChamfer ? std::vector<std::string>{"t", "r", "min_angle"}
-                                : std::vector<std::string>{"r", "t", "min_angle"});
+                      isChamfer ? std::vector<std::string>{"t", "r", "min_angle", "debug"}
+                                : std::vector<std::string>{"r", "t", "min_angle", "debug"});
 
   auto node =
     std::make_shared<FilletNode>(inst, type, CurveDiscretizer(parameters, inst->location()));
@@ -61,6 +61,10 @@ static std::shared_ptr<AbstractNode> builtin_fillet_impl(const ModuleInstantiati
 
   if (parameters["min_angle"].type() == Value::Type::NUMBER) {
     node->min_angle = parameters["min_angle"].toDouble();
+  }
+
+  if (parameters["debug"].type() == Value::Type::BOOL) {
+    node->debug = parameters["debug"].toBool();
   }
 
   return children.instantiate(node);
@@ -109,6 +113,7 @@ std::string FilletNode::toString() const
   stream << this->name() << "(" << this->discretizer << ", " << (isChamfer ? "t = " : "r = ")
          << this->size;
   if (this->min_angle >= 0) stream << ", min_angle = " << this->min_angle;
+  if (this->debug) stream << ", debug = true";
   stream << ")";
   return stream.str();
 }

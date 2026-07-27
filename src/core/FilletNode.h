@@ -44,6 +44,10 @@ public:
   double size{0.0};
   // override for the auto-derived dihedral threshold; <0 means "auto"
   double min_angle{-1.0};
+  // emit the edge/spine diagnostic overlay instead of the tool solid. Off by
+  // default: the overlay is a cloud of disjoint marker cubes rather than a
+  // solid, so it is for looking at, not for building with.
+  bool debug{false};
   FilletType type;
   CurveDiscretizer discretizer;
 };

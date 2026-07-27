@@ -492,11 +492,20 @@ std::shared_ptr<const Geometry> buildFilletTool(
       static_cast<int>(c.featureSameSurface), static_cast<int>(selected),
       wantConcave ? "concave" : "convex", thresholdDeg);
 
-  // The tool solid is not built yet. Until it is, the operator's output is a
-  // debug visualization: colored markers along every edge (concave/convex/
-  // rejected), plus the spine's per-vertex tangency frame (ball center and the
-  // two tangency points) walked from the selected edges. Later milestones
-  // replace this with the real tool and gate the markers behind a debug flag.
+  // The tool solid is not built yet, so without debug= the operator emits
+  // nothing — the honest no-op, and a shape a caller can still union or
+  // subtract without consequence.
+  //
+  // debug = true swaps in a visualization instead: colored markers along every
+  // edge (concave/convex/rejected), plus the spine's per-vertex tangency frame
+  // (ball center and the two tangency points) walked from the selected edges.
+  // It is off by default because those markers are hundreds of disjoint cubes
+  // rather than one solid, and anything downstream that expects a well-formed
+  // mesh — Minkowski, which falls back to CGAL's Nef kernel, above all — either
+  // grinds for minutes or dies on them. Later milestones return the real tool
+  // here and leave this branch as the diagnostic view.
+  if (!node.debug) return nullptr;
+
   const std::vector<EdgeKey> selectedKeys = selectedEdges(m, adj, thresholdDeg, wantConcave);
   const std::vector<Chain> chains = buildChains(m, selectedKeys);
   std::vector<SpineFrame> frames;
