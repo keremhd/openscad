@@ -22,8 +22,8 @@ WRONG = 8;
 CASE_SIGN  = "union";
 CASE_SLICE = ["top", H / 2];
 CASE_DY    = 120;
-//               name    size  has_ref  tol
-CASE_VARIANTS = [["small",  6,  true,   0.12]];
+//                name     size kind   tol
+CASE_VARIANTS = [["small",   6, "ref", 0.12]];
 
 module case_model() {
   cube([40, CY, H]);

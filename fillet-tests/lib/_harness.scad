@@ -128,21 +128,32 @@ module fillet_sandwich(d, sign) {
 // what you see in columns 4-6 is what the "tool" check actually compares; the
 // first three columns are the whole model, unclipped.
 //
+// The three reference columns (2, 4, 6) are drawn only for a "ref" variant. A
+// variant with no hand-written answer must not show one: the columns would be
+// green — the colour that means known-good everywhere else — while check.sh runs
+// no comparison behind them, and the diff column would report a disagreement
+// with a shape that is not the answer. Blank columns say "nothing to compare"
+// without a second colour convention to remember, and skipping the diff saves
+// the row's only expensive computation.
+//
 // Each column slices itself rather than the row being sliced as a whole: an
 // intersection outside color() produces an uncoloured result, so the slab has to
 // happen inside the colour wrapper or every column comes out render-yellow.
 // Within a column the slice still comes last, after any dilation.
-module fillet_row(sign, t, slice, dx = 100) {
+module fillet_row(sign, t, slice, kind, dx = 100) {
+  has_ref = (kind == "ref");
   color("Gainsboro") fillet_slice(slice) children(0);
-  translate([1 * dx, 0, 0]) color("PaleGreen") fillet_slice(slice)
-    fillet_apply(sign) { children(0); children(1); }
+  if (has_ref)
+    translate([1 * dx, 0, 0]) color("PaleGreen") fillet_slice(slice)
+      fillet_apply(sign) { children(0); children(1); }
   translate([2 * dx, 0, 0]) color("LightSkyBlue") fillet_slice(slice)
     fillet_apply(sign) { children(0); children(2); }
-  translate([3 * dx, 0, 0]) color("SeaGreen") fillet_slice(slice)
-    intersection() { children(1); children(3); }
+  if (has_ref)
+    translate([3 * dx, 0, 0]) color("SeaGreen") fillet_slice(slice)
+      intersection() { children(1); children(3); }
   translate([4 * dx, 0, 0]) color("SteelBlue") fillet_slice(slice)
     intersection() { children(2); children(3); }
-  if (!FILLET_NO_DIFF)
+  if (has_ref && !FILLET_NO_DIFF)
     translate([5 * dx, 0, 0]) color("Red") fillet_slice(slice)
       fillet_residual(t) {
         intersection() { children(2); children(3); }
@@ -183,9 +194,17 @@ module fillet_case_view(sign, variants, slice, dy = 120, dx = 100, dz = 0) {
   for (i = [0 : len(variants) - 1])
     translate([0, i * dy, i * dz])
       let($case_size = variants[i][1])
-        fillet_row(sign, variants[i][3], slice, dx)
+        fillet_row(sign, variants[i][3], slice, fillet_variant_kind(variants[i]), dx)
           { children(0); children(1); children(2); children(3); }
 }
+
+// Third field of a variant tuple, checked rather than trusted: a typo would
+// otherwise silently downgrade a variant to reference-free and take its sharpest
+// check away without anything going red.
+function fillet_variant_kind(variant) =
+  assert(variant[2] == "ref" || variant[2] == "drop" || variant[2] == "none",
+         str("variant kind must be \"ref\", \"drop\" or \"none\", got: ", variant[2]))
+  variant[2];
 
 // ---- the checks --------------------------------------------------------------
 
@@ -195,7 +214,12 @@ module fillet_case_view(sign, variants, slice, dy = 120, dx = 100, dz = 0) {
 //   tool      empty = PASS   candidate matches the hand reference within t
 //   sandwich  empty = PASS   candidate disturbs the model only within size
 //   emits     empty = FAIL   candidate produced a tool solid at all
+//   drops     empty = PASS   candidate correctly produced nothing here
 //
+// "drops" and "emits" evaluate the same geometry with opposite polarity, and
+// "drops" carries a second half that is not geometry at all: check.sh also
+// requires the warning. Emptiness alone cannot tell a fillet that was refused
+// from an operator that quietly did nothing.
 module fillet_run_check(kind, t, sign, size) {
   if (kind == "tool")
     fillet_residual(t) {
@@ -204,7 +228,7 @@ module fillet_run_check(kind, t, sign, size) {
     }
   else if (kind == "sandwich")
     fillet_sandwich(size, sign) { children(0); children(2); children(3); }
-  else if (kind == "emits")
+  else if (kind == "emits" || kind == "drops")
     intersection() { children(2); children(3); }
   else
     assert(false, str("unknown check kind: ", kind));

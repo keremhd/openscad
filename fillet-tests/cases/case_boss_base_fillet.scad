@@ -19,9 +19,9 @@ CASE_SIGN  = "union";
 CASE_SLICE = ["front", 0];
 CASE_DY    = 0;
 CASE_DZ    = HB + 20;
-//               name    size  has_ref  tol
-CASE_VARIANTS = [["small",  5,  true,   0.10],
-                 ["large", 24,  true,   0.48]];
+//                name     size kind   tol
+CASE_VARIANTS = [["small",   5, "ref", 0.10],
+                 ["large",  24, "ref", 0.48]];
 
 module case_model() {
   translate([0, 0, -T / 2]) cube([W, W, T], center = true);   // plate z[-T,0]

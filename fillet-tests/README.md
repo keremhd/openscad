@@ -49,6 +49,12 @@ literally the geometry the `tool` check evaluates, so **an empty red column and 
 green test are the same fact**. Side by side tells you *what* went wrong, the
 diff tells you *whether* and *where*.
 
+That equivalence is why columns 2, 4 and 6 are drawn **only for a `ref` variant**
+(see below). A variant with no hand-written answer runs no `tool` check, so a red
+column there would be a disagreement with a shape that was never the answer, and
+the green columns would be claiming a known-good the case doesn't have. They come
+out blank instead, which also spares the row its one expensive computation.
+
 Every case is sliced to a thin slab so one flat image is legible — a horizontal
 cut, a vertical cut through a ring axis, or a stack of horizontal cuts at rising
 z for the junction cases, where the point is to watch the section collapse toward
@@ -62,21 +68,43 @@ the meeting point.
 ./run_all.sh                                     # everything, vs expectations
 ```
 
-Three checks per variant, each reducing to "is this solid empty?" — the one
-verdict that needs no committed baseline:
+Each check reduces to "is this solid empty?" — the one verdict that needs no
+committed baseline:
 
 | check | passes when | catches |
 |---|---|---|
 | `tool` | the residual against the hand reference is empty | wrong radius, missing corner, gouge, wrong sign |
 | `sandwich` | the applied result and the model stay within `size` of each other | gouges, runaway or wrong-direction tools — **needs no reference** |
 | `emits` | the candidate tool is non-empty | the operator silently doing nothing |
+| `drops` | the candidate is empty **and** the log carries a warning | a size the feature cannot carry being built anyway, or refused in silence |
 
-All three are evaluated inside `case_clip()`, the region the case is about.
-`tool` is the sharp one and is skipped where the case declares it has no
-reference. `sandwich` is deliberately coarse — `selftest_wrongradius` passes it —
-but it is what gives the junction corners automated coverage at all, since the
-equal-radius trihedral and valence-4 corners have no closed form to compare
-against.
+All of them are evaluated inside `case_clip()`, the region the case is about.
+`tool` is the sharp one. `sandwich` is deliberately coarse — `selftest_wrongradius`
+passes it — but it is what gives the junction corners automated coverage at all,
+since the equal-radius trihedral and valence-4 corners have no closed form to
+compare against.
+
+`drops` is the only check that reads the log for more than errors, and it has to:
+an empty result is exactly what a deliberate refusal and an unimplemented
+operator have in common, so emptiness alone would let the second pass as the
+first. The warning is half the contract.
+
+### Which checks a variant gets
+
+A variant declares its `kind`, and that decides:
+
+| kind | means | checks |
+|---|---|---|
+| `ref` | a hand-written answer exists | `tool` `sandwich` `emits` |
+| `drop` | the size is out of range for the feature — the required output is a warning and no tool | `drops` `sandwich` |
+| `none` | no closed form exists to compare against | `sandwich` `emits` |
+
+The two reference-free kinds are worth keeping apart. `none` is the junction
+corners, where the equal-radius blend has no elementary solution and nothing can
+be written down. `drop` is a *decision*: an oversized radius has a perfectly
+well-defined answer — refuse it and say so — and `drops` checks that answer
+rather than shrugging at it. Overloading one flag for both is what hid the
+difference before.
 
 Comparison is tessellation-independent. An exact symmetric difference is never
 empty (the operator tessellates arcs at `$fa`, the reference uses
@@ -100,9 +128,9 @@ include <../lib/_harness.scad>;
 CASE_SIGN  = "union";        // concave tools are unioned, convex ones subtracted
 CASE_SLICE = ["top", 30];    // ["top",z] | ["front",y] | ["stack",zs,spacing]
 CASE_DY    = 120;            // row spacing
-//               name    size  has_ref  tol
-CASE_VARIANTS = [["small",  6,  true,   0.12],
-                 ["large", 35,  false,  0.70]];
+//                name     size kind    tol
+CASE_VARIANTS = [["small",   6, "ref",  0.12],
+                 ["large",  35, "drop", 0.70]];
 
 module case_model()     { ... }               // the solid under test
 module case_ref_tool()  { ... }               // hand-written answer, or empty
@@ -121,12 +149,12 @@ Notes on the three parts that are easy to get wrong:
 - **`$case_size`.** The tool modules take no arguments; the size comes in as a
   special variable, bound per row, so one set of modules serves every variant and
   both drivers. Adding a size is one line in `CASE_VARIANTS`.
-- **`has_ref`.** Set it false when no hand-written answer exists — the junction
-  corners, and radii too large for the face, where clamping behaviour is not
-  settled. The variant keeps running `sandwich` and `emits` rather than dropping
-  out of the suite. The picture still draws whatever `case_ref_tool()` produces
-  for such a variant — useful context, but the checks ignore it, so read it as
-  "roughly this" rather than as the answer.
+- **`kind`.** `ref` when a hand-written answer exists, `drop` when the size is out
+  of range for the feature, `none` when no closed form exists at all. A `drop` or
+  `none` variant keeps its reference-free checks rather than falling out of the
+  suite, and the picture omits its three reference columns — drawing them would
+  put the known-good green next to a shape nothing compares against, and would
+  report a diff against an answer that isn't one.
 - **`case_clip()`.** Concave cases usually need none: a model can be built with
   exactly one concave edge. Convex cases always do — every solid has plenty of
   convex edges, the operator rounds all of them, and the reference covers one.
@@ -144,6 +172,12 @@ Most real cases are red today, on purpose: the operator is still being built. So
 about **surprises** — a check that changed state without anyone updating the
 table. When a milestone lands, the expected-FAIL lines it fixes are what you
 delete.
+
+`expectations.txt` is a ledger of *temporary debt* and nothing else. What the
+suite considers correct lives in the case files, as each variant's `kind` — so a
+permanent contract like "this size must be refused" is a `drop` variant, never an
+expectation line. Written as an expectation it would read as "not there yet", and
+someone would eventually delete it believing they had fixed it.
 
 ## Cost
 

@@ -13,8 +13,8 @@ HC = 60;
 CASE_SIGN  = "subtract";
 CASE_SLICE = ["stack", [6, 20, 34, 48, 56], 90];
 CASE_DY    = 5 * 90 + 60;
-//               name    size  has_ref  tol
-CASE_VARIANTS = [["small",  6,  false,  0.12]];
+//                name     size kind    tol
+CASE_VARIANTS = [["small",   6, "none", 0.12]];
 
 module case_model() cylinder(r1 = R, r2 = 0, h = HC, $fn = 3);
 

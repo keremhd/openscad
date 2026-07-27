@@ -1,10 +1,13 @@
 // Inner 90-degree edge of an L (two cubes), edge along Z, concave -> fillet_tool.
 //
 // The L has exactly one concave edge, so the operator's whole output should be
-// the one reference bead — no clipping needed. The large variant deliberately
-// asks for r = 35 on a 30 mm face: the bead cannot fit, and what the operator
-// should do there (clamp? warn?) is not settled, so it carries no reference and
-// runs only the reference-free checks.
+// the one reference bead — no clipping needed.
+//
+// The large variant deliberately asks for r = 35 where each face is only 30 mm
+// long. Both tangent points would land 5 mm past the end of their face, so no
+// bead touches the model tangentially anywhere: there is no fillet to build, at
+// any radius, without changing the one the caller asked for. The required
+// behaviour is a warning and no tool, which is what the "drop" kind checks.
 
 include <../lib/_ref.scad>;
 include <../lib/_harness.scad>;
@@ -18,9 +21,9 @@ CY = 10;    // inner corner y
 CASE_SIGN  = "union";
 CASE_SLICE = ["top", H / 2];
 CASE_DY    = 120;
-//               name    size  has_ref  tol
-CASE_VARIANTS = [["small",  6,  true,   0.12],
-                 ["large", 35,  false,  0.70]];
+//                name     size kind    tol
+CASE_VARIANTS = [["small",   6, "ref",  0.12],
+                 ["large",  35, "drop", 0.70]];
 
 module case_model() {
   cube([40, CY, H]);   // horizontal arm  x[0,40] y[0,10]

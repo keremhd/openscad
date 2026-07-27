@@ -7,7 +7,10 @@
 // case is not about.
 //
 // The large variant reaches far enough across the top face to collide with the
-// plate's own rounded outer edge, so it carries no reference.
+// round on the plate's own outer edge — two different features' tools competing
+// for the same material, which is refused with a warning rather than resolved by
+// shrinking either one: the "drop" kind. Note the checks stay inside case_clip(),
+// so this reads the mouth alone; the plate's other edges are free to emit.
 
 include <../lib/_ref.scad>;
 include <../lib/_harness.scad>;
@@ -22,9 +25,9 @@ CASE_SIGN  = "subtract";
 CASE_SLICE = ["front", 0];
 CASE_DY    = 0;      // rows would overlap in a vertical cut; stack along Z instead
 CASE_DZ    = T + 40;
-//               name    size  has_ref  tol
-CASE_VARIANTS = [["small",  5,  true,   0.10],
-                 ["large", 24,  false,  0.48]];
+//                name     size kind    tol
+CASE_VARIANTS = [["small",   5, "ref",  0.10],
+                 ["large",  24, "drop", 0.48]];
 
 module case_model() {
   difference() {

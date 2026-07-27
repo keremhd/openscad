@@ -29,6 +29,13 @@ require_openscad() {
 # on whatever the build defaults to.
 BACKEND_ARGS=(--backend=Manifold)
 
+# A size the feature cannot carry is refused, not silently resized, so for those
+# variants the warning is half the contract and the suite has to read it. Matched
+# loosely on purpose: tight enough to prove the warning is about a fillet size
+# rather than some unrelated complaint, loose enough that rewording the message
+# does not turn a correct operator red.
+FILLET_WARN_RE='WARNING.*(fillet|chamfer|round|bevel).*(radius|size)'
+
 # Dilation goes through CGAL's Nef kernel, which on some inputs takes minutes or
 # does not finish at all. One such case must not wedge the whole suite, so every
 # render and check is bounded. Returns 124 on timeout, mirroring GNU timeout(1),
@@ -62,7 +69,7 @@ case_path() {  # accepts a bare name, a name.scad, or a path
 # Echo one line per variant plus the case sign and slice kind:
 #   SIGN <union|subtract>
 #   SLICE <top|front|stack>
-#   VARIANT <index> <name> <size> <has_ref> <tol>
+#   VARIANT <index> <name> <size> <kind> <tol>
 probe_case() {
   local case_abs="$1" tmp
   tmp="$(mktemp -d)"
@@ -80,10 +87,23 @@ EOF
   rm -rf "$tmp"
 }
 
-# Which checks apply to a variant. The reference comparison is skipped where the
-# case declares it has no hand-written answer (the junction corners, and the
-# oversized radii whose clamping behaviour is not settled) — those variants still
-# run the reference-free checks rather than dropping out of the suite.
-checks_for_variant() {  # has_ref
-  if [[ "$1" == "true" ]]; then echo "tool sandwich emits"; else echo "sandwich emits"; fi
+# Which checks apply to a variant, from the kind it declares:
+#
+#   ref    a hand-written answer exists — the full comparison applies
+#   drop   the size is out of range for the feature, so the required output is a
+#          warning and no tool at all; "drops" replaces both "tool" (there is no
+#          bead to compare) and "emits" (whose polarity is inverted here)
+#   none   no closed form exists to compare against — the junction corners, where
+#          the equal-radius blend has no elementary solution. These keep the
+#          reference-free checks rather than dropping out of the suite.
+#
+# An unknown kind is a broken case file, not a variant to skip quietly; the
+# harness asserts on it, and this echoes nothing so no check reports a verdict.
+checks_for_variant() {  # kind
+  case "$1" in
+    ref)  echo "tool sandwich emits" ;;
+    drop) echo "drops sandwich" ;;
+    none) echo "sandwich emits" ;;
+    *)    echo "ERROR: unknown variant kind: $1" >&2 ;;
+  esac
 }

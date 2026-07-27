@@ -43,9 +43,9 @@ for f in "${files[@]}"; do
   [[ -z "$abs" ]] && { echo "skip (not found): $f" >&2; rc=1; continue; }
   case_name="$(basename "$abs" .scad)"
 
-  while read -r tag idx name size has_ref tol; do
+  while read -r tag idx name size vkind tol; do
     [[ "$tag" == "VARIANT" ]] || continue
-    for kind in $(checks_for_variant "$has_ref"); do
+    for kind in $(checks_for_variant "$vkind"); do
       out="$("$ROOT/check.sh" "$abs" "$name" "$kind" 2>&1)"
       case $? in 0) got=PASS ;; 1) got=FAIL ;; 3) got=CRASH ;; 4) got=TIMEOUT ;; *) got=ERROR ;; esac
       exp="$(expected_for "$case_name" "$name" "$kind")"

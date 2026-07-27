@@ -23,8 +23,8 @@ BRUSH_TOP = 30;   // fillet only where z < 30
 CASE_SIGN  = "union";
 CASE_SLICE = ["stack", [8, 22, 38, 52], 90];
 CASE_DY    = 4 * 90 + 60;
-//               name    size  has_ref  tol
-CASE_VARIANTS = [["small",  6,  true,   0.12]];
+//                name     size kind   tol
+CASE_VARIANTS = [["small",   6, "ref", 0.12]];
 
 module case_model() {
   cube([40, CY, H]);
