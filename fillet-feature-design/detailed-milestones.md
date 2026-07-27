@@ -343,9 +343,18 @@ a curved chain. The `$fillet_debug`-keeper decision is still open.
 
 - M0 no-op returns empty (chosen) vs. passthrough — empty is semantically honest
   and matches preview passthrough.
-- Debug viz (M3/M4): whether the colored-marker output stays as a permanent
-  `$fillet_debug`-style flag on the real nodes (keeper, helps corner debugging)
-  or is a temporary node deleted at M5. Leaning keeper.
+- Debug viz (M3/M4): **decided — keeper, gated behind a per-node `debug=`
+  argument**, not a `$fillet_debug` special variable. Rationale from a source
+  dive: the repo has **no** debug-only `$`-var precedent (`$preview` is the only
+  boolean special var, and it is render state, not a debug toggle), and a special
+  var needs plumbing through `RenderVariables.{h,cc}` plus both construction
+  sites (`openscad.cc`, `MainWindow.cc`). A per-node argument matches how every
+  operator takes options, reads in the factory with
+  `node->debug = parameters["debug"].toBool();`, needs zero global plumbing, and
+  toggles per call (isolating one bad corner). At M5 `buildFilletTool` returns
+  the markers when `node.debug` is set and the real tool solid otherwise. The
+  other mechanisms surveyed (`--debug=<cat>` log channel, `#ifdef DEBUG`, env
+  vars) either can't emit geometry or aren't user-toggleable at runtime.
 - Everything under plan §13 "Open questions" (Manifold signatures, MeshGL
   round-trip exactness, branch-vertex reality, closed-chain seams,
   `linear_extrude`/`rotate_extrude` seam angles).
