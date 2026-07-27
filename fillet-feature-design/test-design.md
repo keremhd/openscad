@@ -201,14 +201,22 @@ diagnoses; the diff decides.
 | `tool` | yes | wrong radius, missing corner, gouge, wrong sign |
 | `sandwich` | **no** | gouges, runaway or wrong-direction tools |
 | `emits` | no | the operator silently doing nothing |
+| `drops` | no | a size the feature cannot carry being built anyway, or refused in silence |
 
 `sandwich` — result and model must lie within `size` of each other — is what
 gives the trihedral and valence-4 corners automated coverage despite having no
 closed form to compare against (§2.2 lists them, M8/M9 build them). It is
 deliberately coarse: `selftest_wrongradius` passes it, which is the calibration
-worth knowing. Radii too large for the face are the other reference-free
-variants, since §6.5 clamping behaviour is not settled; they keep running the
-other two checks rather than dropping out of the suite.
+worth knowing.
+
+Radii too large for the face used to be lumped in with the junction corners as
+"no reference", which conflated two different things. §6.5 now settles them: an
+oversized radius is warned about and dropped, which is a perfectly writable
+answer, so those variants declare `kind = "drop"` and get `drops` — empty tool
+**and** the warning — rather than being excused from comparison. Only the
+junction corners are genuinely reference-free (`kind = "none"`). `drops` is also
+the suite's first check that reads the log rather than the geometry, because
+emptiness is precisely what a refusal and an unimplemented operator share.
 
 ### 4.4 Cost
 

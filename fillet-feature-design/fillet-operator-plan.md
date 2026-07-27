@@ -618,12 +618,43 @@ It's the fillet with the numerically nastiest part removed.
 ### 6.5 Validity
 
 `tA` cannot exceed the distance from the edge to the far side of face A, or the
-tool eats the next feature. Check per chain vertex; clamp or warn. Similarly `r`
-must be ≤ the local radius of curvature and ≤ half the distance to the nearest
-other feature.
+tool eats the next feature. Check per chain vertex. Similarly `r` must be ≤ the
+local radius of curvature and ≤ half the distance to the nearest other feature.
 
-Degrade gracefully — clamp, or drop the fillet on that chain with a warning.
-Never emit garbage geometry.
+**Out of range means warn and drop that chain. Do not clamp, and do not vary the
+size automatically.** Never emit garbage geometry.
+
+The alternative — clamp to the largest size that fits — does not survive contact
+with a corner. Clamp edge A to its tight vertex and the blend where A meets B now
+has two sizes to reconcile, so either B clamps too or the corner is undefined.
+Follow that to its fixed point and the `min` runs over the whole connected
+network: one tight vertex in a corner of the part silently shrinks a fillet on
+the opposite side, and nudging that one dimension by 0.1 mm resizes geometry the
+user is not looking at. §9 already lists discontinuous neighbour-set membership
+as a usability hazard; a network-wide `min` makes it nonlocal as well, which is
+the worse half. Discarding rather than clamping is also what §6.3.1 already does
+with infeasible triplet solutions, so the two agree.
+
+"Just clamp to the largest size that fits" also assumes the largest size is cheap
+to know. Two of the three constraints above are local, but "half the distance to
+the nearest other feature" is a global proximity query and a circular one — what
+counts as the nearest feature depends on how far the tool reaches, which depends
+on the size being solved for. Computing a true maximum costs about as much as
+building the tool and testing it. Clamping does not avoid that work; it hides it
+and then hides the result too.
+
+Variable size along a chain is a legitimate *feature* — sizes given per chain
+vertex and interpolated, tangency matched where chains meet — and a bad error
+recovery. As a feature the user asked for the variation; as a fallback they get
+geometry they did not ask for and cannot see is wrong. Keep it for later, and
+keep it explicit.
+
+One exception, for float noise rather than intent: when a size exceeds a limit by
+less than the `eps` of §6.2, clamp to the limit silently. Dropping a fillet over
+1e-9 would be its own bug.
+
+`fillet-tests/` encodes this decision directly: a case variant declares `kind =
+"drop"`, and the `drops` check requires both an empty tool and the warning.
 
 ---
 
@@ -1288,5 +1319,6 @@ Each of these should be a regression case with a known-good result.
 | brush covering half a chain | flat perpendicular cap, no scooped end |
 | brush missing entirely | warning with counts, empty result |
 | brush boundary on a spine vertex | stable across small parameter nudges |
-| `r` larger than the face | clamp or warn, never garbage |
+| `r` larger than the face | warned and dropped, never clamped, never garbage |
+| `r` past the limit by float noise only | clamped silently, fillet still built |
 | imported STL | angle-threshold fallback path |
