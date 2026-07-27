@@ -256,6 +256,27 @@ swaps in the real tool solid and gates the markers behind a debug flag (the
 - **Acceptance:** closed hole-mouth = one ring; ordering stable under a small
   parameter nudge; matches the §5.3 worked floor/wall example numerically.
 
+**Status: done.** `fillet::detail` gains `selectedEdges` (the tool's edges:
+threshold-clearing, concavity-matching), `buildChains` (walk into open/closed
+chains via shared vertices, degree-2 interior vs degree-≠2 endpoints, canonical
+ordering by vertex position so indices survive a parameter nudge), and
+`spineFrames` (per-vertex averaged wall normals with fixed handedness along the
+chain, then `C`/`TA`/`TB` and the φ→180 guard). `buildFilletTool` now overlays a
+spine debug solid on the M3 edge markers: a blue cube at each ball center `C`,
+orange/purple cubes at `TA`/`TB`, and yellow legs from the vertex to each
+tangency point. Verified:
+
+- floor/wall union → red concave crease; at each station `TA` on the floor, `TB`
+  up the wall, `C` on the diagonal in the air. Unit test pins `C−v=(r,0,r)` and
+  the tangency pair `{(r,0,0),(0,0,r)}` at `r=3`, φ=90° — the §5.3 numbers.
+- `cylinder` (round_tool) → the two convex rims walk into two closed rings of
+  `$fn` stations each (unit test); a continuous ring of frames renders.
+- L-shape → the single concave crease is one open 2-vertex chain (unit test).
+
+Handedness note: side A/B at a vertex is fixed by
+`sign(cross(nA,nB)·walkdir)`, so averaging adds same-wall normals together along
+a curved chain. The `$fillet_debug`-keeper decision is still open.
+
 ### M5 — `chamfer_tool` / `bevel_tool` (W only) — first real geometry
 
 - Pentagon section (§6.2), hull consecutive sections, union via `BatchBoolean`.

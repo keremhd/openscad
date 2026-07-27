@@ -1,3 +1,21 @@
+/*
+ *  OpenSCAD (www.openscad.org)
+ *  Copyright The OpenSCAD Developers.
+ *
+ *  This program is free software; you can redistribute it and/or
+ *  modify it under the terms of the GNU General Public License
+ *  as published by the Free Software Foundation; either version 2
+ *  of the License, or (at your option) any later version.
+ *
+ *  This program is distributed in the hope that it will be useful,
+ *  but WITHOUT ANY WARRANTY; without even the implied warranty of
+ *  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+ *  GNU General Public License for more details.
+ *
+ *  You should have received a copy of the GNU General Public
+ *  License along with this program; if not, see
+ *  <https://www.gnu.org/licenses/>.
+ */
 #pragma once
 
 // Internal decomposition of the fillet edge-classification pass. These types and
@@ -89,6 +107,49 @@ ClassCounts classifyEdges(const MergedMesh& m,
                           const std::map<EdgeKey, std::vector<int>>& adj,
                           double thresholdDeg, bool useProvenance);
 
+// The edges this tool acts on: two-face edges whose dihedral clears thresholdDeg
+// and whose concavity matches the tool (concave for fillet/chamfer, convex for
+// round/bevel). These are the edges walked into chains.
+std::vector<EdgeKey> selectedEdges(const MergedMesh& m,
+                                   const std::map<EdgeKey, std::vector<int>>& adj,
+                                   double thresholdDeg, bool wantConcave);
+
+// A spine: an ordered run of merged vertex indices along one crease. `closed`
+// marks a ring (the hole-mouth case), where the last vertex reconnects to the
+// first. Ordering is canonical (derived from vertex positions, not mesh
+// traversal order) so downstream indices stay put under a small parameter nudge.
+struct Chain
+{
+  std::vector<int> verts;
+  bool closed = false;
+};
+
+// Walk the selected edges into chains via shared vertices. Vertices of degree 2
+// are interior stations; degree 1 are open ends; degree >= 3 are branch/junction
+// vertices where chains terminate. Returns chains in canonical order.
+std::vector<Chain> buildChains(const MergedMesh& m, const std::vector<EdgeKey>& edges);
+
+// The tangency frame at one spine station: the averaged wall normals nA/nB, the
+// ball center C, the two tangency points TA/TB where radius-r arcs meet each
+// wall, and the wall half-angle. `valid` is false when the crease flattens
+// (phi -> 180), where the ball center runs to infinity and must be skipped.
+struct SpineFrame
+{
+  Vector3d v;
+  Vector3d nA, nB;
+  Vector3d C, TA, TB;
+  double phiDeg = 0.0;
+  bool valid = false;
+};
+
+// Compute the tangency frame at every vertex of a chain for radius r. Wall
+// normals are averaged per side across the vertex's incident chain edges (what
+// keeps the ball-center polyline continuous); side A/B is kept consistent along
+// the chain by a fixed handedness relative to the walking direction.
+std::vector<SpineFrame> spineFrames(const MergedMesh& m,
+                                    const std::map<EdgeKey, std::vector<int>>& adj,
+                                    const Chain& chain, double r);
+
 // Build a colored debug solid: a thin box marker straddling each real edge,
 // colored by class — concave feature (red), convex feature (green), rejected
 // tessellation seam (grey). Coplanar triangulation diagonals (near-zero
@@ -97,5 +158,11 @@ ClassCounts classifyEdges(const MergedMesh& m,
 // nullptr if there are no edges to draw.
 std::unique_ptr<PolySet> debugEdgeMarkers(
   const MergedMesh& m, const std::map<EdgeKey, std::vector<int>>& adj, double thresholdDeg);
+
+// Build a colored debug solid for the computed spine frames: the ball center C,
+// both tangency points TA/TB, and connector legs from each vertex to its
+// tangency points. Returns nullptr if there are no valid frames.
+std::unique_ptr<PolySet> debugSpineMarkers(const MergedMesh& m,
+                                           const std::vector<SpineFrame>& frames);
 
 }  // namespace fillet::detail
