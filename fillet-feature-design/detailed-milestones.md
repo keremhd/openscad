@@ -51,6 +51,16 @@ Confirmed against the current tree; these shape or correct the plan.
 - **Tests auto-glob:** any `.scad` dropped in `tests/data/scad/3D/features/` is
   picked up by CTest (dump/render/preview/throwntogether). Baseline PNGs are
   committed per feature under `tests/regression/<dir>/`.
+- **Copyright headers on new files are optional — do not add one to match a
+  sibling.** Only ~40% of `.cc` and ~14% of `.h` under `src/` carry the GPL
+  block; in `src/geometry/` it is 3/37 and 0/27, and **no `_test.cc` in the repo
+  has one**. New `fillet/` files should start straight at `#pragma once` /
+  `#include`. If a header is ever wanted, copy the current dateless form
+  (`src/gui/ColorLabel.h`) — `Copyright The OpenSCAD Developers.`, no year
+  range, no CGAL linking exception, FSF URL not the Boston address. **Never add
+  a contributor's own name** (the few individually-named files are pre-2022
+  subsystem drops), and **never bump the year** on the legacy `2009-20xx` blocks
+  — those ranges are copy-paste artifacts nobody maintains.
 
 ---
 
