@@ -28,6 +28,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <set>
 #include <utility>
 #include <vector>
@@ -129,6 +130,24 @@ struct Chain
 // vertices where chains terminate. Returns chains in canonical order.
 std::vector<Chain> buildChains(const MergedMesh& m, const std::vector<EdgeKey>& edges);
 
+// The two wall normals at one chain station, averaged over the station's
+// incident chain edges. `valid` is false where the station has no usable pair
+// (a dangling edge, a degenerate triangle).
+struct StationNormals
+{
+  Vector3d v;
+  Vector3d nA, nB;
+  bool valid = false;
+};
+
+// Averaged outward wall normals at every vertex of a chain. Averaging per side
+// across the incident chain edges is what keeps the derived spine continuous
+// around a bend; side A/B is kept consistent along the chain by a fixed
+// handedness relative to the walking direction, so the two sums never mix walls.
+std::vector<StationNormals> chainNormals(const MergedMesh& m,
+                                         const std::map<EdgeKey, std::vector<int>>& adj,
+                                         const Chain& chain);
+
 // The tangency frame at one spine station: the averaged wall normals nA/nB, the
 // ball center C, the two tangency points TA/TB where radius-r arcs meet each
 // wall, and the wall half-angle. `valid` is false when the crease flattens
@@ -149,6 +168,35 @@ struct SpineFrame
 std::vector<SpineFrame> spineFrames(const MergedMesh& m,
                                     const std::map<EdgeKey, std::vector<int>>& adj,
                                     const Chain& chain, double r);
+
+// The chamfer/bevel cross-section at one chain station: the convex pentagon
+// TA, TB, TB', v', TA'. TA and TB are the setback points on the two walls; the
+// primed points are the same corner pushed a hair past the walls (into material
+// for a concave tool, into air for a convex one) so the tool crosses each wall
+// transversally instead of lying coplanar with it. Convex, so hulling two
+// consecutive sections is faithful.
+struct WedgeSection
+{
+  std::array<Vector3d, 5> p;
+  bool valid = false;
+};
+
+// The wedge section at every vertex of a chain, for setback t. The setback is
+// taken directly along the in-wall directions rather than derived from a radius:
+// t = r*tan(phi/2) would make the number mean an inscribed radius, which is not
+// what a chamfer of t means. Sign follows the tool: a concave tool sets back
+// into the reentrant quadrant, a convex one into the solid.
+std::vector<WedgeSection> wedgeSections(const MergedMesh& m,
+                                        const std::map<EdgeKey, std::vector<int>>& adj,
+                                        const Chain& chain, double t, bool concave);
+
+// Build the chamfer/bevel tool solid: hull each consecutive pair of wedge
+// sections into one cell, then union the cells. Junction cells are not built
+// yet, so chains meeting at a branch vertex simply overlap there. Returns an
+// empty manifold when nothing could be built.
+manifold::Manifold buildWedgeSolid(const MergedMesh& m,
+                                   const std::map<EdgeKey, std::vector<int>>& adj,
+                                   const std::vector<Chain>& chains, double t, bool concave);
 
 // Build a colored debug solid: a thin box marker straddling each real edge,
 // colored by class — concave feature (red), convex feature (green), rejected

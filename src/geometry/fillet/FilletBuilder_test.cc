@@ -198,4 +198,150 @@ TEST_CASE("floor/wall: tangency frame matches the worked example")
   CHECK(validCount >= 2);
 }
 
+TEST_CASE("floor/wall: the chamfer section sets back t along each wall")
+{
+  // Same inner 90-degree corner as the tangency-frame case. A chamfer of t cuts
+  // the corner off at t from the crease measured along each wall, so the two
+  // setback points are the vertex offset by t in x (floor) and t in z (wall) —
+  // note this is a distance along the surface, not the inscribed radius a fillet
+  // of t would give.
+  const double t = 3.0;
+  const auto model = box(10.0, 10.0, 1.0) + box(1.0, 10.0, 10.0);
+  const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+
+  const auto edges = selectedEdges(mm, adj, 45.0, /*wantConcave=*/true);
+  REQUIRE(edges.size() == 1);
+  const auto chains = buildChains(mm, edges);
+  REQUIRE(chains.size() == 1);
+
+  const auto sections = wedgeSections(mm, adj, chains[0], t, /*concave=*/true);
+  REQUIRE(sections.size() >= 2);
+
+  int validCount = 0;
+  for (const auto& w : sections) {
+    if (!w.valid) continue;
+    ++validCount;
+
+    // p[3] is the crease vertex nudged into the material; recover the vertex as
+    // the pentagon's untouched corners minus their setback.
+    const Vector3d TA = w.p[0];
+    const Vector3d TB = w.p[1];
+    const Vector3d v(1.0, TA.y(), 1.0);
+
+    const Vector3d a = TA - v;
+    const Vector3d b = TB - v;
+    const bool aFloor =
+      a.isApprox(Vector3d(t, 0, 0), 1e-6) && b.isApprox(Vector3d(0, 0, t), 1e-6);
+    const bool aWall =
+      a.isApprox(Vector3d(0, 0, t), 1e-6) && b.isApprox(Vector3d(t, 0, 0), 1e-6);
+    CHECK((aFloor || aWall));
+
+    // The primed corners sit just inside the material: below the floor plane
+    // z=1 for the floor-side point, and inside the wall (x<1) for the other.
+    const double eps = 1e-3 * t;
+    const Vector3d TAo = w.p[4];
+    const Vector3d TBo = w.p[2];
+    const Vector3d floorSide = aFloor ? TAo : TBo;
+    const Vector3d wallSide = aFloor ? TBo : TAo;
+    CHECK(floorSide.z() == Approx(1.0 - eps).margin(1e-9));
+    CHECK(wallSide.x() == Approx(1.0 - eps).margin(1e-9));
+  }
+  CHECK(validCount >= 2);
+}
+
+TEST_CASE("floor/wall: the chamfer wedge is the expected prism")
+{
+  // The concave crease runs the full 10 in y, so the wedge is a triangular prism
+  // of cross-section t^2/2 and length 10 — plus the sliver the eps overshoot
+  // adds past each wall, which is why this is a loose bound rather than equality.
+  const double t = 3.0;
+  const auto model = box(10.0, 10.0, 1.0) + box(1.0, 10.0, 10.0);
+  const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/true));
+
+  const auto wedge = buildWedgeSolid(mm, adj, chains, t, /*concave=*/true);
+  REQUIRE_FALSE(wedge.IsEmpty());
+
+  const double nominal = 0.5 * t * t * 10.0;
+  CHECK(wedge.Volume() == Approx(nominal).epsilon(0.01));
+
+  // It fills the crease: unioning it with the model must not enlarge the
+  // bounding box, i.e. the tool stays inside the corner rather than sticking out.
+  const auto box0 = model.BoundingBox();
+  const auto box1 = (model + wedge).BoundingBox();
+  for (int i = 0; i < 3; ++i) {
+    CHECK(box1.min[i] == Approx(box0.min[i]).margin(1e-9));
+    CHECK(box1.max[i] == Approx(box0.max[i]).margin(1e-9));
+  }
+}
+
+TEST_CASE("cube: the bevel wedge cuts all twelve edges and only those")
+{
+  // A bevel is the concave construction with both signs flipped, so the same
+  // machinery must remove material instead of adding it. Twelve identical prisms
+  // of cross-section t^2/2 and length s, less the corner overlaps.
+  const double s = 10.0, t = 1.0;
+  const auto cube = box(s, s, s);
+  const MergedMesh mm = mergeMesh(cube.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+
+  const auto edges = selectedEdges(mm, adj, 45.0, /*wantConcave=*/false);
+  REQUIRE(edges.size() == 12);
+  const auto chains = buildChains(mm, edges);
+  REQUIRE(chains.size() == 12);
+
+  const auto wedge = buildWedgeSolid(mm, adj, chains, t, /*concave=*/false);
+  REQUIRE_FALSE(wedge.IsEmpty());
+
+  // Twelve prisms overlap in pairs at each of the eight corners, so the union is
+  // below the naive sum but above the sum less one full prism per corner.
+  const double prisms = 12.0 * 0.5 * t * t * s;
+  CHECK(wedge.Volume() < prisms);
+  CHECK(wedge.Volume() > prisms - 8.0 * 0.5 * t * t * t * 3.0);
+
+  // Subtracting it leaves the bounding box alone — the tool bevels the edges
+  // without eating a face. It removes slightly less than its own volume, since
+  // the part that overshoots each wall was never inside the cube to begin with.
+  const auto beveled = cube - wedge;
+  const double removed = cube.Volume() - beveled.Volume();
+  CHECK(removed < wedge.Volume());
+  CHECK(removed == Approx(wedge.Volume()).epsilon(0.01));
+  const auto box0 = cube.BoundingBox();
+  const auto box1 = beveled.BoundingBox();
+  for (int i = 0; i < 3; ++i) {
+    CHECK(box1.min[i] == Approx(box0.min[i]).margin(1e-9));
+    CHECK(box1.max[i] == Approx(box0.max[i]).margin(1e-9));
+  }
+}
+
+TEST_CASE("cylinder rim: a closed chain wraps into a ring of wedge cells")
+{
+  // The bevel on a cylinder rim is the closed-chain case: the last station pairs
+  // back to the first, so the ring must come out as one connected solid rather
+  // than a ring with a gap where the chain was cut open.
+  const int fn = 32;
+  const double r = 10.0, h = 6.0, t = 1.0;
+  const auto cyl = manifold::Manifold::Cylinder(h, r, r, fn, false);
+  const MergedMesh mm = mergeMesh(cyl.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 60.0, /*wantConcave=*/false));
+  REQUIRE(chains.size() == 2);
+
+  const auto wedge = buildWedgeSolid(mm, adj, chains, t, /*concave=*/false);
+  REQUIRE_FALSE(wedge.IsEmpty());
+  // Two separate rims, and each rim closed rather than split at the seam: two
+  // components, each a torus-like ring (genus 1) rather than an open arc.
+  const auto parts = wedge.Decompose();
+  CHECK(parts.size() == 2);
+  for (const auto& part : parts) CHECK(part.Genus() == 1);
+
+  // Each rim removes roughly the t^2/2 triangle swept round the circumference;
+  // the polygonal approximation makes this a few percent light.
+  const double nominal = 2.0 * 0.5 * t * t * 2.0 * M_PI * r;
+  CHECK(wedge.Volume() == Approx(nominal).epsilon(0.05));
+}
+
 #endif  // ENABLE_MANIFOLD

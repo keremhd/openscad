@@ -5,11 +5,15 @@
 # "*" matches anything; the FIRST matching line wins, so put specific cases
 # above the catch-alls. Anything not listed is expected to PASS.
 #
-# Most real cases are red on purpose: the operator does not build a tool solid
-# yet, so it emits nothing. That means `emits` fails, `tool` fails (the residual
-# is the whole reference), and `sandwich` passes trivially because the applied
-# result is just the model. When a milestone lands, the lines it turns green are
-# what you delete from here.
+# The rounded tools are red on purpose: the operator builds the wedge but not
+# the rolling ball, so fillet_tool/round_tool still emit nothing. That means
+# `emits` fails, `tool` fails (the residual is the whole reference), and
+# `sandwich` passes trivially because the applied result is just the model. When
+# a milestone lands, the lines it turns green are what you delete from here.
+#
+# chamfer_tool and bevel_tool need only the wedge and are fully green. They are
+# listed as PASS rather than left out only because they have to outrank the
+# catch-alls; anything genuinely unlisted is expected to pass too.
 
 selftest_equal          *  *         PASS
 selftest_wrongradius    *  tool      FAIL   # the point of the self-test
@@ -33,7 +37,12 @@ selftest_wrongradius    *  *         PASS
 case_junction3_pocket   *  sandwich  CRASH
 case_junction4_pocket   *  sandwich  CRASH
 
-# The operator emits nothing yet.
+# The wedge tools are done and green everywhere; listed ahead of the catch-alls
+# so the "emits nothing" rule below cannot claim them.
+case_inner_corner_chamfer  *  *         PASS
+case_outer_edge_bevel      *  *         PASS
+
+# The rounded tools emit nothing yet.
 *                       *  tool      FAIL
 *                       *  emits     FAIL
 *                       *  sandwich  PASS

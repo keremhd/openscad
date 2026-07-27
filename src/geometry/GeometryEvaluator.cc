@@ -990,10 +990,11 @@ Response GeometryEvaluator::visit(State& state, const CgalAdvNode& node)
 
 /*!
    input: List of 3D objects (child 0 = target, children 1+ = brushes)
-   output: a tool solid (empty for now)
+   output: a tool solid, to be unioned (concave tools) or subtracted (convex)
    operation:
-    o Extract child 0's mesh, rebuild edge adjacency and classify its edges.
-      Diagnostic counts are logged; no tool geometry is emitted yet. Brushes
+    o Extract child 0's mesh, rebuild edge adjacency, classify its edges and walk
+      the selected ones into chains. chamfer_tool/bevel_tool build the wedge
+      along those chains; the rounded tools still emit nothing. Brushes
       (children 1+) are collected but not yet used.
  */
 Response GeometryEvaluator::visit(State& state, const FilletNode& node)

@@ -25,6 +25,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <map>
+#include <memory>
 #include <set>
 #include <utility>
 #include <vector>
@@ -322,9 +323,9 @@ std::vector<Chain> buildChains(const MergedMesh& m, const std::vector<EdgeKey>& 
   return chains;
 }
 
-std::vector<SpineFrame> spineFrames(const MergedMesh& m,
-                                    const std::map<EdgeKey, std::vector<int>>& adj,
-                                    const Chain& chain, double r)
+std::vector<StationNormals> chainNormals(const MergedMesh& m,
+                                         const std::map<EdgeKey, std::vector<int>>& adj,
+                                         const Chain& chain)
 {
   auto edgeKey = [](int a, int b) { return EdgeKey{std::min(a, b), std::max(a, b)}; };
 
@@ -344,25 +345,46 @@ std::vector<SpineFrame> spineFrames(const MergedMesh& m,
   };
 
   const int n = static_cast<int>(chain.verts.size());
-  std::vector<SpineFrame> frames(n);
+  std::vector<StationNormals> out(n);
   for (int i = 0; i < n; ++i) {
     const int v = chain.verts[i];
-    SpineFrame f;
-    f.v = m.pos[v];
+    StationNormals s;
+    s.v = m.pos[v];
 
     // Average each wall's normal over the vertex's incident chain edges (with
     // wrap-around on a closed ring); an open end has only one incident edge.
-    int prevV = i > 0 ? chain.verts[i - 1] : (chain.closed ? chain.verts[n - 1] : -1);
-    int nextV = i < n - 1 ? chain.verts[i + 1] : (chain.closed ? chain.verts[0] : -1);
+    const int prevV = i > 0 ? chain.verts[i - 1] : (chain.closed ? chain.verts[n - 1] : -1);
+    const int nextV = i < n - 1 ? chain.verts[i + 1] : (chain.closed ? chain.verts[0] : -1);
     Vector3d sumA = Vector3d::Zero(), sumB = Vector3d::Zero(), nA, nB;
     if (prevV >= 0 && sidedNormals(prevV, v, nA, nB)) { sumA += nA; sumB += nB; }
     if (nextV >= 0 && sidedNormals(v, nextV, nA, nB)) { sumA += nA; sumB += nB; }
-    if (sumA.norm() < 1e-9 || sumB.norm() < 1e-9) {
+    if (sumA.norm() >= 1e-9 && sumB.norm() >= 1e-9) {
+      s.nA = sumA.normalized();
+      s.nB = sumB.normalized();
+      s.valid = true;
+    }
+    out[i] = s;
+  }
+  return out;
+}
+
+std::vector<SpineFrame> spineFrames(const MergedMesh& m,
+                                    const std::map<EdgeKey, std::vector<int>>& adj,
+                                    const Chain& chain, double r)
+{
+  const std::vector<StationNormals> stations = chainNormals(m, adj, chain);
+
+  const int n = static_cast<int>(stations.size());
+  std::vector<SpineFrame> frames(n);
+  for (int i = 0; i < n; ++i) {
+    SpineFrame f;
+    f.v = stations[i].v;
+    if (!stations[i].valid) {
       frames[i] = f;
       continue;
     }
-    f.nA = sumA.normalized();
-    f.nB = sumB.normalized();
+    f.nA = stations[i].nA;
+    f.nB = stations[i].nB;
 
     const double phi = std::acos(std::clamp(f.nA.dot(f.nB), -1.0, 1.0));
     f.phiDeg = phi * 180.0 / M_PI;
@@ -383,6 +405,115 @@ std::vector<SpineFrame> spineFrames(const MergedMesh& m,
     frames[i] = f;
   }
   return frames;
+}
+
+std::vector<WedgeSection> wedgeSections(const MergedMesh& m,
+                                        const std::map<EdgeKey, std::vector<int>>& adj,
+                                        const Chain& chain, double t, bool concave)
+{
+  const std::vector<StationNormals> stations = chainNormals(m, adj, chain);
+
+  // How far past each wall the tool reaches. Relative to the setback so it
+  // scales with the feature, with a floor so a degenerate t still separates the
+  // faces by more than the boolean kernel's own tolerance.
+  const double eps = std::max(1e-3 * std::abs(t), 1e-9);
+
+  // A concave tool is unioned into the material, so its overshoot points inward,
+  // against the outward wall normals; a convex tool is subtracted and overshoots
+  // into the air. Setback follows the same sign: a concave tool spans the
+  // reentrant quadrant, a convex one cuts into the solid.
+  const double dir = concave ? 1.0 : -1.0;
+
+  std::vector<WedgeSection> out(stations.size());
+  for (size_t i = 0; i < stations.size(); ++i) {
+    const StationNormals& s = stations[i];
+    if (!s.valid) continue;
+
+    // In-wall directions by Gram-Schmidt: uA is nB with its nA component removed,
+    // so it lies in wall A and points across the crease. Degenerate when the
+    // walls are parallel (a flat seam or a fold back on itself), where there is
+    // no crease to cut.
+    const double c = std::clamp(s.nA.dot(s.nB), -1.0, 1.0);
+    Vector3d uA = s.nB - c * s.nA;
+    Vector3d uB = s.nA - c * s.nB;
+    if (uA.norm() < 1e-9 || uB.norm() < 1e-9) continue;
+    uA.normalize();
+    uB.normalize();
+
+    Vector3d bis = s.nA + s.nB;
+    if (bis.norm() < 1e-9) continue;
+    bis.normalize();
+
+    const Vector3d TA = s.v + dir * t * uA;
+    const Vector3d TB = s.v + dir * t * uB;
+
+    WedgeSection w;
+    w.p = {TA,
+           TB,
+           TB - dir * eps * s.nB,
+           s.v - dir * eps * bis,
+           TA - dir * eps * s.nA};
+    w.valid = true;
+    out[i] = w;
+  }
+  return out;
+}
+
+manifold::Manifold buildWedgeSolid(const MergedMesh& m,
+                                   const std::map<EdgeKey, std::vector<int>>& adj,
+                                   const std::vector<Chain>& chains, double t, bool concave)
+{
+  if (!(t > 0)) return {};
+
+  std::vector<manifold::Manifold> cells;
+  for (const Chain& chain : chains) {
+    const std::vector<WedgeSection> sections = wedgeSections(m, adj, chain, t, concave);
+    const size_t n = sections.size();
+    if (n < 2) continue;
+
+    // One cell per spine segment; a closed chain wraps, so its last station also
+    // pairs with its first.
+    const size_t segments = chain.closed ? n : n - 1;
+    for (size_t i = 0; i < segments; ++i) {
+      const WedgeSection& a = sections[i];
+      const WedgeSection& b = sections[(i + 1) % n];
+      if (!a.valid || !b.valid) continue;
+
+      std::vector<manifold::vec3> pts;
+      pts.reserve(10);
+      for (const auto& section : {a, b})
+        for (const Vector3d& p : section.p) pts.emplace_back(p.x(), p.y(), p.z());
+
+      // Degenerate segments (a zero-length spine step, or a section that
+      // collapsed) hull to nothing rather than to a bad solid; drop them.
+      manifold::Manifold cell = manifold::Manifold::Hull(pts);
+      if (cell.IsEmpty()) continue;
+      cells.push_back(std::move(cell));
+    }
+  }
+
+  if (cells.empty()) return {};
+  if (cells.size() == 1) return cells.front();
+
+  manifold::Manifold solid = manifold::Manifold::BatchBoolean(cells, manifold::OpType::Add);
+
+  // Consecutive cells meet along a shared section face, so the union's inputs
+  // touch on a set of zero measure. Manifold copes, but it leaves one degenerate
+  // four-triangle shell behind per such contact: no volume, no effect on any
+  // boolean, and a nonsense genus for anything that inspects the result. Keep
+  // only the components that enclose material.
+  std::vector<manifold::Manifold> parts = solid.Decompose();
+  if (parts.size() < 2) return solid;
+
+  const double keepAbove = 1e-9 * std::abs(solid.Volume());
+  std::vector<manifold::Manifold> solidParts;
+  for (auto& part : parts)
+    if (std::abs(part.Volume()) > keepAbove) solidParts.push_back(std::move(part));
+
+  if (solidParts.empty()) return {};
+  if (solidParts.size() == 1) return solidParts.front();
+  if (solidParts.size() == parts.size()) return solid;
+  return manifold::Manifold::BatchBoolean(solidParts, manifold::OpType::Add);
 }
 
 std::unique_ptr<PolySet> debugEdgeMarkers(
@@ -492,31 +623,44 @@ std::shared_ptr<const Geometry> buildFilletTool(
       static_cast<int>(c.featureSameSurface), static_cast<int>(selected),
       wantConcave ? "concave" : "convex", thresholdDeg);
 
-  // The tool solid is not built yet, so without debug= the operator emits
-  // nothing — the honest no-op, and a shape a caller can still union or
-  // subtract without consequence.
-  //
-  // debug = true swaps in a visualization instead: colored markers along every
-  // edge (concave/convex/rejected), plus the spine's per-vertex tangency frame
-  // (ball center and the two tangency points) walked from the selected edges.
-  // It is off by default because those markers are hundreds of disjoint cubes
-  // rather than one solid, and anything downstream that expects a well-formed
-  // mesh — Minkowski, which falls back to CGAL's Nef kernel, above all — either
-  // grinds for minutes or dies on them. Later milestones return the real tool
-  // here and leave this branch as the diagnostic view.
-  if (!node.debug) return nullptr;
-
   const std::vector<EdgeKey> selectedKeys = selectedEdges(m, adj, thresholdDeg, wantConcave);
   const std::vector<Chain> chains = buildChains(m, selectedKeys);
-  std::vector<SpineFrame> frames;
-  for (const Chain& chain : chains) {
-    const std::vector<SpineFrame> chainFrames = spineFrames(m, adj, chain, node.size);
-    frames.insert(frames.end(), chainFrames.begin(), chainFrames.end());
+
+  // debug = true swaps the tool solid for a visualization: colored markers along
+  // every edge (concave/convex/rejected), plus the spine's per-vertex tangency
+  // frame (ball center and the two tangency points) walked from the selected
+  // edges. It is off by default because those markers are hundreds of disjoint
+  // cubes rather than one solid, and anything downstream that expects a
+  // well-formed mesh — Minkowski, which falls back to CGAL's Nef kernel, above
+  // all — either grinds for minutes or dies on them.
+  if (node.debug) {
+    std::vector<SpineFrame> frames;
+    for (const Chain& chain : chains) {
+      const std::vector<SpineFrame> chainFrames = spineFrames(m, adj, chain, node.size);
+      frames.insert(frames.end(), chainFrames.begin(), chainFrames.end());
+    }
+
+    PolySetBuilder debug(0, 0, 3, /*convex=*/false);
+    if (auto edges = debugEdgeMarkers(m, adj, thresholdDeg)) debug.appendPolySet(*edges);
+    if (auto spine = debugSpineMarkers(m, frames)) debug.appendPolySet(*spine);
+    if (debug.isEmpty()) return nullptr;
+    return debug.build();
   }
 
-  PolySetBuilder debug(0, 0, 3, /*convex=*/false);
-  if (auto edges = debugEdgeMarkers(m, adj, thresholdDeg)) debug.appendPolySet(*edges);
-  if (auto spine = debugSpineMarkers(m, frames)) debug.appendPolySet(*spine);
-  if (debug.isEmpty()) return nullptr;
-  return debug.build();
+  // Chamfer and bevel need only the wedge; the rounded tools additionally
+  // subtract the rolling ball, which is not built yet, so they stay a no-op —
+  // an empty tool a caller can still union or subtract without consequence.
+  const bool isWedgeOnly =
+    node.type == FilletType::CHAMFER || node.type == FilletType::BEVEL;
+  if (!isWedgeOnly) return nullptr;
+
+  if (!(node.size > 0)) {
+    LOG(message_group::Warning, node.modinst->location(), "",
+        "%1$s: setback must be positive", node.name());
+    return nullptr;
+  }
+
+  manifold::Manifold wedge = buildWedgeSolid(m, adj, chains, node.size, wantConcave);
+  if (wedge.IsEmpty()) return nullptr;
+  return std::make_shared<ManifoldGeometry>(std::move(wedge));
 }
