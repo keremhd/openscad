@@ -266,9 +266,10 @@ diagonal so it reads at any scale. Verified by eye on three cases:
   seams grey (rejected), outer cube edges green — the acceptance case.
 - inner-corner union → the single reflex edge red, all others green.
 
-The markers are the operator's whole output at this milestone; a later milestone
-swaps in the real tool solid and gates the markers behind a debug flag (the
-`$fillet_debug`-keeper decision, still open).
+The markers were the operator's whole output at this milestone. They are now
+gated behind a `debug=` argument (default off), so the operator is an honest
+no-op until it builds a real tool solid; a later milestone returns that solid
+here and leaves the markers as the diagnostic view.
 
 ### M4 — Chain walking + spine
 
@@ -298,7 +299,8 @@ tangency point. Verified:
 
 Handedness note: side A/B at a vertex is fixed by
 `sign(cross(nA,nB)·walkdir)`, so averaging adds same-wall normals together along
-a curved chain. The `$fillet_debug`-keeper decision is still open.
+a curved chain. The debug-marker gating question is settled: `debug=` argument,
+default off.
 
 ### M5 — `chamfer_tool` / `bevel_tool` (W only) — first real geometry
 
