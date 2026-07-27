@@ -310,6 +310,38 @@ default off.
 - **Acceptance:** drops into the M1 harness; inner-corner chamfer matches the
   hand-written `wedge` reference at both radii.
 
+**Status: done.** `fillet::detail` gains `chainNormals` (the per-station averaged
+wall normals, factored out of `spineFrames` since both constructions start
+there), `wedgeSections` (the §6.2 pentagon at each station, setback taken
+directly along the Gram-Schmidt in-wall directions), and `buildWedgeSolid` (hull
+each consecutive pair of sections, `BatchBoolean` the cells). `buildFilletTool`
+returns that solid for `chamfer_tool`/`bevel_tool`; the rounded tools still
+return nothing, and `debug=` still wins over both. Convex is the same code with
+both signs flipped — setback into the solid, `eps` overshoot into the air.
+Verified:
+
+- inner-corner chamfer and outer-edge bevel both go green on all three checks at
+  both sizes in `fillet-tests/`; their expected-FAIL lines are gone from
+  `expectations.txt` and the residual column of both pictures is empty.
+- unit tests pin the §6.4 setback (`t` along each wall, not the inscribed radius
+  `r·tan(φ/2)`), the wedge volume and bounding box on the floor/wall union, the
+  cube's twelve bevels (removes material, leaves the bounding box alone), and a
+  cylinder rim as the closed-chain case (two rings, genus 1 each).
+- the unclamped large variant behaves as §6.5 predicts rather than failing: a
+  40-cube beveled at `t=30` collapses to the diamond that is the intersection of
+  the twelve half-spaces. Correct, and not what anyone wants — §6.5 clamping is
+  still open.
+
+**One thing the plan does not mention.** Consecutive cells meet along a shared
+section face, so the union's inputs intersect in a set of zero measure. Manifold
+handles it, but leaves a degenerate four-triangle shell behind per contact — no
+volume, invisible to any later boolean, and enough to make `Genus()` report `-9`
+on a two-ring rim. `buildWedgeSolid` therefore decomposes the union and keeps
+only the components that enclose material. `Simplify()` does not remove them.
+Worth remembering at M7: `U` is built the same way and will do the same thing.
+`BatchBoolean` was otherwise uneventful — no determinism problem surfaced across
+repeated runs of the case suite.
+
 ### M6 — Automated regression harness
 
 - Establish the ctest baseline-PNG pattern **once**: convert the `fillet-tests/`
