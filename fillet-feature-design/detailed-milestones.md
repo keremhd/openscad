@@ -51,16 +51,17 @@ Confirmed against the current tree; these shape or correct the plan.
 - **Tests auto-glob:** any `.scad` dropped in `tests/data/scad/3D/features/` is
   picked up by CTest (dump/render/preview/throwntogether). Baseline PNGs are
   committed per feature under `tests/regression/<dir>/`.
-- **Copyright headers on new files are optional — do not add one to match a
-  sibling.** Only ~40% of `.cc` and ~14% of `.h` under `src/` carry the GPL
-  block; in `src/geometry/` it is 3/37 and 0/27, and **no `_test.cc` in the repo
-  has one**. New `fillet/` files should start straight at `#pragma once` /
-  `#include`. If a header is ever wanted, copy the current dateless form
-  (`src/gui/ColorLabel.h`) — `Copyright The OpenSCAD Developers.`, no year
-  range, no CGAL linking exception, FSF URL not the Boston address. **Never add
-  a contributor's own name** (the few individually-named files are pre-2022
-  subsystem drops), and **never bump the year** on the legacy `2009-20xx` blocks
-  — those ranges are copy-paste artifacts nobody maintains.
+- **Copyright header on new files: use the dateless "OpenSCAD Developers" form.**
+  Copy it verbatim from **`src/gui/ColorLabel.h:1-18`** (the repo's most recent
+  new-file header) — `Copyright The OpenSCAD Developers.`, no year range, no
+  CGAL linking exception, FSF URL rather than the stale Boston address. Do
+  **not** copy the legacy `Copyright (C) 2009-20xx Clifford Wolf …` block that
+  most older files carry. Two hard rules: **never add a contributor's own name**
+  (the few individually-named files are pre-2022 subsystem drops), and **never
+  bump the year** on an existing legacy block — those ranges are copy-paste
+  artifacts nobody maintains. Coverage is uneven repo-wide (~40% of `.cc`, ~14%
+  of `.h`; 0/27 headers in `src/geometry/`), and **no `_test.cc` has one** — so
+  a missing header elsewhere is not a signal to omit yours.
 
 ---
 
