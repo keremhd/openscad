@@ -1581,6 +1581,10 @@ file(GLOB_RECURSE TEST_SOURCES
 file(GLOB_RECURSE GUI_TEST_SOURCES
   "src/gui/*_test.cc"
 )
+# The globs above intentionally skip src/geometry/ — recursing there would also
+# pull in other, currently-unbuilt geometry test files. Add just the fillet test
+# explicitly instead.
+list(APPEND TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/geometry/fillet/FilletBuilder_test.cc")
 list(FILTER Sources EXCLUDE REGEX ".*_test[.]cc")
 list(REMOVE_ITEM Sources "src/main_wrapper.cc")
 

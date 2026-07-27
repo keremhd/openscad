@@ -195,10 +195,19 @@ unit-test layer rather than porting it to CTest as a shell script.
    `linear_extrude_test.cc` in the same change, since it will start building.
 2. **M2** — `src/geometry/fillet/FilletBuilder_test.cc`, following the
    `linear_extrude_test.cc` pattern. This requires the adjacency and
-   classification types to be reachable from the test: either declare them in a
-   `namespace FilletInternals { ... }` block re-declared in the test file, or
-   widen `FilletBuilder.h`, which today exposes only `buildFilletTool()`. Decide
-   this at M2, before the header ossifies around the single entry point.
+   classification types to be reachable from the test.
+
+   **Decided (2026-07-27): dedicated internal header.** The internals
+   (`Tri`, `EdgeKey`, adjacency rebuild, edge classification) move out of the
+   anonymous namespace in `FilletBuilder.cc` into a new
+   `src/geometry/fillet/FilletBuilder_internal.h` under a named namespace
+   (`fillet::detail`), `#include`d by both the `.cc` and the test. The public
+   `FilletBuilder.h` stays a single entry point (`buildFilletTool()`). Chosen
+   over the `linear_extrude_test.cc` re-declare-`extern` trick because the
+   internals include *structs*, not just free functions — re-declaring a struct
+   layout by hand in the test would drift; a shared header keeps one source of
+   truth. Chosen over widening the public header because these types churn
+   through M4–M11 and should not become public surface.
 3. **M6** — establish the baseline-PNG pattern once, with the §1 sanity case and
    the chamfer cases; resolve the CGAL-backend question from §3 here.
 4. **M4, M8, M9, M11** — each geometry milestone adds unit tests for its own
