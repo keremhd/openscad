@@ -168,23 +168,70 @@ first fillet file added to `3D/features/` triggers it.
 
 ## 4. Current scaffolding and where it goes
 
-Two directories at repo root, from M1, outside CTest entirely:
+`fillet-tests/` at repo root, outside CTest entirely. See its `README.md` for the
+case contract; the design decisions behind the shape are here.
 
-- `fillet-visual-tests/` — hand-written OpenSCAD references for the known-good
-  answer, plus `render.sh` and a shared three-up viewer module. Purpose is an
-  inspectable image *before* the operator exists.
-- `fillet-equivalence-tests/` — `check_equivalence.sh` and friends, comparing a
-  candidate result against a hand-written reference.
+### 4.1 Why one directory
 
-Both are correct as scaffolding and should stay usable by hand. M6's job is to
-convert the *cases* (not the shell drivers) into `.scad` files under
-`tests/data/scad/3D/features/` with committed baselines.
+M1 built two: `fillet-visual-tests/` (hand-written references + `render.sh`) and
+`fillet-equivalence-tests/` (`check_equivalence.sh` + `eq_*.scad`). They were
+correct as scaffolding but structurally guaranteed to diverge — a case had to be
+written twice, once as a scene and once as a comparison, so the automated set
+lagged the visual set permanently (7 scenes against 3 comparisons, of which 2
+were harness self-tests). Merged 2026-07-27 into `fillet-tests/`, where a case is
+one file declaring model, reference tool and operator call, and both the renderer
+and the checker drive it. **Adding a case is one edit and yields both.**
 
-`check_equivalence.sh` is a separate matter: it is doing volume-difference
-comparison through the CLI, which is more naturally and far more precisely
-expressed as a Catch2 test calling Manifold directly — same shape as the existing
-Manifold-vs-CGAL equivalence case in `linear_extrude_test.cc`. Fold it into the
-unit-test layer rather than porting it to CTest as a shell script.
+Metadata (sign, slice, size variants, tolerance) lives in the `.scad` and is read
+back by the shell through OpenSCAD's echo export, so there is no manifest to fall
+out of sync with the geometry.
+
+### 4.2 Side by side *and* diff
+
+The renders show six columns: model, reference applied, candidate applied,
+reference tool, candidate tool, and the residual between the last two. The
+residual column is the same geometry the `tool` check evaluates, so an empty red
+column and a green test are one fact rather than two opinions. Side by side
+diagnoses; the diff decides.
+
+### 4.3 Three checks, so the junction cases are not eyeball-only
+
+| check | needs a reference | catches |
+|---|---|---|
+| `tool` | yes | wrong radius, missing corner, gouge, wrong sign |
+| `sandwich` | **no** | gouges, runaway or wrong-direction tools |
+| `emits` | no | the operator silently doing nothing |
+
+`sandwich` — result and model must lie within `size` of each other — is what
+gives the trihedral and valence-4 corners automated coverage despite having no
+closed form to compare against (§2.2 lists them, M8/M9 build them). It is
+deliberately coarse: `selftest_wrongradius` passes it, which is the calibration
+worth knowing. Radii too large for the face are the other reference-free
+variants, since §6.5 clamping behaviour is not settled; they keep running the
+other two checks rather than dropping out of the suite.
+
+### 4.4 Cost
+
+Both tolerance checks dilate through Minkowski, which has no Manifold path and
+falls back to CGAL's Nef kernel. Two consequences, both handled in the drivers
+rather than by dropping cases:
+
+- Ring cases run at `$fn = 48`, not 128. Chord error is ~0.2 % of `r`, far under
+  the 2 % tolerance, and Minkowski cost climbs steeply with facet count — at 128
+  the boss case did not finish in six minutes.
+- Every check and render is bounded by `CHECK_TIMEOUT` (default 60 s), and a
+  signal death is reported as `CRASH` rather than folded into `FAIL`, so an
+  engine bug can never masquerade as a geometric verdict.
+
+### 4.5 What still moves later
+
+M6 converts the cases that are green by then into `.scad` files under
+`tests/data/scad/3D/features/` with committed baselines. The two-sided
+containment comparison itself is better expressed as a Catch2 test calling
+Manifold directly — same shape as the Manifold-vs-CGAL equivalence case in
+`linear_extrude_test.cc` — rather than ported to CTest as a shell script. That
+would also sidestep the CGAL Minkowski cost above. `fillet-tests/` stays
+afterwards as the place a case is prototyped before it has a baseline.
 
 ---
 

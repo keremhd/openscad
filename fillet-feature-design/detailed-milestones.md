@@ -88,7 +88,7 @@ green apart from these three — treat them as the expected baseline:
 | **M3** | Debug visualization of classified edges | debug viz | §12.1 |
 | **M4** | Chain walking + per-vertex normals, `C`/`TA`/`TB`, debug spine | debug viz | §5 |
 | **M5** | `chamfer_tool`/`bevel_tool` — W only (first real geometry) | geometry | §6.2, §6.4 |
-| **M6** | Automated regression: turn M1 harness files into ctest baselines | test | §15 |
+| **M6** | Automated regression: turn `fillet-tests/` cases into ctest baselines | test | §15 |
 | **M7** | `fillet_tool`/`round_tool` — disc hulls, then swap to circular segments | geometry | §6.1 |
 | **M8** | Junction cells degree 3 (`P`, dual truncation, corner cell) | geometry | §6.3 |
 | **M9** | Junction degree ≥4 (Q-vertex) + numerical guards + runout fallback | geometry | §6.3.1-6.3.2 |
@@ -180,6 +180,29 @@ and Claude.
 
 - **Acceptance:** each case renders a legible reference image; radius sweep and
   contour stacks read correctly by eye.
+
+**Status: done, then restructured (2026-07-27).** The harness and the M6-prep
+equivalence checker were merged into a single `fillet-tests/` directory. The
+conventions above all survive — thin-slab slices, the radius sweep, contour
+stacks for junctions, hand-written references as the M5/M7 acceptance target —
+but a case is now **one file** declaring model, reference tool and operator call,
+consumed by both the renderer and the headless checker, instead of being written
+once as a scene and again as a comparison. Consequences worth knowing here:
+
+- The viewer's three columns became six: the operator's applied result and its
+  isolated tool now sit beside the reference's, and a final column shows the
+  residual between them. The scenes call the operator; they are no longer
+  operator-independent.
+- Every case is automatically checked, not just eyeballed — including the
+  junction cases, via a reference-free containment check, since the equal-radius
+  corner has no closed form to compare against.
+- Cases are one tool per file, so `chamfer_tool` and `bevel_tool` have their own
+  rather than sharing the inner-corner scene. All four builtins are covered.
+- The radius sweep is a per-case variant list; the large radius keeps its row and
+  runs the reference-free checks, since §6.5 clamping is not settled.
+
+See `fillet-tests/README.md` for the contract and
+[`test-design.md`](test-design.md) §4 for the reasoning.
 
 ### M2 — Mesh extraction + edge adjacency + classification
 
@@ -287,9 +310,15 @@ a curved chain. The `$fillet_debug`-keeper decision is still open.
 
 ### M6 — Automated regression harness
 
-- Establish the ctest baseline-PNG pattern **once**: convert the M1 files (§1
-  sanity case + chamfer cases) into committed `.scad` under
-  `tests/data/scad/3D/features/` with committed baseline PNGs.
+- Establish the ctest baseline-PNG pattern **once**: convert the `fillet-tests/`
+  cases that are green by then (§1 sanity case + chamfer cases) into committed
+  `.scad` under `tests/data/scad/3D/features/` with committed baseline PNGs.
+- Fold the two-sided containment comparison into the Catch2 layer, calling
+  Manifold directly rather than porting the shell driver — see
+  [`test-design.md`](test-design.md) §4.5. That also drops the CGAL Minkowski
+  cost the shell version pays.
+- `fillet-tests/` stays afterwards as the place a case is prototyped before it
+  has a baseline.
 - **Acceptance:** new tests run under CTest; baselines committed; later geometry
   milestones only add a `.scad`.
 

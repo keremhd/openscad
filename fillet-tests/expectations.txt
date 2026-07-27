@@ -1,0 +1,39 @@
+# Expected state of every check at the current milestone.
+#
+#   <case>  <variant>  <check>  PASS|FAIL|CRASH|TIMEOUT|ERROR
+#
+# "*" matches anything; the FIRST matching line wins, so put specific cases
+# above the catch-alls. Anything not listed is expected to PASS.
+#
+# Most real cases are red on purpose: the operator does not build a tool solid
+# yet, so it emits nothing. That means `emits` fails, `tool` fails (the residual
+# is the whole reference), and `sandwich` passes trivially because the applied
+# result is just the model. When a milestone lands, the lines it turns green are
+# what you delete from here.
+
+selftest_equal          *  *         PASS
+selftest_wrongradius    *  tool      FAIL   # the point of the self-test
+selftest_wrongradius    *  *         PASS
+
+# Not our bug, and not about fillet at all: dilating a cube with a low-$fn
+# pyramidal pocket segfaults OpenSCAD. Manifold's Minkowski gives up, the Nef
+# fallback trips an assertion in SNC_external_structure.h:1151, and the process
+# dies with SIGSEGV. Reproducible in eight lines with no fillet node present:
+#
+#   minkowski() {
+#     difference() {
+#       translate([-30,-30,0]) cube([60,60,60]);
+#       cylinder(r1 = 30, r2 = 0, h = 60, $fn = 3);
+#     }
+#     cube(12, center = true);
+#   }
+#
+# Recorded rather than designed around: the case is correct and the crash is
+# real, so it should stay visible until the engine bug is fixed.
+case_junction3_pocket   *  sandwich  CRASH
+case_junction4_pocket   *  sandwich  CRASH
+
+# The operator emits nothing yet.
+*                       *  tool      FAIL
+*                       *  emits     FAIL
+*                       *  sandwich  PASS
