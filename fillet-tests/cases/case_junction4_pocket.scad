@@ -9,8 +9,9 @@ include <../lib/_harness.scad>;
 
 $fn = 64;
 
-R  = 30;
-HC = 60;
+R   = 30;
+HC  = 60;
+CAP = 5;    // material above the apex — see case_junction3_pocket
 
 CASE_SIGN  = "union";
 CASE_SLICE = ["stack", [6, 20, 34, 48, 56], 90];
@@ -20,7 +21,7 @@ CASE_VARIANTS = [["small",   6, "none", 0.12]];
 
 module case_model() {
   difference() {
-    translate([-R, -R, 0]) cube([2 * R, 2 * R, HC]);
+    translate([-R, -R, 0]) cube([2 * R, 2 * R, HC + CAP]);
     cylinder(r1 = R, r2 = 0, h = HC, $fn = 4);
   }
 }

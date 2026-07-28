@@ -27,23 +27,27 @@ selftest_equal          *  *         PASS
 selftest_wrongradius    *  tool      FAIL   # the point of the self-test
 selftest_wrongradius    *  *         PASS
 
-# Not our bug, and not about fillet at all: dilating a cube with a low-$fn
-# pyramidal pocket segfaults OpenSCAD. Manifold's Minkowski gives up, the Nef
-# fallback trips an assertion in SNC_external_structure.h:1151, and the process
-# dies with SIGSEGV. Reproducible in eight lines with no fillet node present:
+# The two pocket cases used to segfault here, and it was not a fillet bug: the
+# pocket's apex sat exactly in the plane of the block's top face, so the model
+# pinched to a point at that vertex, and CGAL's convex decomposition — which
+# every dilation goes through — dies on such a vertex. Reproducible in eight
+# lines with no fillet node present, and unrelated to the pocket's face count:
 #
 #   minkowski() {
 #     difference() {
 #       translate([-30,-30,0]) cube([60,60,60]);
-#       cylinder(r1 = 30, r2 = 0, h = 60, $fn = 3);
+#       cylinder(r1 = 30, r2 = 0, h = 60, $fn = 3);   // apex at z = 60
 #     }
 #     cube(12, center = true);
 #   }
 #
-# Recorded rather than designed around: the case is correct and the crash is
-# real, so it should stay visible until the engine bug is fixed.
-case_junction3_pocket   *  sandwich  CRASH
-case_junction4_pocket   *  sandwich  CRASH
+# Move the apex a millimetre either way and it is clean, so the cases now leave
+# material above it (CAP) and the crash is gone for good. What is left is a
+# statement about the fillet: with no junction cells the chains run to the
+# meeting point and pile up there, and the applied result is not a solid CGAL
+# will dilate. The corner milestone is what turns these green.
+case_junction3_pocket   *  sandwich  FAIL
+case_junction4_pocket   *  sandwich  FAIL
 
 # Nothing validates the size against the feature yet, so no tool is ever refused
 # and no warning is ever emitted: every "drops" check is red. The two wedge tools
