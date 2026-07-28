@@ -51,6 +51,37 @@ case_junction4_pocket   *  sandwich  FAIL
 # blunter and still fits inside the sandwich.
 case_junction3_apex     small  sandwich  FAIL
 
+# Same two kinds of red, on the cases from junction-cases.md.
+#
+# The sheared valence-5 pair is the apex and pocket story again and nothing new:
+# the skew is there so the picture SHOWS several distinct corner centres instead
+# of one, which a symmetric cone cannot. Correctness of those corners is pinned
+# exactly in FilletCompare_test.cc; here the apex cannot pass "sandwich" and the
+# pocket cannot be dilated at all.
+case_junction5_apex_skew    small  sandwich  FAIL
+case_junction5_pocket_skew  small  sandwich  FAIL
+
+# The flat apex is a probe: the corner solve's determinant guard should NOT fire
+# at 1e-2, and it does not — the corner is built and the result is a clean solid.
+# It is red because what is flat here is also sharp: the rim is a 1.9-degree
+# knife edge, and rounding one sets the surface back by r/tan(t/2), some sixty
+# radii at this size. Correct, and nowhere near within "size" of the model. Like
+# the two lines above it, this is the check failing to express the answer, so it
+# will still be here when the operator is finished.
+case_junction_flat_apex     small  sandwich  FAIL
+
+# The needle's under-fill is real and severe — its beads stop eighty radii below
+# the apex — but this line is not about that. Dilating a 3 x 120 spike through
+# CGAL's Nef kernel does not finish: measured at CHECK_TIMEOUT=1200 it was still
+# going at twenty minutes of CPU, so the check never returns a verdict at all. The
+# case is carried on its picture and its header note until the runout fallback
+# lands; the geometry it is really about is measured there, not here.
+#
+# It costs the suite one CHECK_TIMEOUT — three minutes by default — on every full
+# run. That is the price of keeping a known-bad corner in the suite rather than
+# in a comment, and CHECK_TIMEOUT can be lowered for a quick pass.
+case_junction_needle        small  sandwich  TIMEOUT
+
 # Brush selection is not built, so the tool rounds the whole chain instead of the
 # half the brush picks out, and the residual is the half that should not be
 # there. Only the "tool" check sees it: the extra bead is still within size of

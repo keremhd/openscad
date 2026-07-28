@@ -25,6 +25,13 @@ check.sh   one case (or one variant, or one check) -> PASS/FAIL
 run_all.sh everything, compared against expectations.txt
 ```
 
+[`junction-cases.md`](junction-cases.md) is where the corner configurations the
+operator had never been pointed at were written down before they were built —
+vertices where creases of both signs meet, junctions whose corner solve is
+refused, a bead that rolls into a face it shares no crease with — and what each
+one turned out to do. Several were expected to come out wrong and two do. The
+point was to find out and write the outcome down, not to wait until they pass.
+
 ## The picture
 
 ```
