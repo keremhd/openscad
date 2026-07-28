@@ -376,32 +376,48 @@ over a swept loft is unchanged.
 cross-section perpendicular to one spine; a trihedral corner needs the actual
 ball (§6.3).
 
-**The disc leaves a knife edge, and that is what breaks the bare tool on CGAL.**
-Worth recording, because it turns the optimisation above from a nicety into the
-fix for a live failure. These builtins emit a *tool solid* — the sliver you
-subtract, not the finished shape — and `round-tool-tests.scad` renders that
-sliver on its own so a regression in it is visible rather than hidden under the
-model. With a full disc, the ball surface meets the wedge's flat faces
-**tangentially**: two surfaces converging at zero dihedral, so the triangles
-along the tangency line get arbitrarily thin. CGAL quantises coordinates when
-converting to a Nef polyhedron and collapses them, which is the assertion behind
-the disabled `render-cgal_round-tool-tests` / `render-csg-cgal_round-tool-tests`.
-Manifold does not quantise and is unaffected.
+**Why the bare tool cannot be quantised, and why `eps` does not answer it.**
+Worth recording, because the obvious response — "push it past by an `eps` like
+the pentagon does" — is already the implementation, at both of the places that
+need it, and the failure is downstream of that.
 
-*Applying* the tool is fine on both backends, and the mechanism is worth naming:
-in the bare tool the flat face **terminates** at the tangency line, giving a
-knife edge; in the applied solid that face continues past the tangency at full
-width, so what survives is a G1 seam with no sliver geometry beyond it. Manifold
-performs the boolean and CGAL is handed a mesh with no near-degenerate triangles.
+These builtins emit a *tool solid*: the sliver you subtract, not the finished
+shape. `round-tool-tests.scad` renders that sliver on its own so a regression in
+it is visible rather than hidden under the model, which is why only the bare form
+is red. **It is not a knife edge.** The pentagon's `TA'→TA` edge runs along `nA`,
+perpendicular to wall A, while the disc's arc is tangent to wall A at `TA` — they
+meet at 90°, and `eps` is exactly what buys that. What is left is a **ribbon of
+width `eps`** along the whole tangency line, and at a corner cell a sphere
+crossing the cell's wall face (set at `eps/2`) in a circle of radius `√(r·eps)`
+at an incidence of `√(eps/r)`. At `eps = 1e-3·r` that ribbon is 2 µm on a 2 mm
+fillet. CGAL quantises coordinates onto an absolute grid when converting to a Nef
+polyhedron, so these vanish regardless of how cleanly they cross — the M8 note is
+precise in saying *triangles too small*, and it is a size problem, not an angle
+one. Manifold does not quantise and is unaffected. *Applying* the tool is fine on
+both backends: the boolean consumes the ribbon and CGAL is handed the finished
+solid, where the flat face runs past the tangency at full width.
 
-The circular segment removes the knife edge by construction — the chord cuts
-*across* the tangency instead of running tangent into it. It was written at M7
-and backed out for the opposite coincidence (the chord lands exactly on the
-wedge's own outer face, so `W − U` puts two coincident surfaces together and the
-closed-ring cases stop being dilatable); M8 named itself as the place to reopen
-it and did not. **Both problems are the same problem** — surfaces resting on each
-other instead of crossing — and the three `eps` brackets M8 already needed are
-the precedent for solving it. This is an open thread, not a closed decision.
+**`eps` is a bracket, not a knob**, which is why enlarging it is not the fix:
+
+- The corner cell's margin must be strictly *less* than the edge cells' `eps`, or
+  its wall face lands in their plane and the coincidence returns inside the tool.
+  It is the midpoint of a two-sided bound, not a free parameter.
+- `eps` is how far the tool overshoots the model's wall, so growing it is real
+  error in the delivered cut and hands the caller's boolean a deeper sliver.
+- Decisively: **the margin that would be safe is not a constant.** The hull
+  between two stations overhangs each station's plane by an amount set by how the
+  spine turns — 0.3 mm on the boss base at `$fn = 48`. M7 measured this by
+  raising the chord margin to 2 % of `r`, twenty times the wall `eps`: it rescued
+  the hole mouth and never rescued the boss base at any margin tried.
+
+The remaining candidate is therefore to reduce the *amount* of grazing contact
+rather than widen the separation — the circular segment, which replaces the
+tangent face with a chord that crosses. **But note what it does not reach.** The
+segment removes the ribbon along the edges; the corner ball is a sphere tangent
+to three walls either way, so the `√(r·eps)` cap survives it. M8 recorded the
+segment as the fix for the corner failure; that attribution is plausible and
+**untested**, and testing it is the first step of reopening the question, not a
+detail of carrying it out.
 
 ### 6.2 W — the wedge, with pentagon cross-section
 
