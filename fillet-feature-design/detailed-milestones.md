@@ -414,6 +414,52 @@ dump and the regression images instead — see `test-design.md` §2.3.
 - **Acceptance:** hole mouth == `annulus_prism − torus` sanity (§1) in the M1
   harness and as regression.
 
+**Status: done.** `fillet::detail` gains `roundSections` (the wedge pentagon and
+the canal section at each station) and `buildRoundSolid` (hull consecutive pairs
+of each, subtract, union the chains); `spineFrames` gains a `concave` flag.
+`buildFilletTool` returns that solid for `fillet_tool`/`round_tool`, with the arc
+tessellation taken from the discretizer at radius `r`. The setback is no longer a
+parameter for these tools: it is `r·tan(φ/2)` per station, so it follows the
+local wall angle instead of being one number for the chain. Verified:
+
+- the §1 sanity case is green — as a `fillet-tests/` case, as one of the two new
+  `.scad` regressions, and as a Catch2 comparison against `annulus_prism − torus`.
+- all four small `ref` variants in `fillet-tests/` pass every check, and so do
+  both radii of the boss base, whose fillet is twice the radius of its boss.
+- unit tests pin the inner corner, one cube edge, the hole mouth and that boss
+  base against hand-written references, plus a probe at a cube corner (below).
+
+**Three deviations from the plan.**
+
+1. *The tangency frame has a sign.* `spineFrames` was written for a concave
+   crease, where both outward normals point into the empty quadrant; at a convex
+   one the ball sits inside the solid and the centre offset and both tangency
+   offsets flip. Nothing caught it at M4 because the only reader was the debug
+   overlay.
+2. *The section plane is spanned by the two wall normals, not perpendicular to
+   the spine.* §6.1 treats these as the same thing. They are, on a straight edge;
+   around a bend only the first still contains `C`, `TA` and `TB` by
+   construction. The boss base is the case that fails on the other choice.
+3. *`W − U` is per chain.* Subtracting every chain's canal from every chain's
+   wedge lets the ball rolling along one crease hollow out the bead of a crease
+   it meets — a cube came out with a lump on all eight corners. Within a chain
+   the subtraction still has to span the whole wedge (a cell's ball reaches into
+   the next cell's wedge at a bend); between chains it must not. What belongs at
+   a meeting point is the corner cell of M8.
+
+**The circular-segment optimization was written and backed out.** It is correct
+and it is smaller (2366 → 2087 vertices on the hole mouth), but the segment's
+chord is the wedge's own outer face, so `W − U` puts two exactly coincident
+surfaces against each other along the whole tool and both closed-ring cases stop
+being dilatable by CGAL. Pushing the chord past by an `eps`, the way the pentagon
+does at the walls, rescues the hole mouth at twenty times the wall `eps` and
+never rescues the boss base — and the safe depth is not a constant anyway, since
+the hull between two stations overhangs each station's chord plane by an amount
+that depends on how the spine turns. The full disc covers that for free: the
+major segment it carries is the rest of the ball. Worth reopening at M8, where
+junction spheres meet the same faces. See
+[`log-2026-07-28-m7.md`](log-2026-07-28-m7.md).
+
 ### M8 — Junction cells, degree 3
 
 - Corner ball `P` (3×3 solve), dual spine **and** wedge truncation, corner cell
