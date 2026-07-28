@@ -184,31 +184,43 @@ green, and the property it holds is easy to lose.
 Every junction case so far is polyhedral, and every closed chain so far has
 constant curvature. Both of those are the easy half.
 
-### `case_pipe_tee_fillet`
+### `case_pipe_tee_fillet` — **BUILT**
 
-**PREDICTED**, and the most valuable entry here — it is the shape people actually
-fillet.
+The suite's first curved crease. A branch pipe stubbed into a run pipe: the seam
+is a closed space curve whose dihedral varies continuously along it, so every
+station asks the frame, the setback and the seated ball a different question.
+
+**Clean at `r = 2` and `r = 4`**, no expectation line. One closed chain of 48
+segments, no station refused, and the bead covers the whole curve — the seam
+spans `z 23..37` and the tool measures `z 21..39` and `z 19..41`, seam plus
+radius at both ends.
+
+The correction worth keeping: a branch that *crosses* the run leaves two separate
+seam loops, which is two easy cases rather than one hard one — hence the stub.
+And there is no saddle in this shape, contrary to what the first draft of this
+file claimed. The saddle needs the case below.
+
+### `case_pipe_tee_equal` — the saddle
+
+**PREDICTED.** Give the branch the *same* radius as the run and the two seam
+loops stop being separate: they cross each other at two points, on the plane of
+the two axes. Those crossings are junctions of valence four **on a curved
+crease** — the only kind the suite has no case for, since every junction it owns
+is a polyhedral vertex where straight spines meet.
 
 ```openscad
 module case_model() {
-  cylinder(r = 12, h = 60, $fn = 48);
-  translate([0, 0, 30]) rotate([90, 0, 0]) cylinder(r = 7, h = 40, $fn = 32);
+  cylinder(r = 10, h = 60, $fn = 48);
+  translate([0, 0, 30]) rotate([-90, 0, 0]) cylinder(r = 10, h = 30, $fn = 48);
 }
 ```
 
-The seam between two cylinders is a curve whose dihedral **varies continuously**
-along it, from near 90° at the flanks to nearly 180° at the crown, and the two
-branches of the seam meet at a **saddle** at the crotch on each side. Everything
-the builder does per station — the frame, the setback, the seated ball — is
-exercised at a different angle at every station, and the saddle is a junction
-that is not a polyhedral vertex.
-
-- variants: `none` at `size = 2` and `size = 4`. The setback near the crown grows
-  without bound as the dihedral opens, so the larger size is where the off-face
-  test should start firing along part of one chain and not the rest — which is
-  also the first case where refusing a **whole chain** may be too blunt.
-- slice: a `["front", 0]` through both axes, plus a `["stack", ...]` climbing
-  past the seam.
+- **watch for:** whether the crossings are found as junctions at all — chain
+  building walks a crease until it meets another, and two seams meeting at a
+  tangential crossing is the case where "meets" is hardest to decide.
+- the equal radii make the crossing exactly tangential, which is the degenerate
+  end of it. A branch at 9 against a run at 10 crosses transversally and is the
+  easier variant; build both if the equal one turns out to be a knife edge.
 
 ### `case_rib_into_boss`
 
