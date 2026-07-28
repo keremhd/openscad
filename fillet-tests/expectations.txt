@@ -12,16 +12,11 @@
 # a permanent contract must never be written as one, or someone will eventually
 # delete it believing they fixed something.
 #
-# The rounded tools are red on purpose: the operator builds the wedge but not
-# the rolling ball, so fillet_tool/round_tool still emit nothing. That means
-# `emits` fails, `tool` fails (the residual is the whole reference), and
-# `sandwich` passes trivially because the applied result is just the model. When
-# a milestone lands, the lines it turns green are what you delete from here.
-#
-# chamfer_tool and bevel_tool need only the wedge and are green on every check
-# except `drops`. They are listed as PASS rather than left out only because they
-# have to outrank the catch-alls; anything genuinely unlisted is expected to pass
-# too.
+# All four tools now build real geometry, and every two-face case — flat and
+# ring, concave and convex — matches its hand reference. What is left below is
+# three specific gaps and nothing else, so the catch-all that used to say "the
+# rounded tools emit nothing" is gone rather than narrowed: an unlisted check is
+# expected to pass, and that is now the common case rather than the exception.
 
 selftest_equal          *  *         PASS
 selftest_wrongradius    *  tool      FAIL   # the point of the self-test
@@ -49,21 +44,13 @@ selftest_wrongradius    *  *         PASS
 case_junction3_pocket   *  sandwich  FAIL
 case_junction4_pocket   *  sandwich  FAIL
 
+# Brush selection is not built, so the tool rounds the whole chain instead of the
+# half the brush picks out, and the residual is the half that should not be
+# there. Only the "tool" check sees it: the extra bead is still within size of
+# the model, which is exactly the coarseness "sandwich" is documented to have.
+case_brush_halfchain    *  tool      FAIL
+
 # Nothing validates the size against the feature yet, so no tool is ever refused
-# and no warning is ever emitted: every "drops" check is red. The two wedge tools
-# get there by building a tool they should have refused; the rounded ones by
-# emitting nothing and staying silent about it, which "drops" deliberately does
-# not accept as a refusal.
-case_inner_corner_chamfer  large  drops  FAIL
-case_outer_edge_bevel      large  drops  FAIL
-
-# The wedge tools are done and green on everything else; listed ahead of the
-# catch-alls so the "emits nothing" rule below cannot claim them.
-case_inner_corner_chamfer  *  *         PASS
-case_outer_edge_bevel      *  *         PASS
-
-# The rounded tools emit nothing yet.
-*                       *  tool      FAIL
-*                       *  emits     FAIL
+# and no warning is ever emitted: every "drops" check is red. Every tool gets
+# there the same way now — by building a tool it should have refused.
 *                       *  drops     FAIL
-*                       *  sandwich  PASS

@@ -15,7 +15,13 @@
 include <../lib/_ref.scad>;
 include <../lib/_harness.scad>;
 
-$fn = 48;   // arcs only need to beat the 2% tolerance; Minkowski cost is superlinear
+// Arcs only need to beat the 2% tolerance, and the checks pay dearly for every
+// facet past that: the dilation decomposes into convex parts through CGAL, which
+// is where nearly all of a check's time goes and which grows far faster than the
+// facet count — 132 parts at $fn = 16, 294 at 24, 1162 at 48. At 24 the chord
+// error is 0.043 on r = 5 against a 0.10 tolerance, and the check runs in a
+// fifth of the time.
+$fn = 24;
 
 W = 80;    // plate width
 T = 30;    // plate thickness, top face at z = T

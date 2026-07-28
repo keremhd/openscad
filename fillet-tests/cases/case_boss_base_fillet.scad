@@ -8,7 +8,8 @@
 include <../lib/_ref.scad>;
 include <../lib/_harness.scad>;
 
-$fn = 48;   // arcs only need to beat the 2% tolerance; Minkowski cost is superlinear
+$fn = 24;   // see case_hole_mouth_round: the dilation's cost is all in the
+            // convex decomposition, which grows much faster than the facet count
 
 W  = 80;    // plate width
 T  = 15;    // plate thickness, top face at z = 0

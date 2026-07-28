@@ -5,7 +5,7 @@
 include <../lib/_ref.scad>;
 include <../lib/_harness.scad>;
 
-$fn = 64;
+$fn = 24;   // fillet arcs; see case_hole_mouth_round on why this is not 64
 
 R  = 30;
 HC = 60;

@@ -14,7 +14,7 @@
 include <../lib/_ref.scad>;
 include <../lib/_harness.scad>;
 
-$fn = 64;   // fillet arcs; the pocket's face count is set on the cone itself
+$fn = 24;   // fillet arcs; see case_hole_mouth_round on why this is not 64
 
 R   = 30;   // cone base radius
 HC  = 60;   // cone height
