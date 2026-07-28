@@ -356,6 +356,55 @@ repeated runs of the case suite.
 - **Acceptance:** new tests run under CTest; baselines committed; later geometry
   milestones only add a `.scad`.
 
+**Status: done.** Two `.scad` cases under `tests/data/scad/3D/features/` —
+`chamfer-tool-tests.scad` (inner corner, plus the boss-base ring as a closed
+chain) and `bevel-tool-tests.scad` (all twelve cube edges, plus a cylinder's two
+rims) — each showing the tool alone beside the applied result, so a change in the
+tool itself is visible rather than hidden under the model. The glob picks them up
+as 16 test instances with no CMake edit beyond the backend question below.
+`src/geometry/fillet/FilletCompare_test.cc` carries the containment comparison,
+and `expectations.txt` is unchanged: the wedge cases it covers were already green
+there, and the rounded tools are still red for the same reason.
+
+**The §1 sanity case is not among them.** It is a `round_tool` hole mouth, and
+the rounded tools emit nothing until M7 — so M6 promotes the chamfer and bevel
+cases only, and M7 adds the sanity case as one more `.scad`, which is the point
+of establishing the pattern here.
+
+**Two things the plan did not anticipate:**
+
+1. *The backend question resolves differently than §3 of the test design
+   expected.* The "fillet tools require the Manifold backend" warning is behind
+   `#ifdef ENABLE_MANIFOLD`, a **compile-time** guard — `--backend=cgal` on a
+   Manifold-enabled build still builds the tool through Manifold and renders it.
+   Preview and throwntogether come out byte-identical on both backends, and so
+   does the chamfer render, which therefore shares one baseline. What does differ
+   is the **bevel** render: the tool's eps overshoot past each wall leaves
+   slivers that Manifold accepts and CGAL's Nef conversion does not, so
+   `render-cgal` discards 14 facets and shades the cut faces as back-facing. That
+   case goes in `RENDER_DIFFERENT_EXPECTATIONS` — the same list, and the same
+   reason, as `issue1137.scad` — rather than being hidden from one backend, so a
+   change in either direction still shows up. The `disable_tests_safe` call the
+   plan expected is instead in the `NOT ENABLE_MANIFOLD` block, where the
+   compile-time fallback genuinely does make the images wrong.
+2. *The containment comparison is much cheaper in C++ than in the shell.* The
+   shell harness dilates with `minkowski()`, which has no Manifold path and falls
+   back to CGAL's Nef kernel — seconds per check, and the reason ring cases run
+   at `$fn = 48`. Written against Manifold directly, the dilation is one convex
+   hull per triangle (a triangle plus a cube is the hull of its 24 offset
+   corners, so this is exact, not an approximation) and the four cases together
+   run in about two seconds. Included is the calibration the shell suite carries
+   as `selftest_*`: two tessellations of one cylinder agree within the chord
+   error and not within a tenth of it, a solid never agrees with an empty one,
+   and a wedge 20 % too deep is caught.
+
+Setting the layer up was also the moment to close the unit-test gaps left since
+M2: the `$fa`/`$fn`-derived threshold (the number, and the seam rejection it buys
+at 8/16/64 facets), the φ→180 guard on a half-degree slit, non-positive and empty
+input, and the debug overlays by colour class. Everything in the internal header
+now has a test; the node factory and `buildFilletTool` are covered by the `.csg`
+dump and the regression images instead — see `test-design.md` §2.3.
+
 ### M7 — `fillet_tool` / `round_tool`
 
 - Add U as **disc** hulls first (§6.1 fastest route), `W − U`. Two-face edges

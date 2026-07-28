@@ -11,11 +11,18 @@
 
 #include "geometry/fillet/FilletBuilder_internal.h"
 
+#include <cmath>
 #include <cstddef>
+#include <functional>
 #include <map>
+#include <optional>
+#include <string>
 #include <vector>
 
 #include <manifold/manifold.h>
+
+#include "core/CurveDiscretizer.h"
+#include "geometry/PolySet.h"
 
 using namespace fillet::detail;
 using Catch::Approx;
@@ -37,6 +44,23 @@ manifold::Manifold box(double sx, double sy, double sz)
 {
   return manifold::Manifold::Cube(manifold::vec3(sx, sy, sz), false);
 }
+
+// A CurveDiscretizer standing in for a given set of tessellation variables, the
+// way the node's factory builds one from the call's $fn/$fa/$fs.
+CurveDiscretizer discretizer(double fn, double fa = 12.0, double fs = 2.0)
+{
+  return CurveDiscretizer([=](const char *name) -> std::optional<double> {
+    const std::string n = name;
+    if (n == "fn") return fn;
+    if (n == "fa") return fa;
+    if (n == "fs") return fs;
+    return std::nullopt;
+  });
+}
+
+// The crease threshold the operator derives from the tessellation parameters:
+// half again the coarsest seam OpenSCAD would generate at those settings.
+double derivedThreshold(const CurveDiscretizer& d) { return 1.5 * d.getMaxSeamAngle(); }
 
 }  // namespace
 
@@ -342,6 +366,199 @@ TEST_CASE("cylinder rim: a closed chain wraps into a ring of wedge cells")
   // the polygonal approximation makes this a few percent light.
   const double nominal = 2.0 * 0.5 * t * t * 2.0 * M_PI * r;
   CHECK(wedge.Volume() == Approx(nominal).epsilon(0.05));
+}
+
+TEST_CASE("threshold: derived from the tessellation parameters, not hardcoded")
+{
+  // $fa bounds any seam OpenSCAD generates on its own, and $fn imposes 360/$fn
+  // when it is set, so the coarsest seam in scope is the larger of the two. The
+  // threshold is half again that, which is what keeps a seam from being mistaken
+  // for a crease while leaving real features clear of it.
+  CHECK(discretizer(0).getMaxSeamAngle() == Approx(12.0));    // $fa default
+  CHECK(discretizer(16).getMaxSeamAngle() == Approx(22.5));   // $fn coarser than $fa
+  CHECK(discretizer(64).getMaxSeamAngle() == Approx(12.0));   // $fn finer; $fa wins
+  CHECK(discretizer(0, 30.0).getMaxSeamAngle() == Approx(30.0));
+  CHECK(derivedThreshold(discretizer(16)) == Approx(33.75));
+}
+
+TEST_CASE("threshold: cylinder side seams are rejected at every tessellation")
+{
+  // The same claim as the stability case above, but through the threshold the
+  // operator actually uses rather than a hand-picked 60 degrees. A cylinder's
+  // side seams are exactly 360/$fn, which the derived threshold clears by half
+  // again at every resolution, while the 90-degree rims never come close to it.
+  // This is the case a hardcoded constant gets wrong: at $fn=8 the seams are 45
+  // degrees and any fixed threshold below 67.5 would fillet them.
+  for (const int fn : {8, 16, 64}) {
+    CAPTURE(fn);
+    const auto cyl = manifold::Manifold::Cylinder(1.0, 1.0, 1.0, fn, false);
+    const ClassCounts c = classify(cyl, derivedThreshold(discretizer(fn)));
+
+    CHECK(c.feature == static_cast<size_t>(2 * fn));
+    CHECK(c.featureConvex == static_cast<size_t>(2 * fn));
+  }
+}
+
+TEST_CASE("wedge: a non-positive setback builds nothing")
+{
+  // The size reaches here straight from the script, so zero and negative are
+  // ordinary user input, not internal errors. Both must come back empty rather
+  // than as an inside-out or zero-volume solid that a later boolean would carry.
+  const auto model = box(10.0, 10.0, 1.0) + box(1.0, 10.0, 10.0);
+  const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/true));
+  REQUIRE(chains.size() == 1);
+
+  CHECK(buildWedgeSolid(mm, adj, chains, 0.0, /*concave=*/true).IsEmpty());
+  CHECK(buildWedgeSolid(mm, adj, chains, -1.0, /*concave=*/true).IsEmpty());
+}
+
+TEST_CASE("wedge: an empty chain list builds nothing")
+{
+  // What every unselected model reaches: a sphere-like solid with no crease
+  // anywhere, or a tool whose sign matches none of the edges present.
+  const auto cube = box(10.0, 10.0, 10.0);
+  const MergedMesh mm = mergeMesh(cube.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+
+  // A cube has no concave edge at all, so the concave tool selects nothing.
+  const auto edges = selectedEdges(mm, adj, 45.0, /*wantConcave=*/true);
+  CHECK(edges.empty());
+  const auto chains = buildChains(mm, edges);
+  CHECK(chains.empty());
+  CHECK(buildWedgeSolid(mm, adj, chains, 1.0, /*concave=*/true).IsEmpty());
+}
+
+TEST_CASE("spine: a slit too narrow to roll a ball into is skipped, not solved")
+{
+  // A V-groove cut into a block: its two walls meet at the apex line with a
+  // dihedral of `openingDeg`, so the outward normals are 180 - openingDeg apart.
+  // As that approaches 180 the bisector degenerates and the ball centre
+  // d = r/cos(phi/2) runs to infinity — coordinates Manifold would either throw
+  // on or spend unbounded memory hulling. The frame has to come back invalid
+  // instead, and the wedge with it.
+  auto slitBlock = [](double openingDeg) {
+    const double halfWidth = 6.0 * std::tan(openingDeg * 0.5 * M_PI / 180.0);
+    std::vector<manifold::vec3> prism;
+    for (const double y : {-1.0, 11.0}) {
+      prism.emplace_back(5.0, y, 5.0);                 // apex line
+      prism.emplace_back(5.0 - halfWidth, y, 11.0);    // mouth, above the block
+      prism.emplace_back(5.0 + halfWidth, y, 11.0);
+    }
+    return box(10.0, 10.0, 10.0) - manifold::Manifold::Hull(prism);
+  };
+
+  auto framesAtApex = [](const manifold::Manifold& model, double r) {
+    const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+    const auto adj = buildEdgeAdjacency(mm.tris);
+    const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/true));
+    std::vector<SpineFrame> all;
+    for (const auto& chain : chains) {
+      const auto f = spineFrames(mm, adj, chain, r);
+      all.insert(all.end(), f.begin(), f.end());
+    }
+    return all;
+  };
+
+  SECTION("a 60-degree groove is ordinary geometry")
+  {
+    const auto frames = framesAtApex(slitBlock(60.0), 1.0);
+    REQUIRE_FALSE(frames.empty());
+    int valid = 0;
+    for (const auto& f : frames) {
+      if (!f.valid) continue;
+      ++valid;
+      CHECK(f.phiDeg == Approx(120.0).margin(0.5));
+      // d = r/cos(phi/2) = 2r at 120 degrees, and every coordinate finite.
+      CHECK((f.C - f.v).norm() == Approx(2.0).margin(0.05));
+      CHECK(std::isfinite(f.C.x()));
+    }
+    CHECK(valid >= 2);
+  }
+
+  SECTION("a half-degree slit is refused")
+  {
+    const auto frames = framesAtApex(slitBlock(0.5), 1.0);
+    REQUIRE_FALSE(frames.empty());
+    for (const auto& f : frames) {
+      CHECK_FALSE(f.valid);
+      // Refused for the reason claimed — the walls really are 179.5 degrees
+      // apart — rather than for some earlier failure that happens to look alike.
+      CHECK(f.phiDeg == Approx(179.5).margin(0.5));
+    }
+  }
+}
+
+TEST_CASE("debug markers: one colour class per kind of edge present")
+{
+  // The overlay's whole job is to say which class an edge landed in, so the
+  // assertion that matters is how many distinct colours come out — a marker in
+  // the wrong colour is a classification bug wearing a disguise, and the count
+  // of colours is what an image would be read for anyway.
+  const double threshold = 45.0;
+
+  SECTION("cube: convex only")
+  {
+    const auto cube = box(10.0, 10.0, 10.0);
+    const MergedMesh mm = mergeMesh(cube.GetMeshGL64());
+    const auto ps = debugEdgeMarkers(mm, buildEdgeAdjacency(mm.tris), threshold);
+    REQUIRE(ps != nullptr);
+    // Only the twelve convex edges are drawn: the six face diagonals are
+    // coplanar and skipped, so there is no seam colour and no concave colour.
+    CHECK(ps->colors.size() == 1);
+  }
+
+  SECTION("L-shape: concave and convex")
+  {
+    const auto ell = box(20.0, 6.0, 10.0) + box(6.0, 20.0, 10.0);
+    const MergedMesh mm = mergeMesh(ell.GetMeshGL64());
+    const auto ps = debugEdgeMarkers(mm, buildEdgeAdjacency(mm.tris), threshold);
+    REQUIRE(ps != nullptr);
+    CHECK(ps->colors.size() == 2);
+  }
+
+  SECTION("cylinder: convex rims plus rejected side seams")
+  {
+    const auto cyl = manifold::Manifold::Cylinder(10.0, 6.0, 6.0, 16, false);
+    const MergedMesh mm = mergeMesh(cyl.GetMeshGL64());
+    const auto ps = debugEdgeMarkers(mm, buildEdgeAdjacency(mm.tris), threshold);
+    REQUIRE(ps != nullptr);
+    // 22.5-degree side seams fall below the threshold and are drawn as seams,
+    // the rims as convex features — two classes, both present.
+    CHECK(ps->colors.size() == 2);
+  }
+}
+
+TEST_CASE("debug markers: nothing to draw returns nothing")
+{
+  // The caller appends whatever comes back into one PolySet, so "no geometry"
+  // has to be a null return rather than an empty solid it would have to detect.
+  const MergedMesh empty;
+  CHECK(debugEdgeMarkers(empty, {}, 45.0) == nullptr);
+  CHECK(debugSpineMarkers(empty, {}) == nullptr);
+
+  const auto cube = box(10.0, 10.0, 10.0);
+  const MergedMesh mm = mergeMesh(cube.GetMeshGL64());
+  CHECK(debugSpineMarkers(mm, {}) == nullptr);
+}
+
+TEST_CASE("debug markers: the spine overlay draws every part of the frame")
+{
+  // Ball centre, both tangency points and the legs between them are four
+  // separate colours; if one is missing the overlay looks plausible and hides
+  // exactly the quantity being debugged.
+  const double r = 3.0;
+  const auto model = box(10.0, 10.0, 1.0) + box(1.0, 10.0, 10.0);
+  const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/true));
+  REQUIRE(chains.size() == 1);
+
+  const auto frames = spineFrames(mm, adj, chains[0], r);
+  const auto ps = debugSpineMarkers(mm, frames);
+  REQUIRE(ps != nullptr);
+  CHECK(ps->colors.size() == 4);
 }
 
 #endif  // ENABLE_MANIFOLD

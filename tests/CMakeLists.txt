@@ -621,6 +621,15 @@ list(APPEND RENDER_DIFFERENT_EXPECTATIONS
 
   # Manifold can represent the very thin slice
   ${TEST_SCAD_DIR}/3D/issues/issue1165.scad
+
+  # The fillet tools offset the tool a hair past each wall so it crosses the
+  # surface transversally instead of lying on it. Manifold takes those slivers;
+  # converting them to a Nef polyhedron trips a CGAL assertion and discards
+  # facets, so the CGAL render shows the beveled faces inverted. The tool itself
+  # is built by the same Manifold code either way — only the CGAL backend's
+  # rendering of it differs, and pinning that with its own baseline keeps the
+  # difference visible instead of hiding the case from one backend.
+  ${TEST_SCAD_DIR}/3D/features/bevel-tool-tests.scad
 )
 if(EXAMPLES_DIR)
   list(APPEND RENDER_DIFFERENT_EXPECTATIONS
@@ -1549,6 +1558,16 @@ if(NOT ENABLE_MANIFOLD)
     openscad-colorscheme-metallic-render_CSG
     lazyunion-render_lazyunion-difference-for
     render-manifold_roof
+
+    # The fillet tools are built on Manifold and warn-and-emit-nothing without
+    # it, so their baselines show an untouched model in such a build. The .csg
+    # dump still runs: the nodes parse and serialise regardless of backend.
+    render-cgal_chamfer-tool-tests
+    preview-cgal_chamfer-tool-tests
+    throwntogether-cgal_chamfer-tool-tests
+    render-cgal_bevel-tool-tests
+    preview-cgal_bevel-tool-tests
+    throwntogether-cgal_bevel-tool-tests
   )
 endif()
 

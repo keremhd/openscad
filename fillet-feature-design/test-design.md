@@ -137,6 +137,31 @@ Note the overlap is deliberate, not redundant. The valence-4 and pyramid cases
 appear in **both** layers: the unit test pins the solved vertex coordinates, the
 regression test proves the solid built from them is the right solid.
 
+### 2.3 Coverage as of M6
+
+Everything in `FilletBuilder_internal.h` has a unit test: merging and adjacency,
+classification and its stability across `$fn`, the threshold derived from
+`$fa`/`$fn` (both the number and the behaviour it buys — a cylinder's side seams
+stay rejected at 8, 16 and 64 facets, where any fixed constant gets one of them
+wrong), chain walking open and closed, the tangency frame against the worked
+example, the wedge section and solid, and the debug overlays by colour class.
+The guards have their own cases: a non-positive setback, an empty chain list, a
+φ→180 slit too narrow to roll a ball into (refused, and shown to be
+refused for that reason rather than an earlier failure that looks the same), and
+the null returns the debug builders owe their caller.
+
+Two things are deliberately **not** unit-tested, because a test there would
+duplicate a cheaper one:
+
+- **The node factory** (`builtin_*`, parameter parsing, `toString`). The `.csg`
+  dump baseline is the assertion — it shows all four names, the resolved
+  tessellation variables and `r`/`t`, and it fails on a parse or spelling change
+  without a second copy of the expected string in C++.
+- **`buildFilletTool` itself.** It needs a `FilletNode`, which needs a
+  `ModuleInstantiation` and a location, to exercise wiring the regression images
+  already cover end to end. Its logic — type to sign, debug gating, empty target
+  — is three branches over functions that are each tested directly.
+
 ---
 
 ## 3. Backend constraint
@@ -163,6 +188,28 @@ Preference is (2) for the geometry cases and (1) for a single dedicated
 
 Either way this is a required M6 decision, not an implementation detail — the
 first fillet file added to `3D/features/` triggers it.
+
+**Settled at M6 (2026-07-28), and the premise above was wrong.** That warning is
+behind `#ifdef ENABLE_MANIFOLD` — a **compile-time** guard, not a backend check.
+On a Manifold-enabled build, `--backend=cgal` still builds the tool through
+Manifold and renders it, so there is no degraded CGAL result to commit and
+nothing for a dedicated fallback file to pin. Measured on the two M6 cases:
+preview and throwntogether are byte-identical on both backends, and so is the
+chamfer render, which shares one baseline.
+
+The one real divergence is narrower and was not predicted: the **bevel** render.
+The tool overshoots each wall by `eps` so it crosses the surface transversally
+(§6.2 of the plan), and those slivers survive Manifold but not conversion to a
+Nef polyhedron — CGAL discards 14 facets and shades the cut faces as
+back-facing. That is precisely the "Manifold can construct geometry which isn't
+representable in CGAL mode" case already in `RENDER_DIFFERENT_EXPECTATIONS`, so
+the bevel case joins that list: option (1), for one case, on evidence rather than
+by policy. Excluding it would have hidden a real difference behind a passing
+suite.
+
+Option (2) is still used, but for the case it was actually meant for: in the
+`NOT ENABLE_MANIFOLD` block, where the compile-time fallback does make every
+image wrong, the six image tests are disabled and the `.csg` dump keeps running.
 
 ---
 
@@ -240,6 +287,20 @@ Manifold directly — same shape as the Manifold-vs-CGAL equivalence case in
 `linear_extrude_test.cc` — rather than ported to CTest as a shell script. That
 would also sidestep the CGAL Minkowski cost above. `fillet-tests/` stays
 afterwards as the place a case is prototyped before it has a baseline.
+
+**Done at M6.** `src/geometry/fillet/FilletCompare_test.cc`. Dilation is one
+convex hull per triangle — a triangle plus a cube is the hull of its 24 offset
+corners, so the Minkowski sum is exact rather than approximated — and the four
+cases run in about two seconds against the shell suite's seconds *per check*.
+The calibration the shell keeps as `selftest_equal` / `selftest_wrongradius`
+comes along: coarse and fine tessellations of one cylinder agree within the
+chord error and not within a tenth of it, a solid never agrees with an empty
+one, and a wedge 20 % too deep is caught.
+
+What did **not** move, and why the shell suite is not now redundant: the picture.
+`render.sh`'s six columns are how a wrong corner gets diagnosed, and a Catch2
+failure names the case without showing it. The two layers answer different
+questions — *whether* here, *what* there.
 
 ---
 

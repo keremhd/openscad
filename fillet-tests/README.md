@@ -5,10 +5,13 @@ two ways to use it: a **picture** you read, and a **verdict** you can run in a
 loop. Both are driven by the same case files, so a case is written once and gets
 both.
 
-This lives outside CTest for now. Milestone M6 promotes the cases that are green
-by then into `tests/data/scad/3D/features/` with committed baseline PNGs; the
-directory stays afterwards as the place where a new feature is prototyped before
-it has a baseline.
+This lives outside CTest. The cases that are green have been promoted into
+`tests/data/scad/3D/features/` with committed baseline PNGs — the chamfer and
+bevel ones so far — and the containment comparison below also exists as a Catch2
+test (`src/geometry/fillet/FilletCompare_test.cc`) that runs under `ctest`. This
+directory stays as the place where a new case is prototyped before it has a
+baseline, and as the only place that draws the picture: a promoted case tells you
+*whether* it is right, the six columns here tell you *what* is wrong.
 
 ## Layout
 
