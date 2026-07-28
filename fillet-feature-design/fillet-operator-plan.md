@@ -376,6 +376,33 @@ over a swept loft is unchanged.
 cross-section perpendicular to one spine; a trihedral corner needs the actual
 ball (§6.3).
 
+**The disc leaves a knife edge, and that is what breaks the bare tool on CGAL.**
+Worth recording, because it turns the optimisation above from a nicety into the
+fix for a live failure. These builtins emit a *tool solid* — the sliver you
+subtract, not the finished shape — and `round-tool-tests.scad` renders that
+sliver on its own so a regression in it is visible rather than hidden under the
+model. With a full disc, the ball surface meets the wedge's flat faces
+**tangentially**: two surfaces converging at zero dihedral, so the triangles
+along the tangency line get arbitrarily thin. CGAL quantises coordinates when
+converting to a Nef polyhedron and collapses them, which is the assertion behind
+the disabled `render-cgal_round-tool-tests` / `render-csg-cgal_round-tool-tests`.
+Manifold does not quantise and is unaffected.
+
+*Applying* the tool is fine on both backends, and the mechanism is worth naming:
+in the bare tool the flat face **terminates** at the tangency line, giving a
+knife edge; in the applied solid that face continues past the tangency at full
+width, so what survives is a G1 seam with no sliver geometry beyond it. Manifold
+performs the boolean and CGAL is handed a mesh with no near-degenerate triangles.
+
+The circular segment removes the knife edge by construction — the chord cuts
+*across* the tangency instead of running tangent into it. It was written at M7
+and backed out for the opposite coincidence (the chord lands exactly on the
+wedge's own outer face, so `W − U` puts two coincident surfaces together and the
+closed-ring cases stop being dilatable); M8 named itself as the place to reopen
+it and did not. **Both problems are the same problem** — surfaces resting on each
+other instead of crossing — and the three `eps` brackets M8 already needed are
+the precedent for solving it. This is an open thread, not a closed decision.
+
 ### 6.2 W — the wedge, with pentagon cross-section
 
 The naive triangle `(v, TA, TB)` sits exactly coplanar with the model's faces.
@@ -655,6 +682,38 @@ less than the `eps` of §6.2, clamp to the limit silently. Dropping a fillet ove
 
 `fillet-tests/` encodes this decision directly: a case variant declares `kind =
 "drop"`, and the `drops` check requires both an empty tool and the warning.
+
+**The sampled gate compensates for a blind spot it created itself.** The
+implemented check asks its two questions at points, and the exemptions it needs
+are what make the sampling necessary — this is worth stating plainly, because
+read separately each rule looks like independent tuning.
+
+The touching question cannot be asked at the end of an open chain, or within
+`2r` of a junction: a crease stops at the boundary of its own walls, so stepping
+in perpendicular from near a corner leaves through the *neighbouring* crease's
+face — a corner, not an overshoot. On a tetrahedron the base corners are 60°, so
+this is guaranteed, and every cone in the suite was refused until the exemption
+went in. The crowding question is separately exempt between chains that share a
+vertex, because sharing material at a vertex is what a corner cell is.
+
+Apply both to a `$fn = 3` cone. Its slant crease is a straight mesh edge with
+exactly **two** stations, base corner and apex; both are chain ends, both are
+degree-3 junctions, and all three slant creases share the apex. Every station is
+exempt from both questions. Without interior samples that crease is asked
+*nothing at all* — the taper is not something the ends fail to notice, it is
+something nothing is looking at. The interior samples are the only probe that
+reaches back into the excluded stretch, which is why the walk has to scale with
+the size (`r = 1` is caught 27 mm below the tip; `r = 0.5` moves the failure
+above a fixed three samples).
+
+So the rule stands as written — one sample per size along a segment, at least
+three, capped at 32 — but the reason to prefer the exact replacement is stronger
+than "the sampled version is coarse". An exact check (build and test, or a
+distance field on the offset surface) needs **no corner exemption at all**,
+because it is not probing a proxy quantity that misreads at corners; removing
+the exemptions removes the blind spot the sampling exists to patch, and the
+three tuning constants go with them. That is the argument for doing it, and it
+is independent of whether the sampled gate is ever caught being too coarse.
 
 ---
 
