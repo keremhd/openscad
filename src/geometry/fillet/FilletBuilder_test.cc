@@ -190,7 +190,7 @@ TEST_CASE("floor/wall: tangency frame matches the worked example")
   const auto chains = buildChains(mm, edges);
   REQUIRE(chains.size() == 1);
 
-  const auto frames = spineFrames(mm, adj, chains[0], r);
+  const auto frames = spineFrames(mm, adj, chains[0], r, /*concave=*/true);
   REQUIRE(frames.size() >= 2);
 
   int validCount = 0;
@@ -455,7 +455,7 @@ TEST_CASE("spine: a slit too narrow to roll a ball into is skipped, not solved")
     const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/true));
     std::vector<SpineFrame> all;
     for (const auto& chain : chains) {
-      const auto f = spineFrames(mm, adj, chain, r);
+      const auto f = spineFrames(mm, adj, chain, r, /*concave=*/true);
       all.insert(all.end(), f.begin(), f.end());
     }
     return all;
@@ -555,7 +555,7 @@ TEST_CASE("debug markers: the spine overlay draws every part of the frame")
   const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/true));
   REQUIRE(chains.size() == 1);
 
-  const auto frames = spineFrames(mm, adj, chains[0], r);
+  const auto frames = spineFrames(mm, adj, chains[0], r, /*concave=*/true);
   const auto ps = debugSpineMarkers(mm, frames);
   REQUIRE(ps != nullptr);
   CHECK(ps->colors.size() == 4);

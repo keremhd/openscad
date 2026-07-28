@@ -370,9 +370,15 @@ std::vector<StationNormals> chainNormals(const MergedMesh& m,
 
 std::vector<SpineFrame> spineFrames(const MergedMesh& m,
                                     const std::map<EdgeKey, std::vector<int>>& adj,
-                                    const Chain& chain, double r)
+                                    const Chain& chain, double r, bool concave)
 {
   const std::vector<StationNormals> stations = chainNormals(m, adj, chain);
+
+  // Which way the ball sits off the crease. At a concave edge the outward wall
+  // normals both point into the empty quadrant, so the center is along +(nA+nB)
+  // and each tangency point lies back down its own normal; at a convex edge the
+  // ball is buried in the solid and every one of those signs flips.
+  const double dir = concave ? 1.0 : -1.0;
 
   const int n = static_cast<int>(stations.size());
   std::vector<SpineFrame> frames(n);
@@ -398,14 +404,86 @@ std::vector<SpineFrame> spineFrames(const MergedMesh& m,
     }
     bis.normalize();
     const double d = r / std::cos(phi / 2.0);
-    f.C = f.v + d * bis;
-    f.TA = f.C - r * f.nA;
-    f.TB = f.C - r * f.nB;
+    f.C = f.v + dir * d * bis;
+    f.TA = f.C - dir * r * f.nA;
+    f.TB = f.C - dir * r * f.nB;
     f.valid = true;
     frames[i] = f;
   }
   return frames;
 }
+
+namespace {
+
+// The wedge cross-section shared by every tool: the two setback points, then the
+// same corner pushed a hair past each wall so the tool crosses it transversally
+// rather than lying coplanar with it. Each primed point is displaced along its
+// *own* wall normal, which is what gives eps its slack — at a crease the
+// material is the union of two half-spaces, so a point only has to be behind one
+// of them. `dir` is +1 for a concave tool and -1 for a convex one.
+std::array<Vector3d, 5> pentagonSection(const Vector3d& v, const Vector3d& nA, const Vector3d& nB,
+                                        const Vector3d& bis, const Vector3d& TA,
+                                        const Vector3d& TB, double dir, double eps)
+{
+  return {TA, TB, TB - dir * eps * nB, v - dir * eps * bis, TA - dir * eps * nA};
+}
+
+// Consecutive cells meet along a shared section face, so a union of them has
+// inputs that touch on a set of zero measure. Manifold copes, but it leaves one
+// degenerate four-triangle shell behind per such contact: no volume, no effect
+// on any boolean, and a nonsense genus for anything that inspects the result.
+// Keep only the components that enclose material.
+manifold::Manifold dropVolumelessParts(manifold::Manifold solid)
+{
+  std::vector<manifold::Manifold> parts = solid.Decompose();
+  if (parts.size() < 2) return solid;
+
+  const double keepAbove = 1e-9 * std::abs(solid.Volume());
+  std::vector<manifold::Manifold> solidParts;
+  for (auto& part : parts)
+    if (std::abs(part.Volume()) > keepAbove) solidParts.push_back(std::move(part));
+
+  if (solidParts.empty()) return {};
+  if (solidParts.size() == 1) return solidParts.front();
+  if (solidParts.size() == parts.size()) return solid;
+  return manifold::Manifold::BatchBoolean(solidParts, manifold::OpType::Add);
+}
+
+manifold::Manifold unionCells(std::vector<manifold::Manifold>& cells)
+{
+  if (cells.empty()) return {};
+  if (cells.size() == 1) return cells.front();
+  return dropVolumelessParts(manifold::Manifold::BatchBoolean(cells, manifold::OpType::Add));
+}
+
+// Hull each consecutive pair of cross-sections along a chain, appending one cell
+// per spine segment. A closed chain wraps, so its last station also pairs with
+// its first. Degenerate segments (a zero-length spine step, or a section that
+// collapsed) hull to nothing rather than to a bad solid and are dropped.
+template <typename Section, typename PointsOf>
+void appendChainCells(const Chain& chain, const std::vector<Section>& sections,
+                      const PointsOf& pointsOf, std::vector<manifold::Manifold>& cells)
+{
+  const size_t n = sections.size();
+  if (n < 2) return;
+
+  const size_t segments = chain.closed ? n : n - 1;
+  for (size_t i = 0; i < segments; ++i) {
+    const Section& a = sections[i];
+    const Section& b = sections[(i + 1) % n];
+    if (!a.valid || !b.valid) continue;
+
+    std::vector<manifold::vec3> pts;
+    for (const Section *section : {&a, &b})
+      for (const Vector3d& p : pointsOf(*section)) pts.emplace_back(p.x(), p.y(), p.z());
+
+    manifold::Manifold cell = manifold::Manifold::Hull(pts);
+    if (cell.IsEmpty()) continue;
+    cells.push_back(std::move(cell));
+  }
+}
+
+}  // namespace
 
 std::vector<WedgeSection> wedgeSections(const MergedMesh& m,
                                         const std::map<EdgeKey, std::vector<int>>& adj,
@@ -448,11 +526,7 @@ std::vector<WedgeSection> wedgeSections(const MergedMesh& m,
     const Vector3d TB = s.v + dir * t * uB;
 
     WedgeSection w;
-    w.p = {TA,
-           TB,
-           TB - dir * eps * s.nB,
-           s.v - dir * eps * bis,
-           TA - dir * eps * s.nA};
+    w.p = pentagonSection(s.v, s.nA, s.nB, bis, TA, TB, dir, eps);
     w.valid = true;
     out[i] = w;
   }
@@ -466,54 +540,87 @@ manifold::Manifold buildWedgeSolid(const MergedMesh& m,
   if (!(t > 0)) return {};
 
   std::vector<manifold::Manifold> cells;
-  for (const Chain& chain : chains) {
-    const std::vector<WedgeSection> sections = wedgeSections(m, adj, chain, t, concave);
-    const size_t n = sections.size();
-    if (n < 2) continue;
+  for (const Chain& chain : chains)
+    appendChainCells(chain, wedgeSections(m, adj, chain, t, concave),
+                     [](const WedgeSection& s) -> const std::array<Vector3d, 5>& { return s.p; },
+                     cells);
 
-    // One cell per spine segment; a closed chain wraps, so its last station also
-    // pairs with its first.
-    const size_t segments = chain.closed ? n : n - 1;
-    for (size_t i = 0; i < segments; ++i) {
-      const WedgeSection& a = sections[i];
-      const WedgeSection& b = sections[(i + 1) % n];
-      if (!a.valid || !b.valid) continue;
+  return unionCells(cells);
+}
 
-      std::vector<manifold::vec3> pts;
-      pts.reserve(10);
-      for (const auto& section : {a, b})
-        for (const Vector3d& p : section.p) pts.emplace_back(p.x(), p.y(), p.z());
+std::vector<RoundSection> roundSections(const MergedMesh& m,
+                                        const std::map<EdgeKey, std::vector<int>>& adj,
+                                        const Chain& chain, double r, bool concave,
+                                        int arcSegments)
+{
+  const std::vector<SpineFrame> frames = spineFrames(m, adj, chain, r, concave);
 
-      // Degenerate segments (a zero-length spine step, or a section that
-      // collapsed) hull to nothing rather than to a bad solid; drop them.
-      manifold::Manifold cell = manifold::Manifold::Hull(pts);
-      if (cell.IsEmpty()) continue;
-      cells.push_back(std::move(cell));
+  const double eps = std::max(1e-3 * std::abs(r), 1e-9);
+  const double dir = concave ? 1.0 : -1.0;
+  // Three points is the coarsest thing that still bounds an area; a radius too
+  // small for the discretizer to have an opinion about lands here.
+  const int segs = std::max(arcSegments, 3);
+
+  std::vector<RoundSection> out(frames.size());
+  for (size_t i = 0; i < frames.size(); ++i) {
+    const SpineFrame& f = frames[i];
+    if (!f.valid) continue;
+
+    Vector3d bis = f.nA + f.nB;
+    if (bis.norm() < 1e-9) continue;
+    bis.normalize();
+
+    // The plane of the section is the one spanned by the two wall normals: C, v,
+    // TA and TB all lie in it by construction, so the arc meets each wall
+    // tangentially there whatever the spine does between stations. Taking it
+    // from the normals rather than from the spine direction is what keeps that
+    // true around a bend, where the two disagree.
+    Vector3d e = f.nA.cross(f.nB);
+    if (e.norm() < 1e-12) continue;
+    e.normalize();
+    const Vector3d e1 = f.nA;  // unit, and perpendicular to e
+    const Vector3d e2 = e.cross(e1);
+
+    RoundSection s;
+    s.w = pentagonSection(f.v, f.nA, f.nB, bis, f.TA, f.TB, dir, eps);
+
+    s.u.reserve(segs);
+    for (int k = 0; k < segs; ++k) {
+      const double a = 2.0 * M_PI * k / segs;
+      s.u.push_back(f.C + r * (std::cos(a) * e1 + std::sin(a) * e2));
     }
+
+    s.valid = true;
+    out[i] = std::move(s);
+  }
+  return out;
+}
+
+manifold::Manifold buildRoundSolid(const MergedMesh& m,
+                                   const std::map<EdgeKey, std::vector<int>>& adj,
+                                   const std::vector<Chain>& chains, double r, bool concave,
+                                   int arcSegments)
+{
+  if (!(r > 0)) return {};
+
+  std::vector<manifold::Manifold> wedgeCells, canalCells;
+  for (const Chain& chain : chains) {
+    const std::vector<RoundSection> sections =
+      roundSections(m, adj, chain, r, concave, arcSegments);
+    appendChainCells(chain, sections,
+                     [](const RoundSection& s) -> const std::array<Vector3d, 5>& { return s.w; },
+                     wedgeCells);
+    appendChainCells(chain, sections,
+                     [](const RoundSection& s) -> const std::vector<Vector3d>& { return s.u; },
+                     canalCells);
   }
 
-  if (cells.empty()) return {};
-  if (cells.size() == 1) return cells.front();
+  manifold::Manifold wedge = unionCells(wedgeCells);
+  if (wedge.IsEmpty()) return {};
+  manifold::Manifold canal = unionCells(canalCells);
+  if (canal.IsEmpty()) return wedge;
 
-  manifold::Manifold solid = manifold::Manifold::BatchBoolean(cells, manifold::OpType::Add);
-
-  // Consecutive cells meet along a shared section face, so the union's inputs
-  // touch on a set of zero measure. Manifold copes, but it leaves one degenerate
-  // four-triangle shell behind per such contact: no volume, no effect on any
-  // boolean, and a nonsense genus for anything that inspects the result. Keep
-  // only the components that enclose material.
-  std::vector<manifold::Manifold> parts = solid.Decompose();
-  if (parts.size() < 2) return solid;
-
-  const double keepAbove = 1e-9 * std::abs(solid.Volume());
-  std::vector<manifold::Manifold> solidParts;
-  for (auto& part : parts)
-    if (std::abs(part.Volume()) > keepAbove) solidParts.push_back(std::move(part));
-
-  if (solidParts.empty()) return {};
-  if (solidParts.size() == 1) return solidParts.front();
-  if (solidParts.size() == parts.size()) return solid;
-  return manifold::Manifold::BatchBoolean(solidParts, manifold::OpType::Add);
+  return dropVolumelessParts(wedge - canal);
 }
 
 std::unique_ptr<PolySet> debugEdgeMarkers(
@@ -576,11 +683,12 @@ std::unique_ptr<PolySet> debugSpineMarkers(const MergedMesh& m,
 
 }  // namespace fillet::detail
 
-// Rebuild edge -> two-face adjacency from the target's triangle soup and
-// classify each edge as concave/convex and feature/seam. The classified edges
-// are the input to spine construction and tool building; for now the pass only
-// reports diagnostic counts (e.g. a plain cube yields 12 feature edges, all
-// convex; an inside corner yields a single concave edge) and emits no geometry.
+// Rebuild edge -> two-face adjacency from the target's triangle soup, classify
+// each edge as concave/convex and feature/seam, walk the ones this tool acts on
+// into chains, and build the tool solid along them. Junction cells are not built
+// yet, so chains meeting at a branch vertex simply overlap there. A diagnostic
+// count line goes out on every invocation (a plain cube yields 12 feature edges,
+// all convex; an inside corner yields a single concave edge).
 std::shared_ptr<const Geometry> buildFilletTool(
   const FilletNode& node, const std::shared_ptr<const ManifoldGeometry>& target)
 {
@@ -636,7 +744,8 @@ std::shared_ptr<const Geometry> buildFilletTool(
   if (node.debug) {
     std::vector<SpineFrame> frames;
     for (const Chain& chain : chains) {
-      const std::vector<SpineFrame> chainFrames = spineFrames(m, adj, chain, node.size);
+      const std::vector<SpineFrame> chainFrames =
+        spineFrames(m, adj, chain, node.size, wantConcave);
       frames.insert(frames.end(), chainFrames.begin(), chainFrames.end());
     }
 
@@ -647,20 +756,26 @@ std::shared_ptr<const Geometry> buildFilletTool(
     return debug.build();
   }
 
-  // Chamfer and bevel need only the wedge; the rounded tools additionally
-  // subtract the rolling ball, which is not built yet, so they stay a no-op —
-  // an empty tool a caller can still union or subtract without consequence.
   const bool isWedgeOnly =
     node.type == FilletType::CHAMFER || node.type == FilletType::BEVEL;
-  if (!isWedgeOnly) return nullptr;
 
   if (!(node.size > 0)) {
-    LOG(message_group::Warning, node.modinst->location(), "",
-        "%1$s: setback must be positive", node.name());
+    LOG(message_group::Warning, node.modinst->location(), "", "%1$s: %2$s must be positive",
+        node.name(), isWedgeOnly ? "setback" : "radius");
     return nullptr;
   }
 
-  manifold::Manifold wedge = buildWedgeSolid(m, adj, chains, node.size, wantConcave);
-  if (wedge.IsEmpty()) return nullptr;
-  return std::make_shared<ManifoldGeometry>(std::move(wedge));
+  // Chamfer and bevel are the wedge alone. The rounded tools are the same wedge
+  // with the rolling ball's canal taken back out of it, and with the setback
+  // fixed at the ball's tangency points rather than given by the caller.
+  manifold::Manifold tool;
+  if (isWedgeOnly) {
+    tool = buildWedgeSolid(m, adj, chains, node.size, wantConcave);
+  } else {
+    const int arcSegments = node.discretizer.getCircularSegmentCount(node.size).value_or(0);
+    tool = buildRoundSolid(m, adj, chains, node.size, wantConcave, arcSegments);
+  }
+
+  if (tool.IsEmpty()) return nullptr;
+  return std::make_shared<ManifoldGeometry>(std::move(tool));
 }

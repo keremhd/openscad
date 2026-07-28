@@ -165,9 +165,15 @@ struct SpineFrame
 // normals are averaged per side across the vertex's incident chain edges (what
 // keeps the ball-center polyline continuous); side A/B is kept consistent along
 // the chain by a fixed handedness relative to the walking direction.
+//
+// The ball rolls on the material side of the crease, and which side that is
+// follows the tool: at a concave edge both outward normals point into the open
+// quadrant, so the center offsets along +(nA+nB) and the tangency points come
+// back toward the walls; at a convex edge the ball sits inside the solid and
+// both signs flip.
 std::vector<SpineFrame> spineFrames(const MergedMesh& m,
                                     const std::map<EdgeKey, std::vector<int>>& adj,
-                                    const Chain& chain, double r);
+                                    const Chain& chain, double r, bool concave);
 
 // The chamfer/bevel cross-section at one chain station: the convex pentagon
 // TA, TB, TB', v', TA'. TA and TB are the setback points on the two walls; the
@@ -197,6 +203,40 @@ std::vector<WedgeSection> wedgeSections(const MergedMesh& m,
 manifold::Manifold buildWedgeSolid(const MergedMesh& m,
                                    const std::map<EdgeKey, std::vector<int>>& adj,
                                    const std::vector<Chain>& chains, double t, bool concave);
+
+// The two cross-sections of a rounded tool at one chain station. `w` is the same
+// pentagon the chamfer uses, but with its setback taken at the tangency points
+// of a radius-r ball rather than from a free parameter, so the triangle
+// (v, TA, TB) is exactly the corner the arc is inscribed in. `u` is the region
+// that arc cuts back out of it, as a convex polygon in the plane spanned by the
+// two wall normals; hulling consecutive copies of each and subtracting gives the
+// rounded bead.
+struct RoundSection
+{
+  std::array<Vector3d, 5> w;
+  std::vector<Vector3d> u;
+  bool valid = false;
+};
+
+// The rounded cross-sections along a chain, for radius r. The wedge setback is
+// r*tan(phi/2) at each station, which is where a ball of radius r seated in the
+// crease touches each wall, so it varies with the local wall angle instead of
+// being one number for the chain. `arcSegments` is the tessellation of a full
+// circle at this radius; the arc actually emitted spans only phi of it.
+std::vector<RoundSection> roundSections(const MergedMesh& m,
+                                        const std::map<EdgeKey, std::vector<int>>& adj,
+                                        const Chain& chain, double r, bool concave,
+                                        int arcSegments);
+
+// Build the fillet/round tool solid: the wedge W hulled from consecutive
+// sections, minus the canal U hulled the same way. Subtraction happens once at
+// the end, over the whole union of each, rather than per cell — a cell's arc
+// has to cut its neighbour's wedge wherever the spine bends. Junction cells are
+// not built yet. Returns an empty manifold when nothing could be built.
+manifold::Manifold buildRoundSolid(const MergedMesh& m,
+                                   const std::map<EdgeKey, std::vector<int>>& adj,
+                                   const std::vector<Chain>& chains, double r, bool concave,
+                                   int arcSegments);
 
 // Build a colored debug solid: a thin box marker straddling each real edge,
 // colored by class — concave feature (red), convex feature (green), rejected
