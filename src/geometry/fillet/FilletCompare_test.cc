@@ -21,6 +21,7 @@
 
 #include "geometry/fillet/FilletBuilder_internal.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <vector>
@@ -73,12 +74,28 @@ Manifold residual(const Manifold& a, const Manifold& b, double t)
   return (a - dilate(b, t)) + (b - dilate(a, t));
 }
 
+// Does this solid enclose any material? Not the same question as IsEmpty():
+// wherever a boolean's operands touch on a set of zero measure, Manifold leaves
+// a volumeless four-triangle shell behind, and an exact containment is precisely
+// such a case — so a residual that is geometrically nothing still has triangles
+// in it. The cutoff is nine orders below the solids being compared: far under
+// any defect a tolerance-based check could be about, far above float noise.
+bool enclosesNothing(const Manifold& m, double scale)
+{
+  if (m.IsEmpty()) return true;
+  const double keepAbove = 1e-9 * scale;
+  for (const auto& part : m.Decompose())
+    if (std::abs(part.Volume()) > keepAbove) return false;
+  return true;
+}
+
 // Two solids agree within t. Both being empty counts as agreement; one empty and
 // one not does not, which is what makes this catch an operator that silently
 // builds nothing.
 bool agreesWithin(const Manifold& a, const Manifold& b, double t)
 {
-  return residual(a, b, t).IsEmpty();
+  const double scale = std::max(std::abs(a.Volume()), std::abs(b.Volume()));
+  return enclosesNothing(residual(a, b, t), scale);
 }
 
 // How finely the hand-written references tessellate their arcs. Manifold's own
