@@ -44,6 +44,13 @@ selftest_wrongradius    *  *         PASS
 case_junction3_pocket   *  sandwich  FAIL
 case_junction4_pocket   *  sandwich  FAIL
 
+# Where chains meet, each one rolls its own ball straight past the meeting point
+# and there is no corner cell to put back what the balls take between them, so
+# the apex is cut off rather than capped. On the 3-face cone that is enough to
+# push the result more than a radius away from the model; the 4-face apex is
+# blunter and still fits inside the sandwich.
+case_junction3_apex     small  sandwich  FAIL
+
 # Brush selection is not built, so the tool rounds the whole chain instead of the
 # half the brush picks out, and the residual is the half that should not be
 # there. Only the "tool" check sees it: the extra bead is still within size of
@@ -52,5 +59,10 @@ case_brush_halfchain    *  tool      FAIL
 
 # Nothing validates the size against the feature yet, so no tool is ever refused
 # and no warning is ever emitted: every "drops" check is red. Every tool gets
-# there the same way now — by building a tool it should have refused.
-*                       *  drops     FAIL
+# there the same way now — by building a tool it should have refused. On the cube
+# that tool is big enough to be seen twice: r = 30 on a 40 mm face means the
+# neighbouring edges' rounds meet and eat the face between them, and the result
+# ends up further from the model than the radius it was asked for. Same missing
+# check, and it goes green with it.
+case_outer_edge_round   large  sandwich  FAIL
+*                       *      drops     FAIL

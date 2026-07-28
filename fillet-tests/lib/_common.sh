@@ -40,7 +40,13 @@ FILLET_WARN_RE='WARNING.*(fillet|chamfer|round|bevel).*(radius|size)'
 # does not finish at all. One such case must not wedge the whole suite, so every
 # render and check is bounded. Returns 124 on timeout, mirroring GNU timeout(1),
 # which macOS does not ship.
-CHECK_TIMEOUT=${CHECK_TIMEOUT:-60}
+#
+# The bound is there to stop a check that will never finish, not to police cost.
+# Set close to how long the slowest real check takes, it turns machine load into
+# a test result — the closed-ring cases sat either side of a 60 s limit depending
+# on what else was running. The ones that genuinely do not converge run for over
+# ten minutes, so there is plenty of room between the two.
+CHECK_TIMEOUT=${CHECK_TIMEOUT:-180}
 
 run_bounded() {  # logfile cmd...
   local log="$1"; shift

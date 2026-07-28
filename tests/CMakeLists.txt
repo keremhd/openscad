@@ -625,11 +625,12 @@ list(APPEND RENDER_DIFFERENT_EXPECTATIONS
   # The fillet tools offset the tool a hair past each wall so it crosses the
   # surface transversally instead of lying on it. Manifold takes those slivers;
   # converting them to a Nef polyhedron trips a CGAL assertion and discards
-  # facets, so the CGAL render shows the beveled faces inverted. The tool itself
+  # facets, so the CGAL render shows the cut faces inverted. The tool itself
   # is built by the same Manifold code either way — only the CGAL backend's
   # rendering of it differs, and pinning that with its own baseline keeps the
   # difference visible instead of hiding the case from one backend.
   ${TEST_SCAD_DIR}/3D/features/bevel-tool-tests.scad
+  ${TEST_SCAD_DIR}/3D/features/round-tool-tests.scad
 )
 if(EXAMPLES_DIR)
   list(APPEND RENDER_DIFFERENT_EXPECTATIONS
@@ -1568,6 +1569,12 @@ if(NOT ENABLE_MANIFOLD)
     render-cgal_bevel-tool-tests
     preview-cgal_bevel-tool-tests
     throwntogether-cgal_bevel-tool-tests
+    render-cgal_fillet-tool-tests
+    preview-cgal_fillet-tool-tests
+    throwntogether-cgal_fillet-tool-tests
+    render-cgal_round-tool-tests
+    preview-cgal_round-tool-tests
+    throwntogether-cgal_round-tool-tests
   )
 endif()
 
