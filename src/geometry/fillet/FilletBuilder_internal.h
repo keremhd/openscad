@@ -208,11 +208,13 @@ struct ChainContact
 // chamfer/bevel reading of `size` (a setback taken directly) over the rounded
 // one (a radius, whose setback is r*tan(phi/2)).
 //
-// `samplesPerSegment` adds points between the stations, with the walls
-// interpolated. A crease is only ever sampled where the mesh has a vertex, and
+// `samplesPerSegment` is the FEWEST points to add between two stations, with the
+// walls interpolated; a segment long against the size gets more, one sample per
+// size along it. A crease is only ever sampled where the mesh has a vertex, and
 // on a tapering feature — a spike, a wedge running to nothing — the room
 // available between two stations can fall below what the tool needs without
-// either station noticing.
+// either station noticing, so how finely the segment is walked has to follow the
+// size being asked about rather than the mesh.
 std::vector<ChainContact> chainContacts(const MergedMesh& m,
                                         const std::map<EdgeKey, std::vector<int>>& adj,
                                         const Chain& chain, double size, bool concave, bool wedge,

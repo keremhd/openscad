@@ -617,13 +617,45 @@ volumes, so nothing has to be built to find out that it cannot be:
   between two walls 10 mm apart. Creases that meet at a junction are exempt:
   sharing material there is exactly what a corner cell is.
 
+**The gate is a sampled check, and there is no right sample density.** This is
+worth saying plainly, because it is the shape of the whole problem rather than a
+defect to tune out. The two questions are asked at points along a crease, and a
+constraint that holds at a point can fail between two of them: on a tapering
+feature the room runs out somewhere continuous, and where that somewhere is moves
+with the size. Sampling coarsely misses it. Sampling finely walks into the
+corners instead — near a junction the contact point steps out through the
+neighbouring crease's face, which is a corner and not an overshoot — so a dense
+walk needs exclusion zones around junctions, and those zones are then their own
+blind spot. Each of the three settings (how many samples, how near a junction to
+stop asking, how much slack a mitre gets) can be moved to fix one case and break
+another; the search has a fixed point only if you stop.
+
+So the rule is stated and left alone: **one sample per size along a segment, at
+least three, capped at 32; no touching question within `2r` of a junction or at
+the two ends of an open chain; slack scaled by the distance to the ball centre.**
+What it will miss, and is meant to: a failure entirely between two samples on a
+crease much longer than the size, and anything inside the junction exclusion,
+where the corner cell is the answer instead. What it will not do is refuse a size
+that fits — the exclusions err that way on purpose, because a false refusal is a
+fillet the user cannot get, while a false acceptance is a fillet they can see is
+wrong.
+
+An exact answer exists and costs what §6.5 says it costs: build the tool and test
+it (or equivalently, ask a distance field whether the offset surface stays on the
+model). If the sampled gate ever proves too coarse in practice, that is the
+replacement — not a finer sample.
+
 **Four things worth carrying forward.**
 
 1. *A crease has to be sampled along its length, not only at its stations.* The
    spine's stations are mesh vertices, and on a tapering feature the room
    available between two of them falls below what the tool needs without either
    station noticing — a spike whose only two stations are its base and its apex
-   is the extreme case. The gate samples three points per segment as well.
+   is the extreme case. The gate walks each segment as well, one sample per size
+   along it (never fewer than three, capped at 32). How fine that walk is has to
+   follow the size rather than the mesh: with a fixed three, `r = 1` is caught
+   27 mm from the spike's tip and `r = 0.5` is not caught at all, because the
+   place where the room runs out has moved above the last sample.
 2. *The two ends of an open chain are exempt from the touching test.* A crease
    stops at the boundary of its own walls, so the contact point there sits in the
    corner of the wall and steps out of it for reasons that are not about the

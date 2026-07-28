@@ -47,9 +47,16 @@ the test otherwise.
 mesh vertices. A spike has two — its base corner and its apex — and everything
 wrong with rounding it at `r = 1` happens between them: the section falls below
 the tool's own setback about 27 mm from the tip, and the tool would take the tip
-off rather than round it. Neither station sees that. The gate samples three
-points per segment, with the walls interpolated the way the cell between two
-sections already interpolates them.
+off rather than round it. Neither station sees that. The gate walks each segment
+as well, with the walls interpolated the way the cell between two sections
+already interpolates them.
+
+How finely has to follow the size, not the mesh: one sample per size along the
+segment, never fewer than three, capped at 32 because a crease can be arbitrarily
+long beside a tool that is arbitrarily small and the crowding test is quadratic
+in its samples. A fixed count is a trap — at `r = 1` three samples catch the
+spike 27 mm from its tip, and at `r = 0.5` the place where the room runs out has
+moved above the last of them, so the tool ate the top 20 mm and said nothing.
 
 **The two ends of an open chain are not asked the question.** A crease stops at
 the boundary of its own walls — at a junction, or where the feature runs out — so
@@ -77,6 +84,29 @@ terms of the radius alone the tolerance was an order of magnitude too small, and
 a 60 x 2 cone was refused a round of 0.6 that fits it comfortably. The same
 quantity absorbs the tessellation's own error and the "over the limit by less
 than float noise, clamp silently" exception §6.5 asks for.
+
+## There is no right sample density, and the search was stopped
+
+Every setting in the gate — how many samples, how close to a junction to stop
+asking, how much slack a mitre gets — fixes one case and breaks another when it
+is moved. Three samples per segment caught a spike at `r = 1` and missed the same
+spike at `r = 0.5`, where the room runs out above the last sample. One sample per
+size caught both and started refusing every cone, because the samples now landed
+close enough to a base corner that the contact leaves through the neighbouring
+crease's face — a corner, not an overshoot. Excluding a stretch either side of a
+junction fixed the cones and made that stretch a blind spot.
+
+That is not a defect to tune out; it is what asking a continuous question at
+points means. The rule is written down and left alone: one sample per size along
+a segment, at least three, capped at 32; no touching question within `2r` of a
+junction or at the two ends of an open chain; slack scaled by the distance to the
+ball centre. It errs toward accepting, on purpose — a false refusal is a fillet
+the user cannot have, a false acceptance is one they can see is wrong.
+
+The exact version is the one §6.5 already prices: build the tool and test it, or
+ask a distance field whether the offset surface stays on the model. That is the
+replacement if the sampled gate proves too coarse in practice. A finer sample is
+not.
 
 ## Mixed-sign vertices: a larger constraint set, not a special case
 

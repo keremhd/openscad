@@ -547,8 +547,19 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
     if (!a.valid || !b.valid) continue;
     int segA = -1, segB = -1;
     if (!sidedTris(m, adj, chain.verts[i], chain.verts[(i + 1) % n], segA, segB)) continue;
-    for (int k = 1; k <= samplesPerSegment; ++k) {
-      const double t = static_cast<double>(k) / (samplesPerSegment + 1);
+
+    // One sample per size along the segment, and never fewer than asked. A fixed
+    // count is a trap on a long crease: the room a spike leaves its tool runs
+    // out somewhere between the last sample and the vertex, and where that is
+    // depends on the size, so the walk has to be as fine as the size is small.
+    // The cap is there because a crease can be arbitrarily long next to a tool
+    // that is arbitrarily small, and the check is quadratic in its samples.
+    const double segmentLength = (b.v - a.v).norm();
+    const int samples =
+      std::clamp(static_cast<int>(std::ceil(segmentLength / std::max(size, 1e-12))),
+                 std::max(samplesPerSegment, 0), 32);
+    for (int k = 1; k <= samples; ++k) {
+      const double t = static_cast<double>(k) / (samples + 1);
       StationNormals s;
       s.v = a.v + t * (b.v - a.v);
       s.nA = (1.0 - t) * a.nA + t * b.nA;
@@ -686,6 +697,24 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
       reach[ci].add(c.TB);
     }
 
+  // Vertices where three or more creases meet, and how much crease either side of
+  // one the touching question does not apply to. The spine is cut back short of a
+  // junction and a corner cell takes over, so contacts inside that stretch are
+  // not contacts the tool has — and near one they read wrong for a reason that
+  // has nothing to do with the size: stepping in perpendicular to a crease from a
+  // point close to where it meets another leaves through THAT crease's face,
+  // which is a corner and not an overshoot.
+  std::map<int, int> endsAt;
+  for (const Chain& chain : chains) {
+    if (chain.closed || chain.verts.size() < 2) continue;
+    ++endsAt[chain.verts.front()];
+    ++endsAt[chain.verts.back()];
+  }
+  std::vector<Vector3d> junctionPos;
+  for (const auto& [v, count] : endsAt)
+    if (count >= 3) junctionPos.push_back(m.pos[v]);
+  const double junctionReach = 2.0 * size;
+
   for (size_t ci = 0; ci < chains.size(); ++ci) {
     SizeVerdict& verdict = verdicts[ci];
 
@@ -706,6 +735,10 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
       const ChainContact& c = contacts[ci][i];
       if (!c.valid) continue;
       if (!chains[ci].closed && (i == 0 || i == last)) continue;
+      bool nearJunction = false;
+      for (const Vector3d& p : junctionPos)
+        if ((c.v - p).norm() < junctionReach) { nearJunction = true; break; }
+      if (nearJunction) continue;
       const double tol = faceTol + c.slack;
       const double a =
         std::max(offSurface(c.TA, c.surfaceA, tol), offSurface(c.TB, c.surfaceB, tol));
