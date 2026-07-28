@@ -228,11 +228,14 @@ std::vector<RoundSection> roundSections(const MergedMesh& m,
                                         const Chain& chain, double r, bool concave,
                                         int arcSegments);
 
-// Build the fillet/round tool solid: the wedge W hulled from consecutive
-// sections, minus the canal U hulled the same way. Subtraction happens once at
-// the end, over the whole union of each, rather than per cell — a cell's arc
-// has to cut its neighbour's wedge wherever the spine bends. Junction cells are
-// not built yet. Returns an empty manifold when nothing could be built.
+// Build the fillet/round tool solid: per chain, the wedge W hulled from
+// consecutive sections minus the canal U hulled the same way, then the chains
+// unioned. Subtraction is per chain rather than per cell (a cell's arc has to
+// cut its neighbour's wedge wherever the spine bends) and rather than once
+// globally (a chain's ball must not hollow out the bead of another chain it
+// meets). Junction cells are not built yet, so what the balls take from each
+// other at a meeting point is not put back. Returns an empty manifold when
+// nothing could be built.
 manifold::Manifold buildRoundSolid(const MergedMesh& m,
                                    const std::map<EdgeKey, std::vector<int>>& adj,
                                    const std::vector<Chain>& chains, double r, bool concave,

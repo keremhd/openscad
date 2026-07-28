@@ -603,24 +603,34 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
 {
   if (!(r > 0)) return {};
 
-  std::vector<manifold::Manifold> wedgeCells, canalCells;
+  std::vector<manifold::Manifold> beads;
   for (const Chain& chain : chains) {
     const std::vector<RoundSection> sections =
       roundSections(m, adj, chain, r, concave, arcSegments);
+
+    std::vector<manifold::Manifold> wedgeCells, canalCells;
     appendChainCells(chain, sections,
                      [](const RoundSection& s) -> const std::array<Vector3d, 5>& { return s.w; },
                      wedgeCells);
     appendChainCells(chain, sections,
                      [](const RoundSection& s) -> const std::vector<Vector3d>& { return s.u; },
                      canalCells);
+
+    manifold::Manifold wedge = unionCells(wedgeCells);
+    if (wedge.IsEmpty()) continue;
+
+    // Subtract once per chain, over the whole of its wedge rather than cell by
+    // cell: where the spine bends, one cell's ball reaches into the next cell's
+    // wedge and has to cut it. But not once over every chain together — a ball
+    // rolling along one crease would then hollow out the neighbouring crease's
+    // bead where the two meet, leaving a lump on the model at every corner. What
+    // belongs at a meeting point is a corner cell, not a hole.
+    const manifold::Manifold canal = unionCells(canalCells);
+    beads.push_back(canal.IsEmpty() ? std::move(wedge)
+                                    : dropVolumelessParts(wedge - canal));
   }
 
-  manifold::Manifold wedge = unionCells(wedgeCells);
-  if (wedge.IsEmpty()) return {};
-  manifold::Manifold canal = unionCells(canalCells);
-  if (canal.IsEmpty()) return wedge;
-
-  return dropVolumelessParts(wedge - canal);
+  return unionCells(beads);
 }
 
 std::unique_ptr<PolySet> debugEdgeMarkers(

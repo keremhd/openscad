@@ -290,6 +290,28 @@ TEST_CASE("round_tool: one cube edge matches the hand-written reference")
   CHECK(agreesWithin((model - tool) ^ clip, (model - ref) ^ clip, 0.02 * r));
 }
 
+TEST_CASE("round_tool: beads meeting at a corner do not hollow each other out")
+{
+  // Three creases meet at every cube corner and each rolls its own ball. Those
+  // balls reach past the corner into the neighbouring beads, so subtracting all
+  // of them from all the wedges at once eats away the very material the
+  // neighbours are there to remove, and the cube keeps a lump on every corner
+  // instead of losing one. What belongs where chains meet is a corner cell, not
+  // a hole, and until there is one the beads have to be left alone.
+  //
+  // The probe sits in the top edge's bead and outside its own ball, so it is
+  // tool whatever happens at the corner — but it is inside the vertical edge's
+  // ball, which is what a single global subtraction would remove it with.
+  const double s = 16.0, r = 3.0;
+  const auto model = box(s, s, s);
+
+  const auto tool = roundToolFor(model, r, /*concave=*/false, 48);
+  REQUIRE_FALSE(tool.IsEmpty());
+
+  const auto probe = box(0.4, 0.4, 0.4).Translate(vec3(13.8, 15.3, 15.3));
+  CHECK(enclosesNothing(probe - tool, probe.Volume()));
+}
+
 TEST_CASE("round_tool: the hole mouth matches annulus prism minus torus")
 {
   // The sanity case the whole operator was specified against: rounding the mouth
