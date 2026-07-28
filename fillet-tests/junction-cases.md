@@ -38,11 +38,15 @@ turns the corner as a closed loop around the rib's foot with nothing beyond the
 end face; the notch's crease is filled to its full height with nothing above the
 top face; neither round tool puts material where the concave side is.
 
-That is a weaker result than it looks. The unheard-of face has to actually be in
-the ball's way for the hole to show, and in both models it is a face the selected
-creases already constrain the ball against. A model where it is not — a convex
-edge leaning back over a concave one — would still be worth building. Nobody has
-written one down yet.
+That was a weaker result than it looked: the unheard-of face has to actually be
+in the ball's way for the hole to show, and in both models it is a face the
+selected creases already constrain the ball against. The hole is closed anyway,
+and not by a case — the corner solve now takes its constraint walls from **every
+triangle at the vertex** rather than from the walls of the creases it selected.
+That is a superset of what it had, so nothing feasible and genuinely clear has
+moved, which the exact corner comparisons confirm by staying green. These four
+stay clean, now by construction; the case nobody wrote down — a convex edge
+leaning back over a concave one — has nothing left to show.
 
 ## Group B — junctions the solve refuses, where the spine is cut anyway
 
@@ -54,10 +58,25 @@ the other rejection path.
 asks whether a corner cell was built, so a refused solve still gets every
 incident spine cut back with nothing filling the space.
 
-**Found, on the needle: exactly that, and it is severe.** At `r = 1` the three
-beads stop 80 mm below the apex — eighty radii — and a fully sharp spike is left
-standing over the stumps, with no warning. The result is at least a valid solid.
-This case is the acceptance for the runout fallback when it is built.
+**Found, on the needle: exactly that, and it was severe.** At `r = 1` the three
+beads stopped 80 mm below the apex — eighty radii — with a fully sharp spike left
+standing over the stumps and no warning. The result was at least a valid solid.
+
+**The runout fallback is built now.** An end whose junction has no seated ball is
+not truncated at all: the radius ramps to zero over the last `2r` of the spine,
+the last section is the sharp vertex itself, and the beads converge on it — a
+valid solid whose blend fades out locally, with a warning saying the corner is
+not the constant-radius one that was asked for.
+
+The needle no longer reaches it. The size gate refuses its three slant creases
+first, because the spike is thinner than the tool's own setback for its last
+27 mm, so only the base creases are built and the tip survives. That ordering is
+right — whether a size can be built here at all comes before what happens at a
+corner nobody can seat a ball in — and it means the runout's acceptance is the
+unit test rather than this case, since the test calls the builder without the
+gate in front. Any apex sharp enough to trip the `10r` bound is also too thin for
+the size somewhere above it, so on this shape the two will always fire in that
+order.
 
 **Found, on the flat apex: the guard does not fire, and cannot.** The determinant
 is around `1e-2` against a `1e-6` threshold; reaching the threshold on a cone
@@ -86,17 +105,23 @@ standing 10 mm away, parallel and not touching. Two sizes: `r = 3` fits the gap,
 here — no shared vertex, no crease between the bead and the wall it approaches —
 so nothing stops the ball rolling straight through that wall.
 
-**Found: the opposite failure.** The ball never enters the second wall. The bead
-*collapses* instead: at `r = 8` the first wall's fillet is 0.26 mm tall where it
-should be 8, and deleting the second wall from the same model restores it. The
-neighbour crushes it. Nothing catches this — `sandwich` bounds only how far the
-result may STRAY from the model and an under-fill strays nowhere, `emits` is
-satisfied by the sliver, and no warning is emitted. The operator neither fills
-the crease nor refuses the size.
+**Found: the opposite failure.** The ball never entered the second wall. The bead
+*collapsed* instead: at `r = 8` the first wall's fillet was 0.26 mm tall where it
+should be 8, and deleting the second wall from the same model restored it — the
+neighbour crushing it not by rolling through the wall but by rolling its own ball
+through this bead from the other side. Nothing caught it: `sandwich` bounds only
+how far the result may STRAY from the model and an under-fill strays nowhere,
+`emits` was satisfied by the sliver, and no warning was emitted.
 
-That makes this the case to settle "refuse" against. Its large variant is `none`
-and not `drop` on purpose: `drop` would assert that refusing is the required
-answer, and that decision has not been made.
+**It is refused now**, which is what this case was for: it is where "refuse" got
+settled against something real. A crease whose seated ball contains another
+crease's contact line is competing for material already spoken for — the "nearest
+other feature" half of the size limit — so at `r = 8` both creases across the gap
+are dropped with a warning and the third, with nothing within reach, is built. At
+`r = 3` all three are built, since the two beads have 4 mm between them.
+
+The large variant stays `none` rather than becoming `drop`: a `drop` asserts the
+whole tool must come out empty, and that third crease is legitimately buildable.
 
 ## Group D — asymmetric high valence, in the picture
 
@@ -125,10 +150,12 @@ the oversize question, and mixing it in here would hide both.
 ## What not to build here
 
 - **Unequal radii per edge.** Out of scope by design — the whole offset framing
-  collapses. It needs a detect-and-warn path, not a case.
-- **Oversize radii in general.** They belong in `drop` variants of the existing
-  cases once "refuse" is settled. `case_near_wall_fillet` is `none` for exactly
-  that reason.
+  collapses. It needs nothing yet either: a tool node carries one size for the
+  whole invocation, so unequal radii at a vertex cannot be expressed, and the
+  detect-and-warn path belongs with the feature that would create the situation.
+- **Oversize radii in general.** "Refuse" is settled and the five `drop` variants
+  in the older cases carry it. `case_near_wall_fillet` stays `none` for a
+  different reason — see above.
 - **Anything with a hand-written reference.** None of these has an elementary
   closed form. `none` is the honest kind; `sandwich` plus the picture is the
   coverage.

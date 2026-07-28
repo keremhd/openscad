@@ -1493,6 +1493,20 @@ disable_tests_safe(
   render-csg-cgal_import_3mf-tests
   throwntogether-cgal_import_3mf-tests
   throwntogether-manifold_import_3mf-tests
+
+  # A round_tool() solid on its own cannot be converted to a Nef polyhedron:
+  # every crease it rounds ends in a corner where a sphere sits tangent to the
+  # walls, and the surfaces that meet along those tangencies leave sub-micron
+  # triangles that CGAL rejects once it quantises its input. Applying the tool is
+  # fine — a difference() against the model renders on either backend — but this
+  # case deliberately shows the bare tool beside the applied result, and on the
+  # CGAL backend that forces the conversion.
+  #
+  # Not hidden from the Manifold backend, which renders it and carries the
+  # baseline; the shape itself is pinned exactly against a shrink-and-grow
+  # reference in FilletCompare_test.cc.
+  render-cgal_round-tool-tests
+  render-csg-cgal_round-tool-tests
 )
 
 list(APPEND NEF3_BROKEN_TESTS

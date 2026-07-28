@@ -92,6 +92,7 @@ green apart from these three — treat them as the expected baseline:
 | **M7** | `fillet_tool`/`round_tool` — disc hulls, then swap to circular segments | geometry | §6.1 |
 | **M8** | Junction cells degree 3 (`P`, dual truncation, corner cell) | geometry | §6.3 |
 | **M9** | Junction degree ≥4 (Q-vertex) + numerical guards + runout fallback | geometry | §6.3.1-6.3.2 |
+| — | Size validity: warn and drop a chain the size does not fit | geometry | §6.5 |
 | **M10** | Brush selection (BVH, spine raycast, W clip) | geometry | §7 |
 | **M11** | Re-fillet tagging (ReserveIDs + MeshGL stamp) — *riskiest* | geometry | §8 |
 | **M12** | `fillet()` SCAD wrapper + preview passthrough | packaging | §2.1, §10 |
@@ -482,12 +483,179 @@ So this is a decision to revisit, not a workaround to preserve. The probe test i
 subtraction the moment truncation lands. If it goes red when the grouping is
 removed, truncation is what is wrong, not the grouping.
 
+**Status: done.** `fillet::detail` gains `Junction` and `chainJunctions`, and
+`RoundSection` gains the ball centre `C` so a section can be interpolated to a
+truncation point. `buildRoundSolid` now truncates every spine, adds a corner cell
+and a corner ball at each junction, and subtracts once globally. The per-chain
+grouping is gone and the probe test is green without it. `buildWedgeSolid` is
+untouched — overlapping wedges are what a chamfered corner is, so those tools
+need no junction cell. Verified against exact references (below): the cube's
+twelve edges and eight corners, a three- and a four-face apex, a three- and a
+four-face pocket, the inside box corner, and the §6.3 section at `z = 0.1r`.
+
+**Three things worth carrying forward.**
+
+1. *The truncation rule replaces the solve, not the other way round.* Stating it
+   as "stop where the ball first reaches any wall of the junction" — the §6.3
+   universal form — needs no 3×3 solve, no valence case, and no fallback when a
+   solve is rejected. `P` then only exists to place the corner ball. The plan's
+   own framing, but it is worth saying that following it literally (solve first,
+   truncate at the result) is the harder implementation.
+2. *Degree ≥ 4 came forward from M9, because truncating without a corner there
+   was a regression.* The general construction — solve every triple, keep the
+   centres clear of the remaining walls, hull balls at what is left — is smaller
+   than a degree-3 special case plus an exception, and degree 3 falls out of it.
+   M9 keeps asymmetric valence-4 (untested here), unequal radii, and the runout
+   fallback.
+3. *`refRoundedConvex` is the reference to reuse.* Rounding a convex solid is
+   exactly eroding it by `r` and dilating by a ball of `r`, and both are
+   computable from the solid's own mesh — face planes pushed in, then the hull of
+   balls at the eroded vertices. One comparison pins every edge and every corner
+   at once, and the concave cases apply it to the void.
+
+**What is red, and why.** A bare `round_tool()` solid cannot be converted to a
+Nef polyhedron: at every corner a sphere sits tangent to three walls, and the
+surfaces meeting along those tangencies leave triangles too small to survive
+CGAL quantising its input. *Applying* the tool is fine on both backends;
+`round-tool-tests.scad` shows the bare tool on purpose, so
+`render-cgal_round-tool-tests` and `render-csg-cgal_round-tool-tests` are
+disabled with the reason recorded. Reducing the tangential contact — the
+circular-segment section M7 backed out is the obvious candidate — is the real
+fix. The two apex cases in `fillet-tests/` also fail their `sandwich` check, and
+correctly: rounding a sharp apex moves the surface by much more than `r`, so a
+reference-free "stays within `r`" check cannot pass there whatever the operator
+does. See [`log-2026-07-28-m8.md`](log-2026-07-28-m8.md).
+
 ### M9 — Junction degree ≥4 + guards
 
 - Q-vertex triplet hull with feasibility filter (§6.3.1); numerical guards
   (§6.3.2); runout fallback for rejected junctions.
 - **Acceptance:** asymmetric valence-4, infeasible-triplet, and singular-solve
   cases behave (no gouge, no NaN, graceful fallback).
+
+**Mostly landed at M8**, because degree 3 could not be special-cased without
+regressing a degree-4 case. In: the triplet enumeration, the feasibility filter,
+the hull of the kept balls, and the §6.3.2 guards (singular determinant,
+`|P − v| > 10r`, finiteness).
+
+**Asymmetric valence 4–6 is covered and green.** Shearing a low-`$fn` cone moves
+its apex off the axis, so the offset planes stop sharing a point and the ball
+gets several extreme positions — four sides give two, five three, six four — and
+the result matches the exact rounded solid at every one, convex and concave. The
+filter is doing real work rather than passing everything through: it is what
+keeps a triple that is tangent to its own three walls but buried in a fourth from
+gouging the fillet back from that fourth wall.
+
+What was left after M8 was two holes and one non-junction question. **All three
+are closed now**, along with the size gate they kept running into:
+
+1. **Mixed-sign vertices — the solve hears every wall now.** The constraint set
+   was built from the walls of the *selected* creases only, so a convex edge
+   arriving at a concave corner was never heard of even though its far face
+   bounds where the ball may sit. `chainJunctions` now collects the normals of
+   **every triangle incident to the vertex** instead. It is a strictly larger
+   constraint set — the walls the creases ride are a subset of it — so nothing
+   that was feasible before and genuinely clear of the neighbourhood has moved,
+   which is what the exact corner comparisons confirm by staying green. The four
+   Group A cases were already clean before the change; what changes is that they
+   are clean *by construction* rather than by the extra face happening not to
+   bind.
+2. **A junction that gets no centre now runs out instead of stopping short.**
+   Truncation used to run off the wall normals without asking whether a corner
+   cell had been built, so a rejected solve left every incident spine cut back
+   with nothing filling the space — the needle's beads stopped eighty radii below
+   its apex, silently. Those ends are no longer truncated at all: the radius
+   ramps to zero over the last `2r` of each incident spine, the last section is
+   the sharp vertex itself, and the beads converge on it. The result is a valid
+   solid whose blend fades out locally, which is §6.3.1's runout, and a warning
+   says the corner is not the constant-radius one that was asked for.
+3. **Unequal radii need no detect-and-warn yet.** A tool node carries one size
+   for the whole invocation, so unequal radii at a vertex cannot be *expressed* —
+   there is nothing to detect. The warning belongs with the feature that would
+   create the situation (per-edge sizes, or variable radius along a chain), not
+   before it.
+
+**Where the runout and the size gate meet.** The needle is the case the runout
+was written for, and running it through the finished operator shows the two in
+the right order: the size gate refuses the three slant creases first, because the
+spike tapers below the tool's own reach for its last 27 mm, and only the three
+base creases are built. The runout is what would happen at that apex if the size
+did fit — which the unit test exercises directly, since it calls the builder
+without the gate in front. The two mechanisms answer different questions: "can
+this size be built here at all" comes before "what happens at a corner nobody can
+seat a ball in".
+
+**Not a junction problem, but it is what the high-valence cases failed on
+first.** The sheared six-sided pyramid has a crease at 130°, where the tangency
+setback is over twice `r`; past `r ≈ 2` on a 30 mm feature the neighbouring beads
+collide and the answer stops being the naive rounded solid. That is the size
+gate, below, and it is now refused rather than built.
+
+### Size validity — warn and drop (plan §6.5)
+
+Not one of the numbered milestones; it is the decision §6.5 has carried since the
+plan was written, and it had to land before M10 because every case that asks for
+too much reaches it first. The decision itself was settled earlier — **warn and
+drop the chain, never clamp, never vary the size automatically**; see
+[`log-2026-07-28-oversize-radius.md`](log-2026-07-28-oversize-radius.md) for why
+a clamp cannot stay local. What landed now is the check behind it.
+
+Two questions per chain, both answered from contact points rather than from
+volumes, so nothing has to be built to find out that it cannot be:
+
+- **Does the tool still touch the model?** The point where the blend meets each
+  wall has to land on that wall. A surface here is the whole smooth patch — a
+  bore's facets are one wall, a cube's faces are six — found by joining triangles
+  across every edge whose dihedral falls below the same threshold that separates
+  creases from tessellation. When the contact point is off the end of its wall,
+  no blend of the size asked for exists there: the arms of an L 30 mm long cannot
+  carry `r = 35` at any tessellation.
+- **Is the room it needs its own?** Another crease's contact line sitting inside
+  this crease's seated ball is that crease's bead being eaten. That is the
+  "nearest other feature" half of §6.5, and it is what refuses `r = 30` on a
+  40 mm cube (the edge across the face reaches back the other way) and `r = 8`
+  between two walls 10 mm apart. Creases that meet at a junction are exempt:
+  sharing material there is exactly what a corner cell is.
+
+**Four things worth carrying forward.**
+
+1. *A crease has to be sampled along its length, not only at its stations.* The
+   spine's stations are mesh vertices, and on a tapering feature the room
+   available between two of them falls below what the tool needs without either
+   station noticing — a spike whose only two stations are its base and its apex
+   is the extreme case. The gate samples three points per segment as well.
+2. *The two ends of an open chain are exempt from the touching test.* A crease
+   stops at the boundary of its own walls, so the contact point there sits in the
+   corner of the wall and steps out of it for reasons that are not about the
+   size. On a tetrahedron it is unmissable: the base triangle's corners are 60°,
+   so stepping perpendicular to one base edge leaves through the next, and every
+   cone in the suite was refused until the rule went in. A size that genuinely
+   does not fit fails *along* the crease, which is what the samples see. The
+   crowding test keeps the ends, because there the ball's own reach is the
+   subject rather than its footing.
+3. *A sample is measured against its segment's walls, not its station's.* Taking
+   the wall from the station survives until a chain turns a corner — the bead
+   around a rib's foot is a closed loop, and half of every segment was being
+   measured against the wall the previous segment rode, reporting an overshoot
+   that grew linearly along it.
+4. *The tolerance scales with the distance to the ball centre, not the radius.*
+   A contact built from averaged normals lands at a mitre between two walls
+   rather than on either, and the miss is an angle applied at the centre — so its
+   size is set by how far that centre sits from the crease, which on a nearly
+   flat crease is many radii (`r / cos(φ/2)` is 28 r at 176°). In terms of the
+   radius alone the slack was an order of magnitude short, and a 60 × 2 cone was
+   refused a round of 0.6 that fits it comfortably. The same quantity absorbs the
+   tessellation's own error and the "over the limit by less than float noise,
+   clamp silently" exception §6.5 asks for.
+
+The wedge tools go through the same gate: a setback `t` at a crease of angle φ is
+the ball of radius `t / tan(φ/2)` seated there, which is the same object to ask
+how much room it needs.
+
+**Acceptance:** the five `drop` variants in `fillet-tests/` — the oversized L
+fillet and chamfer, the cube's round and bevel, the hole mouth — all go green on
+`drops`, which wants an empty tool *and* the warning. The `* * drops FAIL`
+catch-all is gone from `expectations.txt`.
 
 ### M10 — Brush selection
 

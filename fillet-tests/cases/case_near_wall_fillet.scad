@@ -13,31 +13,35 @@
 //   large  r = 8  does not — the ball seated in the first crease is wider than
 //                 the gap and reaches into the second wall
 //
-// The large one is "none" rather than "drop" on purpose. A drop would assert
-// that the operator must REFUSE this size, and that decision has not been made:
-// refusing on nearest-other-feature grounds is the open half of the size-limit
-// question. Until it is settled, the case records what happens rather than
-// claiming what should.
+// The large one is "none" rather than "drop" on purpose, and stays that way.
+// A "drop" asserts that the whole tool must come out empty, and one of the three
+// creases here — the one on the far side of the second wall, with nothing within
+// reach — is legitimately buildable at either size.
 //
-// FOUND, and it is the opposite of the failure the case was written for. The
-// ball never rolls through the second wall: no tool volume ends up inside it.
-// What happens instead is that the bead COLLAPSES. Measured on the section at
-// y = 20, the first wall's bead is
+// FOUND, in two stages, and neither is the failure the case was written for.
+//
+// FIRST: the ball never rolls through the second wall. No tool volume ends up
+// inside it. What happened instead was that the bead COLLAPSED. Measured on the
+// section at y = 20, the first wall's bead was
 //
 //   r = 3   x 4.00 .. 7.00, z 5.00 .. 8.00   — exactly the quarter-round
 //   r = 8   x 4.00 .. 8.00, z 5.00 .. 5.26   — a sliver a quarter of a mm tall
 //
-// and the same model with the second wall deleted gives z 5.00 .. 13.00 at
-// r = 8, so it really is the neighbour that crushes it. The bead on the far side
-// of the second wall goes the same way, crushed there by the wall's own 4 mm
-// thickness rather than by the gap.
+// and the same model with the second wall deleted gave z 5.00 .. 13.00 at
+// r = 8, so it really was the neighbour that crushed it: not by rolling through
+// the wall, but by rolling its own ball through this bead from the other side.
+// Nothing caught it — "sandwich" only bounds how far the result may STRAY from
+// the model and an under-fill strays nowhere, "emits" was satisfied by the
+// sliver, and no warning was emitted.
 //
-// Nothing catches this. "sandwich" only bounds how far the result may STRAY from
-// the model, and an under-fill strays nowhere; "emits" is satisfied by the
-// sliver; no warning is emitted. So the operator neither fills the crease nor
-// refuses the size — it quietly builds a fillet that is not one, which is
-// exactly the case for settling what "refuse" means.
-
+// SECOND, and what the case shows now: the size gate refuses both of the creases
+// facing each other across the 10 mm gap, and says so. A crease whose seated ball
+// contains another crease's contact line is a crease competing for material that
+// is already spoken for, which is the "nearest other feature" half of the size
+// limit. At r = 3 the two beads have 4 mm between them and both are built; at
+// r = 8 both are dropped and only the third is built. The picture is the two
+// answers side by side.
+//
 include <../lib/_ref.scad>;
 include <../lib/_harness.scad>;
 

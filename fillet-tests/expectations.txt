@@ -37,19 +37,29 @@ selftest_wrongradius    *  *         PASS
 #   }
 #
 # Move the apex a millimetre either way and it is clean, so the cases now leave
-# material above it (CAP) and the crash is gone for good. What is left is a
-# statement about the fillet: with no junction cells the chains run to the
-# meeting point and pile up there, and the applied result is not a solid CGAL
-# will dilate. The corner milestone is what turns these green.
+# material above it (CAP) and the crash is gone for good.
+#
+# What is left is not about the fillet either. Corner cells exist now and these
+# pockets close correctly — pinned exactly, against a shrink-and-grow reference,
+# in FilletCompare_test.cc. But at every corner a sphere sits tangent to three
+# walls, and the surfaces meeting along those tangencies leave triangles too
+# small to survive CGAL quantising its input, so the applied result is still not
+# a solid the Nef kernel will dilate. Reducing that tangential contact is what
+# turns these green; nothing about the corner geometry will.
 case_junction3_pocket   *  sandwich  FAIL
 case_junction4_pocket   *  sandwich  FAIL
 
-# Where chains meet, each one rolls its own ball straight past the meeting point
-# and there is no corner cell to put back what the balls take between them, so
-# the apex is cut off rather than capped. On the 3-face cone that is enough to
-# push the result more than a radius away from the model; the 4-face apex is
-# blunter and still fits inside the sandwich.
+# These two are red because "sandwich" cannot pass on a sharp apex, not because
+# the apex is wrong. The check asks that the result stay within the tool's own
+# size of the model, and rounding a point moves the surface by far more than the
+# radius: a ball of 6 seated in a 30 x 60 cone tops out 18.7 below the tip, so
+# the correct answer is three radii from the model. That is the coarseness a
+# reference-free check is documented to have. The exact comparison lives in
+# FilletCompare_test.cc, where both apexes are checked against the true rounded
+# solid; here the contour stack is what to look at, and a section below the
+# corner comes out a circle because it is the corner ball cut by a plane.
 case_junction3_apex     small  sandwich  FAIL
+case_junction4_apex     small  sandwich  FAIL
 
 # Same two kinds of red, on the cases from junction-cases.md.
 #
@@ -70,17 +80,14 @@ case_junction5_pocket_skew  small  sandwich  FAIL
 # will still be here when the operator is finished.
 case_junction_flat_apex     small  sandwich  FAIL
 
-# The needle's under-fill is real and severe — its beads stop eighty radii below
-# the apex — but this line is not about that. Dilating a 3 x 120 spike through
-# CGAL's Nef kernel does not finish: measured at CHECK_TIMEOUT=1200 it was still
-# going at twenty minutes of CPU, so the check never returns a verdict at all. The
-# case is carried on its picture and its header note until the runout fallback
-# lands; the geometry it is really about is measured there, not here.
-#
-# It costs the suite one CHECK_TIMEOUT — three minutes by default — on every full
-# run. That is the price of keeping a known-bad corner in the suite rather than
-# in a comment, and CHECK_TIMEOUT can be lowered for a quick pass.
-case_junction_needle        small  sandwich  TIMEOUT
+# The needle used to sit here twice over: its beads stopped eighty radii below
+# the apex, and dilating a 3 x 120 spike through CGAL took longer than any bound
+# worth setting, so the check never returned a verdict. Both are gone. The size
+# gate refuses the three slant creases — the spike is thinner than the tool for
+# its last 27 mm — so only the base beads are built, the tip is left alone, and
+# what the check has to dilate is small enough to finish. The runout fallback
+# that the under-fill was waiting for exists, and is exercised in
+# FilletBuilder_test.cc, which calls the builder without the gate in front.
 
 # Brush selection is not built, so the tool rounds the whole chain instead of the
 # half the brush picks out, and the residual is the half that should not be
@@ -88,12 +95,9 @@ case_junction_needle        small  sandwich  TIMEOUT
 # the model, which is exactly the coarseness "sandwich" is documented to have.
 case_brush_halfchain    *  tool      FAIL
 
-# Nothing validates the size against the feature yet, so no tool is ever refused
-# and no warning is ever emitted: every "drops" check is red. Every tool gets
-# there the same way now — by building a tool it should have refused. On the cube
-# that tool is big enough to be seen twice: r = 30 on a 40 mm face means the
-# neighbouring edges' rounds meet and eat the face between them, and the result
-# ends up further from the model than the radius it was asked for. Same missing
-# check, and it goes green with it.
-case_outer_edge_round   large  sandwich  FAIL
-*                       *      drops     FAIL
+# Nothing is listed for "drops" any more: a size the feature cannot carry is
+# refused with a warning, one crease at a time, so all five drop variants pass.
+# What each of them is refused FOR differs, which is the point of having five —
+# the L's oversized fillet and chamfer would leave the faces they are meant to
+# meet, while the cube's round and bevel and the hole mouth are each competing
+# with a feature that reaches back the other way.

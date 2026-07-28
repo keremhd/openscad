@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <utility>
 #include <vector>
 
 #include <manifold/manifold.h>
@@ -185,6 +186,46 @@ Manifold roundToolFor(const Manifold& target, double r, bool concave, int arcSeg
 
 Manifold box(double sx, double sy, double sz) { return Manifold::Cube(vec3(sx, sy, sz), false); }
 
+// Rounding a convex solid by r, exactly: shrink it by r and grow it back with a
+// ball of r. Both halves are exact rather than idiomatic — eroding a polytope is
+// pushing each of its face planes in by r, and growing a convex body by a ball
+// is the hull of balls at its vertices — so this is the answer every edge and
+// every corner of a convex model has to reproduce at once, corners included.
+// The face planes and the vertices are read off the solid's own mesh, so a case
+// states its model once instead of restating its geometry as a reference.
+Manifold refRoundedConvex(const Manifold& solid, double r)
+{
+  const manifold::MeshGL64 mesh = solid.GetMeshGL64();
+  const size_t stride = mesh.numProp;
+  auto vert = [&](size_t i) {
+    const size_t base = mesh.triVerts[i] * stride;
+    return vec3(mesh.vertProperties[base], mesh.vertProperties[base + 1],
+                mesh.vertProperties[base + 2]);
+  };
+
+  Manifold eroded = solid;
+  std::vector<std::pair<vec3, double>> planes;
+  for (size_t i = 0; i + 2 < mesh.triVerts.size(); i += 3) {
+    const vec3 a = vert(i), b = vert(i + 1), c = vert(i + 2);
+    const vec3 n = manifold::la::normalize(manifold::la::cross(b - a, c - a));
+    const double d = manifold::la::dot(n, a);
+    bool seen = false;
+    for (const auto& [pn, pd] : planes)
+      if (manifold::la::dot(pn, n) > 1.0 - 1e-9 && std::abs(pd - d) < 1e-9) { seen = true; break; }
+    if (seen) continue;
+    planes.emplace_back(n, d);
+    eroded = eroded.TrimByPlane(-n, -(d - r));
+  }
+
+  std::vector<Manifold> balls;
+  const manifold::MeshGL64 core = eroded.GetMeshGL64();
+  for (size_t i = 0; i + 2 < core.vertProperties.size(); i += core.numProp)
+    balls.push_back(Manifold::Sphere(r, kRefSegments)
+                      .Translate(vec3(core.vertProperties[i], core.vertProperties[i + 1],
+                                      core.vertProperties[i + 2])));
+  return Manifold::Hull(balls);
+}
+
 }  // namespace
 
 TEST_CASE("comparison: tessellation differences pass, size differences do not")
@@ -293,15 +334,15 @@ TEST_CASE("round_tool: one cube edge matches the hand-written reference")
 TEST_CASE("round_tool: beads meeting at a corner do not hollow each other out")
 {
   // Three creases meet at every cube corner and each rolls its own ball. Those
-  // balls reach past the corner into the neighbouring beads, so subtracting all
-  // of them from all the wedges at once eats away the very material the
-  // neighbours are there to remove, and the cube keeps a lump on every corner
-  // instead of losing one. What belongs where chains meet is a corner cell, not
-  // a hole, and until there is one the beads have to be left alone.
+  // balls reach past the corner into the neighbouring beads, and subtracting all
+  // of them from all the wedges at once would eat away the very material the
+  // neighbours are there to remove — unless each spine stops where its ball
+  // first touches the third wall, which is what makes the canal exactly the set
+  // of positions the ball can reach.
   //
-  // The probe sits in the top edge's bead and outside its own ball, so it is
-  // tool whatever happens at the corner — but it is inside the vertical edge's
-  // ball, which is what a single global subtraction would remove it with.
+  // The probe sits in the top edge's bead, outside that bead's own ball, and
+  // 3.35 from the corner ball's centre against a radius of 3 — so it is tool on
+  // every count, and it is what an untruncated spine would wrongly remove.
   const double s = 16.0, r = 3.0;
   const auto model = box(s, s, s);
 
@@ -310,6 +351,122 @@ TEST_CASE("round_tool: beads meeting at a corner do not hollow each other out")
 
   const auto probe = box(0.4, 0.4, 0.4).Translate(vec3(13.8, 15.3, 15.3));
   CHECK(enclosesNothing(probe - tool, probe.Volume()));
+}
+
+TEST_CASE("round_tool: the cube corner closes onto the true rounded solid")
+{
+  // The acceptance the edge cells alone cannot reach: three beads meeting at a
+  // corner leave a lump there whatever the radius, and only a corner cell with
+  // its own ball taken out of it gives the spherical patch. Compared against the
+  // exact shrink-and-grow answer, which pins the twelve edges and the eight
+  // corners in the same statement.
+  const double s = 16.0, r = 3.0;
+  const auto model = box(s, s, s);
+
+  const auto tool = roundToolFor(model, r, /*concave=*/false, 48);
+  REQUIRE_FALSE(tool.IsEmpty());
+
+  CHECK(agreesWithin(model - tool, refRoundedConvex(model, r), 0.02 * r));
+}
+
+TEST_CASE("round_tool: a three-face and a four-face apex both close")
+{
+  // Corners of valence three and four in one statement. A low-$fn cone is a
+  // pyramid, so the apex is where three (or four) slant creases meet at once and
+  // every base corner is a valence-three junction of two base creases and a
+  // slant — and being convex, the whole rounded solid has the exact
+  // shrink-and-grow answer, apex included.
+  //
+  // Four walls do not generally leave the ball one place to sit, which is why
+  // the corner is solved as every triple of walls filtered down to the positions
+  // that clear the rest. A symmetric apex is the case where those all coincide;
+  // it still has to come out right, and it is the one that says the filter has
+  // not thrown the answer away.
+  const double R = 30.0, h = 60.0, r = 6.0;
+
+  for (const int sides : {3, 4}) {
+    const auto model = Manifold::Cylinder(h, R, 0.0, sides, false);
+    const auto tool = roundToolFor(model, r, /*concave=*/false, 24);
+    REQUIRE_FALSE(tool.IsEmpty());
+    const auto ref = refRoundedConvex(model, r);
+    REQUIRE_FALSE(ref.IsEmpty());
+    CHECK(agreesWithin(model - tool, ref, 0.02 * r));
+  }
+}
+
+TEST_CASE("fillet_tool: a three-face and a four-face pocket both close")
+{
+  // The same two apexes turned inside out: a pyramidal pocket in a block, where
+  // the creases are concave and the ball rolls in the void rather than the
+  // solid. The void is the pyramid, so filling the pocket's creases is rounding
+  // that pyramid's own edges — the same exact answer, subtracted from the block
+  // instead of from the model.
+  const double R = 30.0, h = 60.0, r = 6.0, cap = 5.0;
+
+  for (const int sides : {3, 4}) {
+    const auto pocket = Manifold::Cylinder(h, R, 0.0, sides, false);
+    // The block runs past the tip, so the pocket ends inside it. Flush, the
+    // solid would pinch to a point at the apex, which is a property of the model
+    // and not of the fillet, but it makes every downstream boolean harder.
+    const auto block = box(4 * R, 4 * R, h + cap).Translate(vec3(-2 * R, -2 * R, 0));
+    const auto model = block - pocket;
+
+    const auto tool = roundToolFor(model, r, /*concave=*/true, 24);
+    REQUIRE_FALSE(tool.IsEmpty());
+    const auto ref = block - refRoundedConvex(pocket, r);
+    REQUIRE_FALSE(ref.IsEmpty());
+
+    // Clipped above the pocket's mouth. The rim where it opens is a convex edge
+    // of the block, not a concave one — the pocket walls lean away from the
+    // bottom face rather than into it — so `fillet_tool` rightly leaves it alone
+    // while rounding the void rounds it too. Everything the case is about, the
+    // slant creases and the apex they meet at, is well clear of it.
+    const auto clip = box(4 * R, 4 * R, h + cap).Translate(vec3(-2 * R, -2 * R, 2 * r));
+    CHECK(agreesWithin((model + tool) ^ clip, ref ^ clip, 0.02 * r));
+  }
+}
+
+TEST_CASE("fillet_tool: the inside box corner closes")
+{
+  // The concave counterpart, and the case §6.3 is written about: an octant
+  // notched out of a block leaves three concave creases meeting at one reentrant
+  // corner. Filling it correctly means the *void* ends up rounded, and the void
+  // is convex where it matters, so the same hull-of-balls reference applies to
+  // it — placed so that only the notch's own corner is inside the block and the
+  // far ones fall outside, where the block clips them away.
+  const double s = 40.0, cut = 20.0, r = 4.0;
+  const auto block = box(s, s, s);
+  const auto model = block - box(cut, cut, cut).Translate(vec3(cut, cut, cut));
+
+  const auto tool = roundToolFor(model, r, /*concave=*/true, 48);
+  REQUIRE_FALSE(tool.IsEmpty());
+
+  const double far = 3.0 * s;
+  std::vector<Manifold> balls;
+  for (int c = 0; c < 8; ++c)
+    balls.push_back(Manifold::Sphere(r, kRefSegments)
+                      .Translate(vec3((c & 1) ? far : cut + r, (c & 2) ? far : cut + r,
+                                      (c & 4) ? far : cut + r)));
+  const auto ref = block - Manifold::Hull(balls);
+
+  CHECK(agreesWithin(model + tool, ref, 0.02 * r));
+
+  // And the statement that pins the corner numerically rather than by its
+  // bounds. A tenth of a radius above the corner, the ball at (cut+r)^3 cuts the
+  // plane in a circle of radius sqrt(r^2 - (0.9r)^2), so the remaining void is
+  // the notch square pulled back to that circle and rounded on it — the hull of
+  // four such circles, three of them pushed out of the block. Get the corner
+  // wrong in either direction and this misses, at a tolerance a fiftieth of r.
+  const double z = cut + 0.1 * r;
+  const double rq = std::sqrt(r * r - 0.81 * r * r);
+  const auto slab = box(s, s, 0.002).Translate(vec3(0, 0, z - 0.001));
+
+  std::vector<Manifold> pillars;
+  for (int c = 0; c < 4; ++c)
+    pillars.push_back(Manifold::Cylinder(s, rq, rq, kRefSegments, false)
+                        .Translate(vec3((c & 1) ? far : cut + r, (c & 2) ? far : cut + r, 0)));
+
+  CHECK(agreesWithin((block - (model + tool)) ^ slab, Manifold::Hull(pillars) ^ slab, 0.02 * r));
 }
 
 TEST_CASE("round_tool: the hole mouth matches annulus prism minus torus")
@@ -363,6 +520,55 @@ TEST_CASE("comparison: a wedge of the wrong size is caught")
   const auto tool = toolFor(model, t, /*concave=*/true);
   const auto refTooBig = refWedgeZ(6.0, 6.0, 1.2 * t, h, 0.0, /*concave=*/true);
   CHECK_FALSE(agreesWithin(tool, refTooBig, 0.02 * t));
+}
+
+
+TEST_CASE("round_tool: asymmetric junctions of valence four, five and six")
+{
+  // The case the corner solve is actually general for. Shearing a pyramid moves
+  // its apex off the axis, so the incident walls pushed in by r no longer share
+  // one point and the ball has several extreme positions there rather than one —
+  // four sides give two, five give three, six give four. Each is tangent to
+  // three walls and clear of the rest; a triple that is tangent to its own three
+  // and buried in a fourth would gouge the fillet back from that fourth wall,
+  // and discarding those is what the filter is for.
+  //
+  // Radius kept well inside the feature. Larger, and neighbouring beads on the
+  // shallowest creases (this shape has one at 130 degrees, where the tangency
+  // setback is over twice r) start colliding, which is the unsettled oversize
+  // question and not a statement about the corner.
+  const double R = 30.0, h = 60.0, r = 2.0;
+
+  for (const int sides : {4, 5, 6}) {
+    CAPTURE(sides);
+    manifold::mat3x4 shear = manifold::la::identity;
+    shear[2][0] = 0.45;  // x += 0.45 z
+    shear[2][1] = 0.20;
+    const auto model = Manifold::Cylinder(h, R, 0.0, sides, false).Transform(shear);
+
+    // The apex really is the multi-centre case, not a symmetric one in disguise.
+    const auto mm = mergeMesh(model.GetMeshGL64());
+    const auto adj = buildEdgeAdjacency(mm.tris);
+    const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*concave=*/false));
+    size_t apexCentres = 0;
+    for (const auto& j : chainJunctions(mm, adj, chains, r, /*concave=*/false))
+      if (j.faceNormals.size() == static_cast<size_t>(sides)) apexCentres = j.ballCentres.size();
+    CHECK(apexCentres == static_cast<size_t>(sides - 2));
+
+    const auto tool = roundToolFor(model, r, /*concave=*/false, 24);
+    REQUIRE_FALSE(tool.IsEmpty());
+    CHECK(agreesWithin(model - tool, refRoundedConvex(model, r), 0.02 * r));
+
+    // And the same solid as a pocket, so the concave sign gets the same corners.
+    // Clipped above the mouth, whose rim is a convex edge the tool leaves alone.
+    const auto block = box(6 * R, 6 * R, h + 5.0).Translate(vec3(-3 * R, -3 * R, 0));
+    const auto pocket = block - model;
+    const auto pocketTool = roundToolFor(pocket, r, /*concave=*/true, 24);
+    REQUIRE_FALSE(pocketTool.IsEmpty());
+    const auto clip = box(6 * R, 6 * R, h + 5.0).Translate(vec3(-3 * R, -3 * R, 2 * r));
+    CHECK(agreesWithin((pocket + pocketTool) ^ clip,
+                       (block - refRoundedConvex(model, r)) ^ clip, 0.02 * r));
+  }
 }
 
 #endif  // ENABLE_MANIFOLD

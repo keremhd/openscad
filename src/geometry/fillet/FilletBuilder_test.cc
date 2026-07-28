@@ -11,11 +11,13 @@
 
 #include "geometry/fillet/FilletBuilder_internal.h"
 
+#include <algorithm>
 #include <cmath>
 #include <cstddef>
 #include <functional>
 #include <map>
 #include <optional>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -428,6 +430,302 @@ TEST_CASE("wedge: an empty chain list builds nothing")
   const auto chains = buildChains(mm, edges);
   CHECK(chains.empty());
   CHECK(buildWedgeSolid(mm, adj, chains, 1.0, /*concave=*/true).IsEmpty());
+}
+
+namespace {
+
+// One model put through the size gate: the chains a tool would walk on it, and
+// the verdict on each.
+struct SizeRun
+{
+  MergedMesh mm;
+  std::map<EdgeKey, std::vector<int>> adj;
+  std::vector<Chain> chains;
+  std::vector<SizeVerdict> verdicts;
+};
+
+SizeRun sizeRun(const manifold::Manifold& solid, double size, bool concave, bool wedge = false,
+                double thresholdDeg = 20.0)
+{
+  SizeRun run;
+  run.mm = mergeMesh(solid.GetMeshGL64());
+  run.adj = buildEdgeAdjacency(run.mm.tris);
+  run.chains = buildChains(run.mm, selectedEdges(run.mm, run.adj, thresholdDeg, concave));
+  run.verdicts =
+    checkChainSizes(run.mm, run.adj, run.chains, size, concave, wedge, thresholdDeg);
+  return run;
+}
+
+size_t countFault(const std::vector<SizeVerdict>& verdicts, SizeFault fault)
+{
+  return static_cast<size_t>(
+    std::count_if(verdicts.begin(), verdicts.end(),
+                  [fault](const SizeVerdict& v) { return v.fault == fault; }));
+}
+
+// An L whose two faces are `arm` long: one concave crease, and the only thing
+// limiting the size is how far each face reaches.
+manifold::Manifold ell(double arm, double thickness, double height)
+{
+  return box(arm, thickness, height) + box(thickness, arm, height);
+}
+
+}  // namespace
+
+TEST_CASE("zzdebug rib", "[.]")
+{
+  const auto model = box(60.0, 40.0, 6.0) + box(30.0, 4.0, 20.0).Translate(manifold::vec3(10.0, 18.0, 6.0));
+  const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 20.0, true));
+  const auto surf = smoothSurfaces(mm, adj, 20.0);
+  for (size_t ci = 0; ci < chains.size(); ++ci) {
+    const auto cs = chainContacts(mm, adj, chains[ci], 1.5, true, false, surf, 3);
+    for (const auto& c : cs) {
+      if (!c.valid) continue;
+      double bA = 1e30, bB = 1e30;
+      for (size_t t = 0; t < mm.tris.size(); ++t) {
+        const auto& tr = mm.tris[t];
+        if (surf[t] == c.surfaceA)
+          bA = std::min(bA, pointTriangleDistance(c.TA, mm.pos[tr.v[0]], mm.pos[tr.v[1]], mm.pos[tr.v[2]]));
+        if (surf[t] == c.surfaceB)
+          bB = std::min(bB, pointTriangleDistance(c.TB, mm.pos[tr.v[0]], mm.pos[tr.v[1]], mm.pos[tr.v[2]]));
+      }
+      if (bA > 0.05 || bB > 0.05)
+        WARN("chain " << ci << " v=(" << c.v.x() << "," << c.v.y() << "," << c.v.z() << ")"
+             << " TA=(" << c.TA.x() << "," << c.TA.y() << "," << c.TA.z() << ") sA=" << c.surfaceA << " offA=" << bA
+             << " TB=(" << c.TB.x() << "," << c.TB.y() << "," << c.TB.z() << ") sB=" << c.surfaceB << " offB=" << bB);
+    }
+  }
+}
+
+TEST_CASE("size: a blend wider than the face it must meet is refused")
+{
+  // The tangency points of a radius-6 bead land 6 along each 30 mm face; at 35
+  // they land 5 past the end of both, so the bead would touch nothing. There is
+  // no smaller bead that is still the one asked for, so the crease is dropped.
+  const auto model = ell(40.0, 10.0, 60.0);
+
+  const SizeRun fits = sizeRun(model, 6.0, /*concave=*/true);
+  REQUIRE(fits.chains.size() == 1);
+  CHECK(fits.verdicts[0].fault == SizeFault::Fits);
+
+  const SizeRun over = sizeRun(model, 35.0, /*concave=*/true);
+  REQUIRE(over.chains.size() == 1);
+  CHECK(over.verdicts[0].fault == SizeFault::OffFace);
+  CHECK(over.verdicts[0].amount == Approx(5.0).margin(1e-6));
+  CHECK(over.verdicts[0].where.x() == Approx(10.0));
+  CHECK(over.verdicts[0].where.y() == Approx(10.0));
+}
+
+TEST_CASE("size: a chamfer setback is measured against the same face")
+{
+  // The wedge tools take the setback directly, so the same 30 mm face is what
+  // bounds it — and at 90 degrees the ball whose tangency points are those
+  // setback points has exactly the setback as its radius.
+  const auto model = ell(40.0, 10.0, 60.0);
+
+  CHECK(sizeRun(model, 6.0, /*concave=*/true, /*wedge=*/true).verdicts[0].fault ==
+        SizeFault::Fits);
+  const SizeRun over = sizeRun(model, 35.0, /*concave=*/true, /*wedge=*/true);
+  CHECK(over.verdicts[0].fault == SizeFault::OffFace);
+  CHECK(over.verdicts[0].amount == Approx(5.0).margin(1e-6));
+}
+
+TEST_CASE("size: creases closer together than the tool's reach are refused")
+{
+  // A wall standing 10 mm from another wall's foot. At r = 3 the two beads have
+  // 4 mm between them and both are built; at r = 8 each one's ball reaches
+  // through the other's bead to its root, and neither crease can be filled as
+  // asked. The third crease, on the far side of the second wall, has nothing
+  // within reach and survives both times.
+  const auto model = box(60.0, 40.0, 5.0) + box(4.0, 40.0, 25.0) +
+                     box(4.0, 40.0, 25.0).Translate(manifold::vec3(14.0, 0.0, 5.0));
+
+  const SizeRun fits = sizeRun(model, 3.0, /*concave=*/true);
+  REQUIRE(fits.chains.size() == 3);
+  CHECK(countFault(fits.verdicts, SizeFault::Fits) == 3);
+
+  const SizeRun over = sizeRun(model, 8.0, /*concave=*/true);
+  REQUIRE(over.chains.size() == 3);
+  CHECK(countFault(over.verdicts, SizeFault::Crowded) == 2);
+  CHECK(countFault(over.verdicts, SizeFault::Fits) == 1);
+
+  // The two that fail are the pair facing each other across the gap, and the
+  // distance reported is to the neighbour's bead root, not to its crease.
+  for (size_t i = 0; i < over.chains.size(); ++i)
+    if (over.verdicts[i].fault == SizeFault::Crowded)
+      CHECK(over.verdicts[i].where.x() < 15.0);
+}
+
+TEST_CASE("size: a cube's rounds are limited by the edge across the face")
+{
+  // Nothing is off its face here — r = 30 reaches back only 30 of the 40 mm
+  // available — but the edge on the other side of that face reaches 30 the
+  // other way, so the two want the same material. Every edge fails for that
+  // reason, and none for the first.
+  const auto model = box(40.0, 40.0, 60.0);
+
+  const SizeRun fits = sizeRun(model, 6.0, /*concave=*/false);
+  REQUIRE(fits.chains.size() == 12);
+  CHECK(countFault(fits.verdicts, SizeFault::Fits) == 12);
+
+  const SizeRun over = sizeRun(model, 30.0, /*concave=*/false);
+  CHECK(countFault(over.verdicts, SizeFault::Crowded) == 12);
+  CHECK(countFault(over.verdicts, SizeFault::OffFace) == 0);
+}
+
+TEST_CASE("runout: a corner with no seated ball fades the blend out to the vertex")
+{
+  // A 3 x 120 spike. The ball seated against all three slant walls sits eighty
+  // radii down the axis, which the sanity bound refuses, so the apex gets no
+  // corner. Truncating into it anyway is what used to leave the beads stopping
+  // 80 mm short with a sharp spike standing over them; the ramp takes the radius
+  // to nothing at the vertex instead, so the tool reaches the tip.
+  const double r = 1.0;
+  const auto needle = manifold::Manifold::Cylinder(120.0, 3.0, 0.0, 3, false);
+  const MergedMesh mm = mergeMesh(needle.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 20.0, /*wantConcave=*/false));
+
+  const auto junctions = chainJunctions(mm, adj, chains, r, /*concave=*/false);
+  const Junction *apex = nullptr;
+  for (const auto& j : junctions)
+    if (mm.pos[j.vert].z() > 119.0) apex = &j;
+  REQUIRE(apex != nullptr);
+  CHECK(apex->ballCentres.empty());
+
+  const auto tool = buildRoundSolid(mm, adj, chains, r, /*concave=*/false, 24);
+  REQUIRE_FALSE(tool.IsEmpty());
+  CHECK(tool.BoundingBox().max[2] == Approx(120.0).margin(1e-6));
+
+  // And what it leaves behind is still a solid: the point of the fallback is a
+  // valid shape whose blend fades, not a hole where a corner should be.
+  const auto rounded = needle - tool;
+  REQUIRE_FALSE(rounded.IsEmpty());
+  CHECK(rounded.Genus() == 0);
+}
+
+TEST_CASE("size: a feature that tapers below the tool's reach is refused")
+{
+  // The same spike, asked the question the operator asks before building
+  // anything. A crease has stations only where the mesh has vertices, and this
+  // one has two: the base corner and the apex, both junctions. Everything that
+  // is wrong with a radius of 1 here happens between them — the spike is
+  // narrower than the tool's own setback for its last 27 mm, so the tool would
+  // take the tip off rather than round it — and it is caught only because the
+  // crease is sampled along its length and not just at its ends.
+  const auto needle = manifold::Manifold::Cylinder(120.0, 3.0, 0.0, 3, false);
+  const MergedMesh mm = mergeMesh(needle.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 20.0, /*wantConcave=*/false));
+
+  const auto verdicts =
+    checkChainSizes(mm, adj, chains, 1.0, /*concave=*/false, /*wedge=*/false, 20.0);
+
+  // Six creases: three up the slant, three around the base. The slant ones are
+  // refused and the base ones are not — the spike is only too thin where it has
+  // tapered, and the base is as wide as it ever gets.
+  REQUIRE(chains.size() == 6);
+  CHECK(countFault(verdicts, SizeFault::OffFace) == 3);
+  CHECK(countFault(verdicts, SizeFault::Fits) == 3);
+  for (const auto& v : verdicts)
+    if (v.fault == SizeFault::OffFace) CHECK(v.where.z() > 80.0);
+}
+
+TEST_CASE("surfaces: a seam joins two triangles into one wall, a crease does not")
+{
+  // What the size gate asks a contact point to land on is a surface, not a
+  // triangle: a bore's facets are one wall the ball rides, while a cube's six
+  // faces stay six.
+  const auto cube = box(10.0, 10.0, 10.0);
+  const MergedMesh cm = mergeMesh(cube.GetMeshGL64());
+  const auto cAdj = buildEdgeAdjacency(cm.tris);
+  const auto cSurfaces = smoothSurfaces(cm, cAdj, 20.0);
+  REQUIRE(cSurfaces.size() == cm.tris.size());
+  CHECK(std::set<int>(cSurfaces.begin(), cSurfaces.end()).size() == 6);
+
+  // A 32-sided cylinder: the side is one surface at 11.25 degrees a seam, and
+  // the two caps are one each.
+  const auto cyl = manifold::Manifold::Cylinder(10.0, 5.0, 5.0, 32, false);
+  const MergedMesh ym = mergeMesh(cyl.GetMeshGL64());
+  const auto yAdj = buildEdgeAdjacency(ym.tris);
+  const auto ySurfaces = smoothSurfaces(ym, yAdj, 20.0);
+  CHECK(std::set<int>(ySurfaces.begin(), ySurfaces.end()).size() == 3);
+}
+
+TEST_CASE("junctions: a cube corner solves to the one ball seated in all three walls")
+{
+  // Eight corners, each three walls, each one place a ball of r can sit: the
+  // symmetric answer is r in from all three faces, which for a cube of side s
+  // puts every centre on a corner of the box [r, s-r]^3.
+  const double s = 16.0, r = 3.0;
+  const auto model = box(s, s, s);
+  const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/false));
+
+  const auto junctions = chainJunctions(mm, adj, chains, r, /*concave=*/false);
+  REQUIRE(junctions.size() == 8);
+  for (const auto& j : junctions) {
+    CHECK(j.faceNormals.size() == 3);
+    REQUIRE(j.ballCentres.size() == 1);
+    const Vector3d v = mm.pos[j.vert];
+    const Vector3d P = j.ballCentres.front();
+    for (int k = 0; k < 3; ++k) CHECK(P[k] == Approx(v[k] == 0.0 ? r : s - r));
+  }
+}
+
+TEST_CASE("junctions: four walls meeting on an axis keep the one centre they share")
+{
+  // A four-sided pyramid's apex. Four walls do not generally leave the ball one
+  // place to sit, so the corner is solved as every triple of walls filtered down
+  // to the ones clear of the rest — and here all four triples give the same
+  // answer, on the axis. The filter must keep it rather than reject it for
+  // sitting exactly on the fourth wall, and the dedup must not report it four
+  // times.
+  const double R = 30.0, h = 60.0, r = 6.0;
+  const auto model = manifold::Manifold::Cylinder(h, R, 0.0, 4, false);
+  const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/false));
+
+  const auto junctions = chainJunctions(mm, adj, chains, r, /*concave=*/false);
+  // The apex plus the four base corners.
+  REQUIRE(junctions.size() == 5);
+
+  const auto apex = std::find_if(junctions.begin(), junctions.end(), [&](const Junction& j) {
+    return mm.pos[j.vert].z() == Approx(h);
+  });
+  REQUIRE(apex != junctions.end());
+  CHECK(apex->faceNormals.size() == 4);
+  REQUIRE(apex->ballCentres.size() == 1);
+
+  const Vector3d P = apex->ballCentres.front();
+  CHECK(P.x() == Approx(0.0).margin(1e-9));
+  CHECK(P.y() == Approx(0.0).margin(1e-9));
+  // Seated against all four slant walls, so it is exactly r from each of them.
+  for (const Vector3d& n : apex->faceNormals)
+    CHECK(-n.dot(P - mm.pos[apex->vert]) == Approx(r));
+}
+
+TEST_CASE("junctions: walls that cannot pin a point down produce no corner")
+{
+  // Three creases meeting where the walls are all parallel to one axis: the 3x3
+  // is singular, and the solve would hand a hull coordinates at 1e30 rather than
+  // fail cleanly. A prism whose cross-section is an L has exactly that shape at
+  // its concave crease — every wall is vertical — and the crease is a plain
+  // two-face edge, so no junction should be reported at all.
+  const auto model = box(10.0, 10.0, 4.0) + box(4.0, 20.0, 4.0);
+  const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/true));
+
+  for (const auto& j : chainJunctions(mm, adj, chains, 1.0, /*concave=*/true))
+    for (const Vector3d& P : j.ballCentres) {
+      CHECK(std::isfinite(P.norm()));
+      CHECK((P - mm.pos[j.vert]).norm() <= 10.0);
+    }
 }
 
 TEST_CASE("spine: a slit too narrow to roll a ball into is skipped, not solved")

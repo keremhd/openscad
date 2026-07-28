@@ -131,12 +131,14 @@ struct Chain
 std::vector<Chain> buildChains(const MergedMesh& m, const std::vector<EdgeKey>& edges);
 
 // The two wall normals at one chain station, averaged over the station's
-// incident chain edges. `valid` is false where the station has no usable pair
-// (a dangling edge, a degenerate triangle).
+// incident chain edges. `triA`/`triB` name one triangle of each wall, which is
+// the handle onto the surface that wall belongs to. `valid` is false where the
+// station has no usable pair (a dangling edge, a degenerate triangle).
 struct StationNormals
 {
   Vector3d v;
   Vector3d nA, nB;
+  int triA = -1, triB = -1;
   bool valid = false;
 };
 
@@ -175,6 +177,93 @@ std::vector<SpineFrame> spineFrames(const MergedMesh& m,
                                     const std::map<EdgeKey, std::vector<int>>& adj,
                                     const Chain& chain, double r, bool concave);
 
+// Group the triangles into surfaces: two triangles belong to the same surface
+// when the edge between them is a seam rather than a crease, i.e. when its
+// dihedral falls below the same threshold that separates feature edges from
+// tessellation. Returns one surface id per triangle. A bore's facets come out as
+// one surface, a cube's six faces as six.
+std::vector<int> smoothSurfaces(const MergedMesh& m,
+                                const std::map<EdgeKey, std::vector<int>>& adj,
+                                double thresholdDeg);
+
+// Where the tool meets the model at one chain station, and the ball seated in
+// the crease there. For the rounded tools that ball is the one being rolled; for
+// the wedge tools it is the ball whose tangency points are the setback points,
+// which is the same object for the purpose of asking how much room the tool
+// needs. `surfaceA`/`surfaceB` are the surfaces the two contact points must land
+// on for the tool to meet the model tangentially at all.
+struct ChainContact
+{
+  Vector3d v;
+  Vector3d C;
+  Vector3d TA, TB;
+  double radius = 0.0;
+  int surfaceA = -1, surfaceB = -1;
+  int vert = -1;      // the mesh vertex, or -1 between two of them
+  double slack = 0.0; // how far off its wall this contact point may legitimately sit
+  bool valid = false;
+};
+
+// The contact points and seated ball along a chain. `wedge` selects the
+// chamfer/bevel reading of `size` (a setback taken directly) over the rounded
+// one (a radius, whose setback is r*tan(phi/2)).
+//
+// `samplesPerSegment` adds points between the stations, with the walls
+// interpolated. A crease is only ever sampled where the mesh has a vertex, and
+// on a tapering feature — a spike, a wedge running to nothing — the room
+// available between two stations can fall below what the tool needs without
+// either station noticing.
+std::vector<ChainContact> chainContacts(const MergedMesh& m,
+                                        const std::map<EdgeKey, std::vector<int>>& adj,
+                                        const Chain& chain, double size, bool concave, bool wedge,
+                                        const std::vector<int>& surfaceOf,
+                                        int samplesPerSegment = 0);
+
+// Distance from a point to a closed triangle — face, edge or corner, whichever
+// is nearest. What the size gate asks with it is whether a contact point still
+// lands on the wall it is meant to touch.
+double pointTriangleDistance(const Vector3d& p, const Vector3d& a, const Vector3d& b,
+                             const Vector3d& c);
+
+// Why a chain cannot carry the size it was asked for.
+//
+// A size that does not fit is refused, not clamped: clamping one crease forces
+// the creases it meets to agree, and following that to its fixed point runs a
+// min over the whole connected network, so one tight corner would silently
+// resize a fillet on the far side of the part.
+enum class SizeFault
+{
+  Fits,
+  OffFace,  // the contact line runs off the end of the wall it should meet
+  Crowded,  // a neighbouring crease sits inside the space this one needs
+};
+
+// One chain's verdict, carrying where it was decided and by how much, so the
+// warning can say what is wrong rather than only that something is.
+struct SizeVerdict
+{
+  SizeFault fault = SizeFault::Fits;
+  Vector3d where = Vector3d::Zero();
+  double amount = 0.0;
+};
+
+// Check every chain against the size asked for, in two ways.
+//
+// The tool has to *touch* the model: a contact point past the far side of its
+// wall means no size-preserving blend exists there at all (the arms of an L
+// shorter than the radius). And it has to have the room it needs: a crease that
+// is not this one, sitting closer to the seated ball than the ball's own radius,
+// is a crease whose bead this one would eat — the two features are competing for
+// the same material, and neither can be built as asked.
+//
+// Creases that meet at a junction are exempt from the second test; that is what
+// junction cells are for. Both tests are answered per chain, and a chain that
+// fails is dropped whole.
+std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
+                                         const std::map<EdgeKey, std::vector<int>>& adj,
+                                         const std::vector<Chain>& chains, double size,
+                                         bool concave, bool wedge, double thresholdDeg);
+
 // The chamfer/bevel cross-section at one chain station: the convex pentagon
 // TA, TB, TB', v', TA'. TA and TB are the setback points on the two walls; the
 // primed points are the same corner pushed a hair past the walls (into material
@@ -197,8 +286,9 @@ std::vector<WedgeSection> wedgeSections(const MergedMesh& m,
                                         const Chain& chain, double t, bool concave);
 
 // Build the chamfer/bevel tool solid: hull each consecutive pair of wedge
-// sections into one cell, then union the cells. Junction cells are not built
-// yet, so chains meeting at a branch vertex simply overlap there. Returns an
+// sections into one cell, then union the cells. Chains meeting at a vertex
+// simply overlap there, which is what a chamfered corner is — the union of the
+// planar cuts — so these tools need no junction cell of their own. Returns an
 // empty manifold when nothing could be built.
 manifold::Manifold buildWedgeSolid(const MergedMesh& m,
                                    const std::map<EdgeKey, std::vector<int>>& adj,
@@ -215,6 +305,7 @@ struct RoundSection
 {
   std::array<Vector3d, 5> w;
   std::vector<Vector3d> u;
+  Vector3d C = Vector3d::Zero();
   bool valid = false;
 };
 
@@ -228,14 +319,43 @@ std::vector<RoundSection> roundSections(const MergedMesh& m,
                                         const Chain& chain, double r, bool concave,
                                         int arcSegments);
 
-// Build the fillet/round tool solid: per chain, the wedge W hulled from
-// consecutive sections minus the canal U hulled the same way, then the chains
-// unioned. Subtraction is per chain rather than per cell (a cell's arc has to
-// cut its neighbour's wedge wherever the spine bends) and rather than once
-// globally (a chain's ball must not hollow out the bead of another chain it
-// meets). Junction cells are not built yet, so what the balls take from each
-// other at a meeting point is not put back. Returns an empty manifold when
-// nothing could be built.
+// A vertex where three or more creases meet. `faceNormals` are the distinct
+// outward normals of every wall that touches the vertex — not just the walls of
+// the creases this tool selected, since a face arriving on an edge of the other
+// sign is no less solid — and `ballCentres` are the extreme positions the rolling
+// ball can occupy there.
+//
+// The legal positions near the vertex are the intersection of the walls' own
+// half-spaces pushed in by r, a convex region whose corners are exactly those
+// centres. Three walls pin down one corner, and every spine running into the
+// vertex stops at it simultaneously, which is what lets the corner close
+// exactly. More than three walls generally give several, because pushing them in
+// by r breaks up the single point the originals shared.
+struct Junction
+{
+  int vert = -1;
+  std::vector<Vector3d> faceNormals;
+  std::vector<Vector3d> ballCentres;
+};
+
+// Find the junctions among a chain set: vertices where three or more open-chain
+// ends land. A centre is kept only if it clears every wall it was not solved
+// against — a solution tangent to its own three walls but buried in a fourth
+// would gouge the fillet back from that fourth wall, so it is discarded rather
+// than clamped. Near-singular solves and centres absurdly far from the vertex
+// are rejected too, since both produce coordinates a hull will either choke on
+// or blow up around; a junction with no centre left simply gets no corner.
+std::vector<Junction> chainJunctions(const MergedMesh& m,
+                                     const std::map<EdgeKey, std::vector<int>>& adj,
+                                     const std::vector<Chain>& chains, double r, bool concave);
+
+// Build the fillet/round tool solid: the wedge W hulled from consecutive
+// sections along every chain, plus a corner cell at each junction, minus the
+// canal U hulled the same way, plus a ball at each corner. Spines are truncated
+// where the rolling ball would first cut into a wall it is not riding, so U is
+// exactly the set of positions the ball can occupy and the subtraction is a
+// single global one: the corner ball has to reach the wedges of every chain that
+// meets there. Returns an empty manifold when nothing could be built.
 manifold::Manifold buildRoundSolid(const MergedMesh& m,
                                    const std::map<EdgeKey, std::vector<int>>& adj,
                                    const std::vector<Chain>& chains, double r, bool concave,

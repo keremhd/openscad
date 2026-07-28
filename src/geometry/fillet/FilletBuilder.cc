@@ -24,6 +24,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <set>
@@ -323,24 +324,36 @@ std::vector<Chain> buildChains(const MergedMesh& m, const std::vector<EdgeKey>& 
   return chains;
 }
 
+namespace {
+
+// The two wall triangles of edge a->b, ordered so side A/B is consistent along a
+// consistently-walked chain (fixed handedness relative to the walk direction).
+bool sidedTris(const MergedMesh& m, const std::map<EdgeKey, std::vector<int>>& adj, int a, int b,
+               int& tA, int& tB)
+{
+  const auto it = adj.find(EdgeKey{std::min(a, b), std::max(a, b)});
+  if (it == adj.end() || it->second.size() != 2) return false;
+  tA = it->second[0];
+  tB = it->second[1];
+  Vector3d d = m.pos[b] - m.pos[a];
+  const double len = d.norm();
+  if (len < 1e-12) return false;
+  d /= len;
+  if (m.tris[tA].normal.cross(m.tris[tB].normal).dot(d) < 0) std::swap(tA, tB);
+  return true;
+}
+
+}  // namespace
+
 std::vector<StationNormals> chainNormals(const MergedMesh& m,
                                          const std::map<EdgeKey, std::vector<int>>& adj,
                                          const Chain& chain)
 {
-  auto edgeKey = [](int a, int b) { return EdgeKey{std::min(a, b), std::max(a, b)}; };
-
-  // The two wall normals of edge a->b, oriented so side A/B is consistent along a
-  // consistently-walked chain (fixed handedness relative to the walk direction).
   auto sidedNormals = [&](int a, int b, Vector3d& nA, Vector3d& nB) {
-    const auto it = adj.find(edgeKey(a, b));
-    if (it == adj.end() || it->second.size() != 2) return false;
-    nA = m.tris[it->second[0]].normal;
-    nB = m.tris[it->second[1]].normal;
-    Vector3d d = m.pos[b] - m.pos[a];
-    const double len = d.norm();
-    if (len < 1e-12) return false;
-    d /= len;
-    if (nA.cross(nB).dot(d) < 0) std::swap(nA, nB);
+    int tA = -1, tB = -1;
+    if (!sidedTris(m, adj, a, b, tA, tB)) return false;
+    nA = m.tris[tA].normal;
+    nB = m.tris[tB].normal;
     return true;
   };
 
@@ -356,8 +369,16 @@ std::vector<StationNormals> chainNormals(const MergedMesh& m,
     const int prevV = i > 0 ? chain.verts[i - 1] : (chain.closed ? chain.verts[n - 1] : -1);
     const int nextV = i < n - 1 ? chain.verts[i + 1] : (chain.closed ? chain.verts[0] : -1);
     Vector3d sumA = Vector3d::Zero(), sumB = Vector3d::Zero(), nA, nB;
-    if (prevV >= 0 && sidedNormals(prevV, v, nA, nB)) { sumA += nA; sumB += nB; }
-    if (nextV >= 0 && sidedNormals(v, nextV, nA, nB)) { sumA += nA; sumB += nB; }
+    if (prevV >= 0 && sidedNormals(prevV, v, nA, nB)) {
+      sumA += nA;
+      sumB += nB;
+      sidedTris(m, adj, prevV, v, s.triA, s.triB);
+    }
+    if (nextV >= 0 && sidedNormals(v, nextV, nA, nB)) {
+      sumA += nA;
+      sumB += nB;
+      if (s.triA < 0) sidedTris(m, adj, v, nextV, s.triA, s.triB);
+    }
     if (sumA.norm() >= 1e-9 && sumB.norm() >= 1e-9) {
       s.nA = sumA.normalized();
       s.nB = sumB.normalized();
@@ -411,6 +432,320 @@ std::vector<SpineFrame> spineFrames(const MergedMesh& m,
     frames[i] = f;
   }
   return frames;
+}
+
+std::vector<int> smoothSurfaces(const MergedMesh& m,
+                                const std::map<EdgeKey, std::vector<int>>& adj,
+                                double thresholdDeg)
+{
+  // Union-find over triangles, joined across every edge that is not a crease.
+  std::vector<int> parent(m.tris.size());
+  for (size_t i = 0; i < parent.size(); ++i) parent[i] = static_cast<int>(i);
+  auto find = [&](int x) {
+    while (parent[x] != x) x = parent[x] = parent[parent[x]];
+    return x;
+  };
+
+  for (const auto& [key, ts] : adj) {
+    if (ts.size() != 2) continue;
+    if (classifyEdge(m, key, m.tris[ts[0]], m.tris[ts[1]]).dihedralDeg >= thresholdDeg) continue;
+    const int a = find(ts[0]), b = find(ts[1]);
+    if (a != b) parent[a] = b;
+  }
+
+  // Renumber the roots so the ids are dense and start at zero.
+  std::map<int, int> idOf;
+  std::vector<int> out(m.tris.size(), -1);
+  for (size_t i = 0; i < out.size(); ++i) {
+    const int root = find(static_cast<int>(i));
+    auto [it, inserted] = idOf.try_emplace(root, static_cast<int>(idOf.size()));
+    out[i] = it->second;
+  }
+  return out;
+}
+
+std::vector<ChainContact> chainContacts(const MergedMesh& m,
+                                        const std::map<EdgeKey, std::vector<int>>& adj,
+                                        const Chain& chain, double size, bool concave, bool wedge,
+                                        const std::vector<int>& surfaceOf, int samplesPerSegment)
+{
+  const std::vector<StationNormals> stations = chainNormals(m, adj, chain);
+  const double dir = concave ? 1.0 : -1.0;
+
+  auto contactAt = [&](const StationNormals& s, int vert) {
+    ChainContact c;
+    c.v = s.v;
+    c.vert = vert;
+    if (!s.valid) return c;
+
+    const double cosPhi = std::clamp(s.nA.dot(s.nB), -1.0, 1.0);
+    const double phi = std::acos(cosPhi);
+    Vector3d bis = s.nA + s.nB;
+    // Flat walls have no crease to blend, and the seated ball runs to infinity.
+    if (phi > 179.0 * M_PI / 180.0 || bis.norm() < 1e-9) return c;
+    bis.normalize();
+
+    // The wedge tools take the setback directly, so the ball that touches the
+    // walls there has whatever radius puts its tangency points at that setback:
+    // t = r*tan(phi/2) read the other way round.
+    const double r = wedge ? size / std::tan(phi / 2.0) : size;
+    c.radius = r;
+    c.C = s.v + dir * (r / std::cos(phi / 2.0)) * bis;
+    c.TA = c.C - dir * r * s.nA;
+    c.TB = c.C - dir * r * s.nB;
+    if (s.triA >= 0 && static_cast<size_t>(s.triA) < surfaceOf.size())
+      c.surfaceA = surfaceOf[s.triA];
+    if (s.triB >= 0 && static_cast<size_t>(s.triB) < surfaceOf.size())
+      c.surfaceB = surfaceOf[s.triB];
+    c.valid = std::isfinite(r) && c.C.allFinite();
+    return c;
+  };
+
+  // How far a contact point may legitimately sit off the wall it is named
+  // against. Where a chain turns, the wall normals it is built from are an
+  // average of two walls and the contact lands in the air at the mitre between
+  // them; the same happens at a sample, whose walls are interpolated between its
+  // two stations'. Either way the miss is an angle applied at the ball centre,
+  // so it is the distance from the crease to that centre that sets the scale —
+  // and on a nearly flat crease that distance is many radii, which is why the
+  // slack cannot be written in terms of the radius alone.
+  auto mitreSlack = [&](const Vector3d& u, const Vector3d& w, double lever) {
+    const double c = std::clamp(u.dot(w), -1.0, 1.0);
+    return lever * std::sin(std::acos(c));
+  };
+
+  const size_t n = stations.size();
+  const size_t segments = n < 2 ? 0 : (chain.closed ? n : n - 1);
+
+  std::vector<ChainContact> out;
+  out.reserve(n * (1 + std::max(samplesPerSegment, 0)));
+  for (size_t i = 0; i < n; ++i) {
+    ChainContact station = contactAt(stations[i], chain.verts[i]);
+    if (station.valid) {
+      // The station's own walls come from one of its incident edges; if the
+      // other edge rides different walls, this is the corner case above.
+      const int prev = i > 0 ? chain.verts[i - 1] : (chain.closed ? chain.verts[n - 1] : -1);
+      const int next = i + 1 < n ? chain.verts[i + 1] : (chain.closed ? chain.verts[0] : -1);
+      int pA = -1, pB = -1, nA2 = -1, nB2 = -1;
+      const double lever = (station.C - station.v).norm() + station.radius;
+      if (prev >= 0 && next >= 0 && sidedTris(m, adj, prev, chain.verts[i], pA, pB) &&
+          sidedTris(m, adj, chain.verts[i], next, nA2, nB2))
+        station.slack = std::max(mitreSlack(m.tris[pA].normal, m.tris[nA2].normal, lever),
+                                 mitreSlack(m.tris[pB].normal, m.tris[nB2].normal, lever));
+    }
+    out.push_back(std::move(station));
+    if (i >= segments || samplesPerSegment <= 0) continue;
+
+    // Between two stations the walls turn from one pair of normals to the
+    // other; interpolating them is what the cell between the two sections is
+    // built from, so it is the same shape being asked about. The walls
+    // themselves are the ones of the segment's own edge — at a corner of a
+    // closed loop the stations' are two different pairs, and only the segment's
+    // is the surface a point on it can be expected to lie on.
+    const StationNormals& a = stations[i];
+    const StationNormals& b = stations[(i + 1) % n];
+    if (!a.valid || !b.valid) continue;
+    int segA = -1, segB = -1;
+    if (!sidedTris(m, adj, chain.verts[i], chain.verts[(i + 1) % n], segA, segB)) continue;
+    for (int k = 1; k <= samplesPerSegment; ++k) {
+      const double t = static_cast<double>(k) / (samplesPerSegment + 1);
+      StationNormals s;
+      s.v = a.v + t * (b.v - a.v);
+      s.nA = (1.0 - t) * a.nA + t * b.nA;
+      s.nB = (1.0 - t) * a.nB + t * b.nB;
+      s.triA = segA;
+      s.triB = segB;
+      if (s.nA.norm() < 1e-9 || s.nB.norm() < 1e-9) continue;
+      s.nA.normalize();
+      s.nB.normalize();
+      s.valid = true;
+      ChainContact sample = contactAt(s, -1);
+      if (sample.valid) {
+        const double lever = (sample.C - sample.v).norm() + sample.radius;
+        sample.slack = std::max(mitreSlack(s.nA, m.tris[segA].normal, lever),
+                                mitreSlack(s.nB, m.tris[segB].normal, lever));
+      }
+      out.push_back(std::move(sample));
+    }
+  }
+  return out;
+}
+
+// Distance from a point to a closed triangle: the usual region test on the
+// barycentric coordinates, then the distance to whichever feature (face, edge or
+// corner) turned out to be nearest.
+double pointTriangleDistance(const Vector3d& p, const Vector3d& a, const Vector3d& b,
+                             const Vector3d& c)
+{
+  const Vector3d ab = b - a, ac = c - a, ap = p - a;
+  const double d1 = ab.dot(ap), d2 = ac.dot(ap);
+  if (d1 <= 0 && d2 <= 0) return ap.norm();
+
+  const Vector3d bp = p - b;
+  const double d3 = ab.dot(bp), d4 = ac.dot(bp);
+  if (d3 >= 0 && d4 <= d3) return bp.norm();
+
+  const double vc = d1 * d4 - d3 * d2;
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) {
+    const double t = d1 / (d1 - d3);
+    return (p - (a + t * ab)).norm();
+  }
+
+  const Vector3d cp = p - c;
+  const double d5 = ab.dot(cp), d6 = ac.dot(cp);
+  if (d6 >= 0 && d5 <= d6) return cp.norm();
+
+  const double vb = d5 * d2 - d1 * d6;
+  if (vb <= 0 && d2 >= 0 && d6 <= 0) {
+    const double t = d2 / (d2 - d6);
+    return (p - (a + t * ac)).norm();
+  }
+
+  const double va = d3 * d6 - d5 * d4;
+  if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) {
+    const double t = (d4 - d3) / ((d4 - d3) + (d5 - d6));
+    return (p - (b + t * (c - b))).norm();
+  }
+
+  const double denom = 1.0 / (va + vb + vc);
+  return (p - (a + ab * (vb * denom) + ac * (vc * denom))).norm();
+}
+
+std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
+                                         const std::map<EdgeKey, std::vector<int>>& adj,
+                                         const std::vector<Chain>& chains, double size,
+                                         bool concave, bool wedge, double thresholdDeg)
+{
+  std::vector<SizeVerdict> verdicts(chains.size());
+  if (!(size > 0) || chains.empty()) return verdicts;
+
+  const std::vector<int> surfaceOf = smoothSurfaces(m, adj, thresholdDeg);
+  std::vector<std::vector<int>> surfaceTris;
+  for (size_t t = 0; t < surfaceOf.size(); ++t) {
+    if (surfaceOf[t] < 0) continue;
+    if (static_cast<size_t>(surfaceOf[t]) >= surfaceTris.size())
+      surfaceTris.resize(surfaceOf[t] + 1);
+    surfaceTris[surfaceOf[t]].push_back(static_cast<int>(t));
+  }
+
+  std::vector<std::vector<ChainContact>> contacts;
+  contacts.reserve(chains.size());
+  for (const Chain& chain : chains)
+    contacts.push_back(chainContacts(m, adj, chain, size, concave, wedge, surfaceOf,
+                                     /*samplesPerSegment=*/3));
+
+  // A contact point computed from averaged normals does not sit exactly on a
+  // tessellated wall: the average leans away from each facet by up to half a
+  // seam angle, so the point misses the surface by about that much of the
+  // radius. The crease threshold is the largest seam the tessellation can
+  // produce, which makes it the bound on that miss, and it also swallows the
+  // float noise the plan asks be clamped silently rather than dropped.
+  const double faceTol =
+    std::max(size * (1.0 - std::cos(thresholdDeg * M_PI / 180.0)), 1e-9 * size);
+
+  auto offSurface = [&](const Vector3d& p, int surface, double tol) {
+    if (surface < 0 || static_cast<size_t>(surface) >= surfaceTris.size()) return 0.0;
+    double best = std::numeric_limits<double>::infinity();
+    for (const int t : surfaceTris[surface]) {
+      const Tri& tri = m.tris[t];
+      best = std::min(best, pointTriangleDistance(p, m.pos[tri.v[0]], m.pos[tri.v[1]],
+                                                  m.pos[tri.v[2]]));
+      if (best <= tol) break;
+    }
+    return best <= tol ? 0.0 : best;
+  };
+
+  std::vector<std::set<int>> chainVerts(chains.size());
+  for (size_t ci = 0; ci < chains.size(); ++ci)
+    chainVerts[ci].insert(chains[ci].verts.begin(), chains[ci].verts.end());
+
+  // A box around each chain's contact points, so the crowding question can skip
+  // the pairs that are nowhere near each other.
+  struct Reach
+  {
+    Vector3d lo = Vector3d::Zero();
+    Vector3d hi = Vector3d::Zero();
+    bool empty = true;
+    void add(const Vector3d& p)
+    {
+      lo = empty ? p : lo.cwiseMin(p);
+      hi = empty ? p : hi.cwiseMax(p);
+      empty = false;
+    }
+    bool contains(const Vector3d& p, double slack) const
+    {
+      return !empty && (p.array() >= lo.array() - slack).all() &&
+             (p.array() <= hi.array() + slack).all();
+    }
+  };
+  std::vector<Reach> reach(chains.size());
+  for (size_t ci = 0; ci < chains.size(); ++ci)
+    for (const ChainContact& c : contacts[ci]) {
+      if (!c.valid) continue;
+      reach[ci].add(c.TA);
+      reach[ci].add(c.TB);
+    }
+
+  for (size_t ci = 0; ci < chains.size(); ++ci) {
+    SizeVerdict& verdict = verdicts[ci];
+
+    // Does the tool still touch the walls it is blending? A contact point past
+    // the far side of its wall means the blend hangs in space there, and no
+    // blend of the size asked for exists there at all.
+    //
+    // Not at the two ends of an open chain, though. A crease that stops does so
+    // at the boundary of its own walls — at a junction, or where the feature
+    // simply runs out — so the contact point at that last station sits in the
+    // corner of the wall and steps out of it for reasons that have nothing to do
+    // with the size. On a tetrahedron it is unmissable: the base triangle's
+    // corners are 60 degrees, so stepping perpendicular to one base edge leaves
+    // through the next. A size that genuinely does not fit fails along the
+    // crease, not only at its ends, and the samples in between are what say so.
+    const size_t last = contacts[ci].empty() ? 0 : contacts[ci].size() - 1;
+    for (size_t i = 0; i < contacts[ci].size(); ++i) {
+      const ChainContact& c = contacts[ci][i];
+      if (!c.valid) continue;
+      if (!chains[ci].closed && (i == 0 || i == last)) continue;
+      const double tol = faceTol + c.slack;
+      const double a =
+        std::max(offSurface(c.TA, c.surfaceA, tol), offSurface(c.TB, c.surfaceB, tol));
+      if (a > 0.0) {
+        verdict = {SizeFault::OffFace, c.v, a};
+        break;
+      }
+    }
+    if (verdict.fault != SizeFault::Fits) continue;
+
+    // Is the room it needs its own? Another crease's contact line inside this
+    // ball is that crease's bead being eaten. Creases that meet at a junction
+    // are exempt: sharing the material there is what a corner cell is.
+    for (const ChainContact& c : contacts[ci]) {
+      if (!c.valid) continue;
+      for (size_t cj = 0; cj < chains.size() && verdict.fault == SizeFault::Fits; ++cj) {
+        if (cj == ci) continue;
+        // Everything this ball can reach is inside that chain's own box or not
+        // at issue; without the test the question is asked of every pair of
+        // contact points on the model.
+        if (!reach[cj].contains(c.C, c.radius)) continue;
+        bool meets = false;
+        for (const int v : chains[cj].verts)
+          if (chainVerts[ci].count(v)) { meets = true; break; }
+        if (meets) continue;
+
+        for (const ChainContact& o : contacts[cj]) {
+          if (!o.valid) continue;
+          const double d = std::min((c.C - o.TA).norm(), (c.C - o.TB).norm());
+          if (d < c.radius - faceTol) {
+            verdict = {SizeFault::Crowded, c.v, d};
+            break;
+          }
+        }
+      }
+      if (verdict.fault != SizeFault::Fits) break;
+    }
+  }
+
+  return verdicts;
 }
 
 namespace {
@@ -548,6 +883,54 @@ manifold::Manifold buildWedgeSolid(const MergedMesh& m,
   return unionCells(cells);
 }
 
+namespace {
+
+// The two cross-sections at one point of a crease, given the walls there and the
+// radius to use at that point. Taking the radius as an argument rather than
+// reading one for the whole chain is what lets a spine ramp its bead down to
+// nothing where a corner cannot be built.
+RoundSection makeRoundSection(const Vector3d& v, const Vector3d& nA, const Vector3d& nB, double r,
+                              bool concave, int segs, double eps)
+{
+  RoundSection s;
+  if (!(r > 0)) return s;
+
+  const double dir = concave ? 1.0 : -1.0;
+  const double cosPhi = std::clamp(nA.dot(nB), -1.0, 1.0);
+  const double phi = std::acos(cosPhi);
+
+  Vector3d bis = nA + nB;
+  if (phi > 179.0 * M_PI / 180.0 || bis.norm() < 1e-9) return s;
+  bis.normalize();
+
+  // The plane of the section is the one spanned by the two wall normals: C, v,
+  // TA and TB all lie in it by construction, so the arc meets each wall
+  // tangentially there whatever the spine does between stations. Taking it from
+  // the normals rather than from the spine direction is what keeps that true
+  // around a bend, where the two disagree.
+  Vector3d e = nA.cross(nB);
+  if (e.norm() < 1e-12) return s;
+  e.normalize();
+  const Vector3d e1 = nA;  // unit, and perpendicular to e
+  const Vector3d e2 = e.cross(e1);
+
+  const Vector3d C = v + dir * (r / std::cos(phi / 2.0)) * bis;
+  const Vector3d TA = C - dir * r * nA;
+  const Vector3d TB = C - dir * r * nB;
+
+  s.w = pentagonSection(v, nA, nB, bis, TA, TB, dir, eps);
+  s.C = C;
+  s.u.reserve(segs);
+  for (int k = 0; k < segs; ++k) {
+    const double a = 2.0 * M_PI * k / segs;
+    s.u.push_back(C + r * (std::cos(a) * e1 + std::sin(a) * e2));
+  }
+  s.valid = true;
+  return s;
+}
+
+}  // namespace
+
 std::vector<RoundSection> roundSections(const MergedMesh& m,
                                         const std::map<EdgeKey, std::vector<int>>& adj,
                                         const Chain& chain, double r, bool concave,
@@ -556,7 +939,6 @@ std::vector<RoundSection> roundSections(const MergedMesh& m,
   const std::vector<SpineFrame> frames = spineFrames(m, adj, chain, r, concave);
 
   const double eps = std::max(1e-3 * std::abs(r), 1e-9);
-  const double dir = concave ? 1.0 : -1.0;
   // Three points is the coarsest thing that still bounds an area; a radius too
   // small for the discretizer to have an opinion about lands here.
   const int segs = std::max(arcSegments, 3);
@@ -565,36 +947,179 @@ std::vector<RoundSection> roundSections(const MergedMesh& m,
   for (size_t i = 0; i < frames.size(); ++i) {
     const SpineFrame& f = frames[i];
     if (!f.valid) continue;
-
-    Vector3d bis = f.nA + f.nB;
-    if (bis.norm() < 1e-9) continue;
-    bis.normalize();
-
-    // The plane of the section is the one spanned by the two wall normals: C, v,
-    // TA and TB all lie in it by construction, so the arc meets each wall
-    // tangentially there whatever the spine does between stations. Taking it
-    // from the normals rather than from the spine direction is what keeps that
-    // true around a bend, where the two disagree.
-    Vector3d e = f.nA.cross(f.nB);
-    if (e.norm() < 1e-12) continue;
-    e.normalize();
-    const Vector3d e1 = f.nA;  // unit, and perpendicular to e
-    const Vector3d e2 = e.cross(e1);
-
-    RoundSection s;
-    s.w = pentagonSection(f.v, f.nA, f.nB, bis, f.TA, f.TB, dir, eps);
-
-    s.u.reserve(segs);
-    for (int k = 0; k < segs; ++k) {
-      const double a = 2.0 * M_PI * k / segs;
-      s.u.push_back(f.C + r * (std::cos(a) * e1 + std::sin(a) * e2));
-    }
-
-    s.valid = true;
-    out[i] = std::move(s);
+    out[i] = makeRoundSection(f.v, f.nA, f.nB, r, concave, segs, eps);
   }
   return out;
 }
+
+std::vector<Junction> chainJunctions(const MergedMesh& m,
+                                     const std::map<EdgeKey, std::vector<int>>& adj,
+                                     const std::vector<Chain>& chains, double r, bool concave)
+{
+  // Chains are cut at every vertex whose crease degree is not two, so the number
+  // of chain ends landing on a vertex is that degree. A closed ring has no ends
+  // and never contributes.
+  std::map<int, std::vector<int>> ends;  // vertex -> the next station along each end
+  for (const Chain& chain : chains) {
+    if (chain.closed || chain.verts.size() < 2) continue;
+    ends[chain.verts.front()].push_back(chain.verts[1]);
+    ends[chain.verts.back()].push_back(chain.verts[chain.verts.size() - 2]);
+  }
+
+  // Every triangle that touches a vertex, so a junction can be asked about the
+  // walls around it rather than only about the ones its own creases ride.
+  std::map<int, std::vector<int>> trisAt;
+  for (size_t t = 0; t < m.tris.size(); ++t)
+    for (const int v : m.tris[t].v) trisAt[v].push_back(static_cast<int>(t));
+
+  const double dir = concave ? 1.0 : -1.0;
+
+  std::vector<Junction> out;
+  for (const auto& [v, nbrs] : ends) {
+    if (nbrs.size() < 3) continue;
+
+    Junction j;
+    j.vert = v;
+    // Every wall meeting at the vertex constrains the ball, not just the walls
+    // of the creases this tool selected. Where a convex edge arrives at a
+    // concave corner, its far face is the one a centre solved from the concave
+    // walls alone would end up buried in, and nothing about that crease's own
+    // sign makes the face any less solid.
+    const auto tit = trisAt.find(v);
+    if (tit != trisAt.end())
+      for (const int t : tit->second) {
+        const Vector3d& n = m.tris[t].normal;
+        bool seen = false;
+        for (const Vector3d& q : j.faceNormals)
+          if (q.dot(n) > 1.0 - 1e-9) { seen = true; break; }
+        if (!seen) j.faceNormals.push_back(n);
+      }
+
+    // Every wall passes through the vertex, so a ball tangent to three of them
+    // solves n_i . (P - v) = +-r. Take every triple: at three walls that is the
+    // single corner, and at more it enumerates the candidates, of which only the
+    // ones clear of all the remaining walls are positions the ball can actually
+    // reach.
+    const size_t k = j.faceNormals.size();
+    const double slack = 1e-6 * r;
+    for (size_t a = 0; a + 2 < k; ++a)
+      for (size_t b = a + 1; b + 1 < k; ++b)
+        for (size_t c = b + 1; c < k; ++c) {
+          Matrix3d M;
+          M.row(0) = j.faceNormals[a].transpose();
+          M.row(1) = j.faceNormals[b].transpose();
+          M.row(2) = j.faceNormals[c].transpose();
+
+          // The rows are unit vectors, so the determinant is the volume of the
+          // parallelepiped they span: it goes to zero exactly as the three walls
+          // stop pinning a point down.
+          if (std::abs(M.determinant()) <= 1e-6) continue;
+
+          const Vector3d P = m.pos[v] + M.inverse() * (dir * r * Vector3d::Ones());
+          // Nominal success is not enough: nearly-coplanar walls clear the
+          // determinant test and still put the centre absurdly far off.
+          if (!P.allFinite() || (P - m.pos[v]).norm() > 10.0 * r) continue;
+
+          bool reachable = true;
+          for (const Vector3d& n : j.faceNormals)
+            if (dir * n.dot(P - m.pos[v]) < r - slack) { reachable = false; break; }
+          if (!reachable) continue;
+
+          // A symmetric junction solves to the same centre from every triple.
+          bool seen = false;
+          for (const Vector3d& q : j.ballCentres)
+            if ((q - P).norm() <= slack) { seen = true; break; }
+          if (!seen) j.ballCentres.push_back(P);
+        }
+
+    out.push_back(std::move(j));
+  }
+  return out;
+}
+
+namespace {
+
+// How far along the last spine segment the ball may still travel: the first
+// point at which it touches a wall it is not riding. Past there it would cut
+// into material, so that is where the spine stops and the corner cell takes
+// over. Phrased as a distance to every wall at the junction rather than as a
+// solve, it needs no special case per valence — the walls the spine does ride
+// sit at exactly r all along it and never bind, and at degree three every
+// incident spine stops at the same point. Returned as a fraction of the segment
+// from `C0` toward `C1`; 1 means nothing binds.
+double truncationParam(const Junction& j, const Vector3d& vj, const Vector3d& C0,
+                       const Vector3d& C1, double r, double dir)
+{
+  const double tol = 1e-9 * r;
+  double s = 1.0;
+  for (const Vector3d& n : j.faceNormals) {
+    const double g0 = dir * n.dot(C0 - vj) - r;
+    const double g1 = dir * n.dot(C1 - vj) - r;
+    if (g1 >= -tol) continue;   // still clear of this wall at the vertex
+    if (g0 <= g1) continue;     // never clear of it on this segment either
+    s = std::min(s, std::max(0.0, g0 / (g0 - g1)));
+  }
+  return s;
+}
+
+// The section a fraction s of the way from a to b. The spine, its walls and the
+// arc all vary linearly along a straight mesh edge, which is the only place a
+// truncation point ever falls, so interpolating the section's points is exact
+// there and degrades gracefully where the walls turn.
+RoundSection lerpSection(const RoundSection& a, const RoundSection& b, double s)
+{
+  RoundSection out;
+  if (!a.valid || !b.valid) return out;
+  for (size_t k = 0; k < a.w.size(); ++k) out.w[k] = a.w[k] + s * (b.w[k] - a.w[k]);
+  out.u.resize(std::min(a.u.size(), b.u.size()));
+  for (size_t k = 0; k < out.u.size(); ++k) out.u[k] = a.u[k] + s * (b.u[k] - a.u[k]);
+  out.C = a.C + s * (b.C - a.C);
+  out.valid = true;
+  return out;
+}
+
+// The corner cell: what the incident wedges no longer cover once they have been
+// cut back, hulled from the junction vertex, the point at which each corner ball
+// touches each wall it is seated against, and a section of every chain that
+// meets there. Convex by construction, so the hull is faithful; the corner balls
+// are taken out of it by the same global subtraction as the canals.
+//
+// The vertex and the tangency points are taken `over` past their walls rather
+// than on them, for the reason the edge cells' pentagon is: a face resting
+// exactly on a wall asks a boolean to resolve two coincident surfaces. Two
+// things bound how far. It must not be the edge cells' own overshoot, or the
+// corner cell's wall face lands in their plane and the coincidence is back,
+// inside the tool this time, as a scatter of triangles too small to survive a
+// kernel that quantises its input. And it must not exceed it either, or the tool
+// presents two overshoot depths past one wall and the caller's boolean has two
+// slivers to resolve instead of one. Half the edge cells' is inside both.
+manifold::Manifold cornerCell(const Junction& j, const Vector3d& vj,
+                              const std::vector<std::array<Vector3d, 5>>& endSections, double r,
+                              double dir, double over)
+{
+  Vector3d bis = Vector3d::Zero();
+  for (const Vector3d& n : j.faceNormals) bis += n;
+  if (bis.norm() < 1e-9) return {};
+  bis.normalize();
+
+  std::vector<manifold::vec3> pts;
+  auto add = [&pts](const Vector3d& p) { pts.emplace_back(p.x(), p.y(), p.z()); };
+
+  add(vj - dir * over * bis);
+  for (const Vector3d& P : j.ballCentres)
+    for (const Vector3d& n : j.faceNormals) {
+      // Only the walls this ball is actually seated against; the others it
+      // merely clears, and projecting onto them would reach outside the corner.
+      if (std::abs(dir * n.dot(P - vj) - r) > 1e-6 * r) continue;
+      add(P - dir * (r + over) * n);
+    }
+  for (const auto& section : endSections)
+    for (const Vector3d& p : section) add(p);
+
+  return manifold::Manifold::Hull(pts);
+}
+
+}  // namespace
 
 manifold::Manifold buildRoundSolid(const MergedMesh& m,
                                    const std::map<EdgeKey, std::vector<int>>& adj,
@@ -603,41 +1128,194 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
 {
   if (!(r > 0)) return {};
 
-  std::vector<manifold::Manifold> beads;
-  for (const Chain& chain : chains) {
-    const std::vector<RoundSection> sections =
-      roundSections(m, adj, chain, r, concave, arcSegments);
+  const double dir = concave ? 1.0 : -1.0;
+  const double eps = std::max(1e-3 * r, 1e-9);
+  const int segs = std::max(arcSegments, 3);
 
-    std::vector<manifold::Manifold> wedgeCells, canalCells;
-    appendChainCells(chain, sections,
-                     [](const RoundSection& s) -> const std::array<Vector3d, 5>& { return s.w; },
-                     wedgeCells);
-    appendChainCells(chain, sections,
-                     [](const RoundSection& s) -> const std::vector<Vector3d>& { return s.u; },
-                     canalCells);
+  const std::vector<Junction> junctions = chainJunctions(m, adj, chains, r, concave);
+  std::map<int, const Junction *> junctionAt;
+  for (const Junction& j : junctions) junctionAt[j.vert] = &j;
 
-    manifold::Manifold wedge = unionCells(wedgeCells);
-    if (wedge.IsEmpty()) continue;
+  std::vector<std::vector<RoundSection>> sections;
+  sections.reserve(chains.size());
+  for (const Chain& chain : chains)
+    sections.push_back(roundSections(m, adj, chain, r, concave, segs));
 
-    // Subtract once per chain, over the whole of its wedge rather than cell by
-    // cell: where the spine bends, one cell's ball reaches into the next cell's
-    // wedge and has to cut it. But not once over every chain together — a ball
-    // rolling along one crease would then hollow out the neighbouring crease's
-    // bead where the two meet, leaving a lump on the model at every corner.
-    //
-    // The grouping is standing in for something the spine does not do yet. A
-    // chain runs its ball centres to the meeting vertex itself, so its last ball
-    // sits where the neighbouring creases still have material to remove. Once
-    // the spine is cut back short of the vertex and a corner cell fills the gap,
-    // the canal is exactly the set of positions the ball can occupy, and the
-    // subtraction wants to be global again — the corner's own ball has to reach
-    // every chain that meets there.
-    const manifold::Manifold canal = unionCells(canalCells);
-    beads.push_back(canal.IsEmpty() ? std::move(wedge)
-                                    : dropVolumelessParts(wedge - canal));
+  // Cut every chain back where its ball first meets a wall of the junction it
+  // runs into, and hand the truncated end section to that junction so its corner
+  // cell can hull against it. Both ends come off the untruncated sections, so a
+  // two-station chain does not truncate itself twice over.
+  std::map<int, std::vector<std::array<Vector3d, 5>>> endSections;
+  std::vector<bool> chainUsable(chains.size(), true);
+  std::vector<std::array<bool, 2>> runout(chains.size(), {false, false});
+  for (size_t ci = 0; ci < chains.size(); ++ci) {
+    const Chain& chain = chains[ci];
+    std::vector<RoundSection>& sec = sections[ci];
+    const size_t n = sec.size();
+    if (chain.closed || n < 2) continue;
+
+    std::vector<RoundSection> trimmed = sec;
+    double consumed = 0.0;  // of the single segment a two-station chain has
+    for (const bool front : {true, false}) {
+      const size_t endIdx = front ? 0 : n - 1;
+      const size_t nbrIdx = front ? 1 : n - 2;
+      const auto it = junctionAt.find(chain.verts[endIdx]);
+      if (it == junctionAt.end()) continue;
+      const RoundSection& a = sec[nbrIdx];
+      const RoundSection& b = sec[endIdx];
+      if (!a.valid || !b.valid) continue;
+
+      // A junction whose solve found no ball centre gets no corner cell, so
+      // truncating into it would cut every incident spine back and leave the
+      // space they vacated empty. Ramp the radius down to nothing over the last
+      // stretch instead: the beads converge on the sharp vertex, the corner
+      // closes with no patch, and the blend fades out locally rather than
+      // stopping with a step.
+      if (it->second->ballCentres.empty()) {
+        runout[ci][front ? 0 : 1] = true;
+        continue;
+      }
+
+      const Junction& j = *it->second;
+      double s = truncationParam(j, m.pos[j.vert], a.C, b.C, r, dir);
+
+      // Stopping exactly at the corner puts the canal's last section flat on the
+      // corner ball — the section is a great disc of it — and two subtracted
+      // surfaces that coincide over a whole face rather than crossing are what a
+      // Nef kernel downstream chokes on. Run a hair past, so they cross. The
+      // overshoot is the same trick and the same size as the pentagon's at the
+      // walls, and what it takes extra is a ring a thousandth of a radius deep
+      // inside the corner cell, which the corner ball removes anyway.
+      const double step = (b.C - a.C).norm();
+      const double nudge = step > 1e-12 ? 1e-3 * r / step : 0.0;
+      if (s < 1.0) s = std::min(1.0, s + nudge);
+      consumed += 1.0 - s;
+      trimmed[endIdx] = lerpSection(a, b, s);
+
+      // The corner cell hulls against a section a hair further back than the one
+      // the wedge stops at, so the two overlap in a thin slab instead of meeting
+      // on one shared face. Cells that merely abut leave the union a face that is
+      // in both of them and in neither's interior, and the sub-micron triangles
+      // that come of it survive as far as the first kernel that quantises its
+      // input. The same reasoning puts the pentagon a hair past each wall.
+      const RoundSection reach = lerpSection(a, b, std::max(0.0, s - 2.0 * nudge));
+      if (reach.valid) endSections[j.vert].push_back(reach.w);
+    }
+
+    // A chain one segment long, truncated from both ends by more than its own
+    // length, has nothing left between the two corner cells — and interpolating
+    // past the crossing point would build a cell inside out. Drop it; the corner
+    // cells meet each other there.
+    if (n == 2 && consumed > 1.0) chainUsable[ci] = false;
+    sec = std::move(trimmed);
   }
 
-  return unionCells(beads);
+  // Replace the end station of every chain that runs out with a ramp: a few
+  // samples along the last stretch, each carrying its own radius, ending in the
+  // sharp vertex itself. Sections are no longer one per station past this point,
+  // which is fine — a cell is the hull of two consecutive sections whatever
+  // produced them.
+  for (size_t ci = 0; ci < chains.size(); ++ci) {
+    if (!runout[ci][0] && !runout[ci][1]) continue;
+    const Chain& chain = chains[ci];
+    const std::vector<StationNormals> stations = chainNormals(m, adj, chain);
+    const std::vector<RoundSection>& sec = sections[ci];
+    if (stations.size() != sec.size() || sec.size() < 2) continue;
+
+    // Over how much of the crease the bead fades. Two radii is short enough to
+    // stay local and long enough that the taper is gentler than the bead's own
+    // curvature; a segment shorter than that ramps over what it has.
+    const double rampLength = 2.0 * r;
+
+    auto ramp = [&](size_t endIdx, size_t nbrIdx, std::vector<RoundSection>& into) {
+      const StationNormals& end = stations[endIdx];
+      const StationNormals& nbr = stations[nbrIdx];
+      if (!end.valid || !nbr.valid) return;
+      const double segment = (end.v - nbr.v).norm();
+      if (segment < 1e-12) return;
+      const double length = std::min(rampLength, segment);
+
+      // Samples run from the vertex outward, closest first; the caller puts them
+      // in the order its end needs.
+      constexpr int kSamples = 6;
+      RoundSection tip;
+      tip.w.fill(end.v);
+      tip.u.assign(1, end.v);
+      tip.C = end.v;
+      tip.valid = true;
+      into.push_back(std::move(tip));
+
+      for (int k = 1; k <= kSamples; ++k) {
+        const double d = length * k / kSamples;
+        // The last sample lands on the neighbour station when the ramp is as
+        // long as the segment; that station is already in the list.
+        if (segment - d < 1e-9 * segment) break;
+        const double s = d / segment;  // from the end vertex toward the neighbour
+        const Vector3d v = end.v + s * (nbr.v - end.v);
+        Vector3d nA = (1.0 - s) * end.nA + s * nbr.nA;
+        Vector3d nB = (1.0 - s) * end.nB + s * nbr.nB;
+        if (nA.norm() < 1e-9 || nB.norm() < 1e-9) return;
+        const double radius = r * d / length;
+        into.push_back(makeRoundSection(v, nA.normalized(), nB.normalized(), radius, concave,
+                                        segs, std::max(1e-3 * radius, 1e-9)));
+      }
+    };
+
+    // The ramp is built vertex-first, which is already the order the front end
+    // wants; the back end takes the same list reversed.
+    std::vector<RoundSection> rebuilt;
+    if (runout[ci][0]) ramp(0, 1, rebuilt);
+    for (size_t i = runout[ci][0] ? 1 : 0; i + (runout[ci][1] ? 1 : 0) < sec.size(); ++i)
+      rebuilt.push_back(sec[i]);
+    if (runout[ci][1]) {
+      std::vector<RoundSection> back;
+      ramp(sec.size() - 1, sec.size() - 2, back);
+      rebuilt.insert(rebuilt.end(), back.rbegin(), back.rend());
+    }
+    sections[ci] = std::move(rebuilt);
+  }
+
+  std::vector<manifold::Manifold> wedgeCells, canalCells;
+  for (size_t ci = 0; ci < chains.size(); ++ci) {
+    if (!chainUsable[ci]) continue;
+    appendChainCells(chains[ci], sections[ci],
+                     [](const RoundSection& s) -> const std::array<Vector3d, 5>& { return s.w; },
+                     wedgeCells);
+    appendChainCells(chains[ci], sections[ci],
+                     [](const RoundSection& s) -> const std::vector<Vector3d>& { return s.u; },
+                     canalCells);
+  }
+
+  for (const Junction& j : junctions) {
+    if (j.ballCentres.empty()) continue;
+    manifold::Manifold cell =
+      cornerCell(j, m.pos[j.vert], endSections[j.vert], r, dir, /*over=*/0.5 * eps);
+    if (cell.IsEmpty()) continue;
+    wedgeCells.push_back(std::move(cell));
+    // One ball per reachable centre, hulled together. The hull is not an
+    // approximation: dilating a convex hull of points by a ball gives the hull
+    // of the balls at those points, and the centres are the corners of a convex
+    // region every point of which the ball may sit at — so the hull is exactly
+    // the material it can sweep out there.
+    std::vector<manifold::Manifold> balls;
+    balls.reserve(j.ballCentres.size());
+    for (const Vector3d& P : j.ballCentres)
+      balls.push_back(
+        manifold::Manifold::Sphere(r, segs).Translate(manifold::vec3(P.x(), P.y(), P.z())));
+    canalCells.push_back(balls.size() == 1 ? std::move(balls.front())
+                                           : manifold::Manifold::Hull(balls));
+  }
+
+  // One subtraction over everything. The spines stop where the ball does, so the
+  // canal is exactly the set of positions the ball can occupy and nothing in it
+  // is material another crease still needs — while the corner ball, conversely,
+  // has to cut the wedges of every chain meeting at its vertex, which grouping
+  // the subtraction per chain would prevent.
+  const manifold::Manifold wedge = unionCells(wedgeCells);
+  if (wedge.IsEmpty()) return {};
+  const manifold::Manifold canal = unionCells(canalCells);
+  if (canal.IsEmpty()) return wedge;
+  return dropVolumelessParts(wedge - canal);
 }
 
 std::unique_ptr<PolySet> debugEdgeMarkers(
@@ -702,10 +1380,9 @@ std::unique_ptr<PolySet> debugSpineMarkers(const MergedMesh& m,
 
 // Rebuild edge -> two-face adjacency from the target's triangle soup, classify
 // each edge as concave/convex and feature/seam, walk the ones this tool acts on
-// into chains, and build the tool solid along them. Junction cells are not built
-// yet, so chains meeting at a branch vertex simply overlap there. A diagnostic
-// count line goes out on every invocation (a plain cube yields 12 feature edges,
-// all convex; an inside corner yields a single concave edge).
+// into chains, and build the tool solid along them. A diagnostic count line goes
+// out on every invocation (a plain cube yields 12 feature edges, all convex; an
+// inside corner yields a single concave edge).
 std::shared_ptr<const Geometry> buildFilletTool(
   const FilletNode& node, const std::shared_ptr<const ManifoldGeometry>& target)
 {
@@ -782,15 +1459,52 @@ std::shared_ptr<const Geometry> buildFilletTool(
     return nullptr;
   }
 
+  // A size the feature cannot carry is refused, one crease at a time, and never
+  // quietly resized: a clamp would have to be agreed with every crease this one
+  // meets, and following that through runs a minimum over the whole connected
+  // network, so one tight corner would shrink a fillet on the far side of the
+  // part where nobody is looking.
+  const std::vector<SizeVerdict> verdicts =
+    checkChainSizes(m, adj, chains, node.size, wantConcave, isWedgeOnly, thresholdDeg);
+  std::vector<Chain> usable;
+  for (size_t ci = 0; ci < chains.size(); ++ci) {
+    const SizeVerdict& verdict = verdicts[ci];
+    if (verdict.fault == SizeFault::Fits) {
+      usable.push_back(chains[ci]);
+      continue;
+    }
+    LOG(message_group::Warning, node.modinst->location(), "",
+        "%1$s: %2$s %3$g does not fit the crease at [%4$.4g, %5$.4g, %6$.4g] - %7$s. "
+        "That crease is dropped; the size is never clamped to make it fit.",
+        node.name(), isWedgeOnly ? "setback" : "radius", node.size, verdict.where.x(),
+        verdict.where.y(), verdict.where.z(),
+        verdict.fault == SizeFault::OffFace
+          ? STR("the blend would leave the surface it is meant to meet, by ", verdict.amount)
+          : STR("another feature ", verdict.amount, " away needs the same material"));
+  }
+
+  // A corner the solve refuses — walls too nearly parallel to pin a point down,
+  // or a ball seated so far from the vertex that the answer is not a corner of
+  // this feature at all — gets no corner cell, and the blends that meet there
+  // fade out to the sharp vertex instead. Say so: the shape is valid but it is
+  // not the constant-radius blend that was asked for.
+  if (!isWedgeOnly)
+    for (const Junction& j : chainJunctions(m, adj, usable, node.size, wantConcave))
+      if (j.ballCentres.empty())
+        LOG(message_group::Warning, node.modinst->location(), "",
+            "%1$s: no ball of radius %2$g is seated in the corner at [%3$.4g, %4$.4g, %5$.4g]; "
+            "the blends there run out to the sharp vertex instead of closing at that size.",
+            node.name(), node.size, m.pos[j.vert].x(), m.pos[j.vert].y(), m.pos[j.vert].z());
+
   // Chamfer and bevel are the wedge alone. The rounded tools are the same wedge
   // with the rolling ball's canal taken back out of it, and with the setback
   // fixed at the ball's tangency points rather than given by the caller.
   manifold::Manifold tool;
   if (isWedgeOnly) {
-    tool = buildWedgeSolid(m, adj, chains, node.size, wantConcave);
+    tool = buildWedgeSolid(m, adj, usable, node.size, wantConcave);
   } else {
     const int arcSegments = node.discretizer.getCircularSegmentCount(node.size).value_or(0);
-    tool = buildRoundSolid(m, adj, chains, node.size, wantConcave, arcSegments);
+    tool = buildRoundSolid(m, adj, usable, node.size, wantConcave, arcSegments);
   }
 
   if (tool.IsEmpty()) return nullptr;
