@@ -39,8 +39,8 @@ for f in "${files[@]}"; do
   slice="$(probe_case "$abs" | sed -n 's/^SLICE //p')"
   if [[ "$slice" == "front" ]]; then rot="90,0,0"; else rot="0,0,0"; fi
 
-  # The unsliced solid column is for the GUI, where the view can be turned; in a
-  # flat top-down image it would only hide the sections behind its own outline.
+  # The unsliced solid rows are for the GUI, where the view can be turned; in a
+  # flat top-down image they would only hide the sections behind their outlines.
   args=(-D "FILLET_NO_SOLID=true")
   [[ -n "${FAST:-}" ]] && args+=(-D "FILLET_NO_DIFF=true")
 

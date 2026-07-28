@@ -20,10 +20,10 @@ FILLET_DRIVER = false;
 // the only expensive part of the picture — it dilates both solids.
 FILLET_NO_DIFF = false;
 
-// Set from the command line by render.sh to drop the unsliced solid column. Every
-// other column is a thin section, which is what makes one flat top-down image
-// legible; the solid is there for the GUI, where the view can be rotated. It is
-// off for the rendered PNGs so those stay the six columns the README describes.
+// Set from the command line by render.sh to drop the unsliced rows. Sections are
+// what make one flat top-down image legible; the solids are for the GUI, where
+// the view can be turned. Off for the rendered PNGs, which stay the six columns
+// the README describes.
 FILLET_NO_SOLID = false;
 
 // ---- sectioning viewers ------------------------------------------------------
@@ -129,12 +129,9 @@ module fillet_sandwich(d, sign) {
 //   0 = model, 1 = reference tool, 2 = candidate tool, 3 = clip region
 //
 //   [ model ] [ ref applied ] [ cand applied ] [ ref tool ] [ cand tool ] [ diff ]
-//   [ cand applied, whole solid ]
 //
-// The seventh column is the same geometry as the third, minus the slab: the
-// result you would actually print, so the bead can be looked at in the round.
-// Sections are what make a single flat image readable, so it is drawn only where
-// there is a camera to turn — the GUI — and render.sh switches it off.
+// A slice spec of undef draws the row unsliced, which is how fillet_case_view
+// repeats the whole row as solids for the GUI.
 //
 // The tool columns and the diff are clipped to the case's region of interest, so
 // what you see in columns 4-6 is what the "tool" check actually compares; the
@@ -171,9 +168,6 @@ module fillet_row(sign, t, slice, kind, dx = 100) {
         intersection() { children(2); children(3); }
         intersection() { children(1); children(3); }
       }
-  if (!FILLET_NO_SOLID)
-    translate([6 * dx, 0, 0]) color("LightSkyBlue")
-      fillet_apply(sign) { children(0); children(2); }
 }
 
 // Cut the scene down to something one flat image can show, per the case's
@@ -184,8 +178,10 @@ module fillet_row(sign, t, slice, kind, dx = 100) {
 //                             section evolving toward a junction is visible at once
 // Applied per column, always as the last step: intersecting with a slab commutes
 // with union and difference, but NOT with the dilation the diff column uses.
+// undef means don't cut at all — the solid rows below.
 module fillet_slice(spec) {
-  if (spec[0] == "top") fillet_section(z = spec[1]) children();
+  if (is_undef(spec)) children();
+  else if (spec[0] == "top") fillet_section(z = spec[1]) children();
   else if (spec[0] == "front") fillet_vsection(y = spec[1]) children();
   else if (spec[0] == "stack")
     fillet_contour_stack(spec[1], spacing = is_undef(spec[2]) ? 90 : spec[2]) children();
@@ -205,12 +201,38 @@ module fillet_slice(spec) {
 // children(): forwarding collapses them into a single group, and fillet_row
 // would then see one child — the union of model, both tools and the clip
 // region — instead of four it can lay out separately.
-module fillet_case_view(sign, variants, slice, dy = 120, dx = 100, dz = 0) {
-  for (i = [0 : len(variants) - 1])
+// Opened in the GUI the case then repeats itself, every row and every column,
+// with no slab at all — the same six comparisons as whole solids, to be turned
+// around rather than read flat. A section tells you where two shapes differ; the
+// solid is the only place you see what the difference looks like on the part.
+//
+// The solid block is lifted straight up in Z and keeps each row's X and Y, so a
+// solid sits directly above the section it came from and above its own column.
+// Separating the two blocks along the layout axes instead would put a solid next
+// to a section it has nothing to do with.
+//
+// The lift has to clear both the models and whatever Z spread the sliced block
+// already has — the ring cases step their variants along +Z. There is no way to
+// ask OpenSCAD for a bounding box, so it comes from the numbers the case already
+// declares: (n+1)*dz covers a Z-stacked block, and dx is the column pitch, which
+// every case sized to clear its own model. A case with an unusually tall model
+// can pass dzsolid to override.
+module fillet_case_view(sign, variants, slice, dy = 120, dx = 100, dz = 0, dzsolid = undef) {
+  n = len(variants);
+  lift = is_undef(dzsolid) ? max((n + 1) * dz, 1.5 * dx) : dzsolid;
+
+  for (i = [0 : n - 1])
     translate([0, i * dy, i * dz])
       let($case_size = variants[i][1])
         fillet_row(sign, variants[i][3], slice, fillet_variant_kind(variants[i]), dx)
           { children(0); children(1); children(2); children(3); }
+
+  if (!FILLET_NO_SOLID)
+    for (i = [0 : n - 1])
+      translate([0, i * dy, i * dz + lift])
+        let($case_size = variants[i][1])
+          fillet_row(sign, variants[i][3], undef, fillet_variant_kind(variants[i]), dx)
+            { children(0); children(1); children(2); children(3); }
 }
 
 // Third field of a variant tuple, checked rather than trusted: a typo would

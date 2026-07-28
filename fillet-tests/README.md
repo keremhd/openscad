@@ -64,12 +64,13 @@ z for the junction cases, where the point is to watch the section collapse towar
 the meeting point.
 
 Sections are what a flat image can carry, not what you always want to look at, so
-opening a case file in the GUI adds a **seventh column**: the operator's result
-as a whole solid, unsliced, one per row. It is the same geometry as column 3
-without the slab — the shape you would print, with the bead on it, there to be
-turned around. `render.sh` passes `-D FILLET_NO_SOLID=true`, so the PNGs stay the
-six columns above; in a fixed top-down image the solid would only hide the
-sections behind its own outline.
+opening a case file in the GUI repeats the whole thing **as solid rows**: every
+variant, all six columns, with no slab at all, laid out past the sliced rows
+along the case's own `CASE_DY`/`CASE_DZ` stepping. A section tells you where two
+shapes differ; the solids are the only place you see what the difference looks
+like on the part, and they can be turned around. `render.sh` passes
+`-D FILLET_NO_SOLID=true`, so the PNGs stay the six columns above — in a fixed
+top-down image the solids would only hide the sections behind their outlines.
 
 ## The verdict
 
