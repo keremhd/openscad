@@ -467,6 +467,21 @@ junction spheres meet the same faces. See
 - **Acceptance:** inside box corner closes; §6.3 symmetric check at `z=0.1r`;
   contour stack matches reference.
 
+**Take the per-chain `W − U` back out here.** M7 subtracts each chain's canal
+from its own wedge only, because an untruncated canal runs its ball centres all
+the way to the corner *vertex* and so reaches sideways into the wedge of every
+chain it meets. Spine truncation is the actual fix: once the last station moves
+back to `P`, the canal stops there and `U` becomes exactly the set of legal ball
+positions, at which point a single global subtraction is not merely safe but
+required — the corner ball has to cut all three chains' wedges, and per-chain
+subtraction would stop it, leaving the inscribed lump of §6.3.3.
+
+So this is a decision to revisit, not a workaround to preserve. The probe test in
+`FilletCompare_test.cc` stays valid across the change: its box sits 3.35–4.0 from
+`P` at `r = 3`, hence outside the corner ball, so it survives a global
+subtraction the moment truncation lands. If it goes red when the grouping is
+removed, truncation is what is wrong, not the grouping.
+
 ### M9 — Junction degree ≥4 + guards
 
 - Q-vertex triplet hull with feasibility filter (§6.3.1); numerical guards

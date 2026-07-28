@@ -623,8 +623,15 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
     // cell: where the spine bends, one cell's ball reaches into the next cell's
     // wedge and has to cut it. But not once over every chain together — a ball
     // rolling along one crease would then hollow out the neighbouring crease's
-    // bead where the two meet, leaving a lump on the model at every corner. What
-    // belongs at a meeting point is a corner cell, not a hole.
+    // bead where the two meet, leaving a lump on the model at every corner.
+    //
+    // The grouping is standing in for something the spine does not do yet. A
+    // chain runs its ball centres to the meeting vertex itself, so its last ball
+    // sits where the neighbouring creases still have material to remove. Once
+    // the spine is cut back short of the vertex and a corner cell fills the gap,
+    // the canal is exactly the set of positions the ball can occupy, and the
+    // subtraction wants to be global again — the corner's own ball has to reach
+    // every chain that meets there.
     const manifold::Manifold canal = unionCells(canalCells);
     beads.push_back(canal.IsEmpty() ? std::move(wedge)
                                     : dropVolumelessParts(wedge - canal));
