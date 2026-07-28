@@ -32,6 +32,12 @@ refused, a bead that rolls into a face it shares no crease with — and what eac
 one turned out to do. Several were expected to come out wrong and two do. The
 point was to find out and write the outcome down, not to wait until they pass.
 
+[`next-cases.md`](next-cases.md) is the queue that replaced it: selection and the
+`$fn`-derived feature threshold, obstacles that are faces rather than creases,
+curved creases and the junctions on them, and the numeric extremes. Each entry
+says whether it was probed by hand or only reasoned about, so whoever writes them
+knows which ones already have an answer to pin and which are still questions.
+
 ## The picture
 
 ```
