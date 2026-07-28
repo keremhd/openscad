@@ -20,6 +20,12 @@ FILLET_DRIVER = false;
 // the only expensive part of the picture — it dilates both solids.
 FILLET_NO_DIFF = false;
 
+// Set from the command line by render.sh to drop the unsliced solid column. Every
+// other column is a thin section, which is what makes one flat top-down image
+// legible; the solid is there for the GUI, where the view can be rotated. It is
+// off for the rendered PNGs so those stay the six columns the README describes.
+FILLET_NO_SOLID = false;
+
 // ---- sectioning viewers ------------------------------------------------------
 
 // Thin-slab section: intersect children with a thin horizontal slab at height z.
@@ -123,6 +129,12 @@ module fillet_sandwich(d, sign) {
 //   0 = model, 1 = reference tool, 2 = candidate tool, 3 = clip region
 //
 //   [ model ] [ ref applied ] [ cand applied ] [ ref tool ] [ cand tool ] [ diff ]
+//   [ cand applied, whole solid ]
+//
+// The seventh column is the same geometry as the third, minus the slab: the
+// result you would actually print, so the bead can be looked at in the round.
+// Sections are what make a single flat image readable, so it is drawn only where
+// there is a camera to turn — the GUI — and render.sh switches it off.
 //
 // The tool columns and the diff are clipped to the case's region of interest, so
 // what you see in columns 4-6 is what the "tool" check actually compares; the
@@ -159,6 +171,9 @@ module fillet_row(sign, t, slice, kind, dx = 100) {
         intersection() { children(2); children(3); }
         intersection() { children(1); children(3); }
       }
+  if (!FILLET_NO_SOLID)
+    translate([6 * dx, 0, 0]) color("LightSkyBlue")
+      fillet_apply(sign) { children(0); children(2); }
 }
 
 // Cut the scene down to something one flat image can show, per the case's

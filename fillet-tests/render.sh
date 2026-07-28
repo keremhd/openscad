@@ -39,7 +39,9 @@ for f in "${files[@]}"; do
   slice="$(probe_case "$abs" | sed -n 's/^SLICE //p')"
   if [[ "$slice" == "front" ]]; then rot="90,0,0"; else rot="0,0,0"; fi
 
-  args=()
+  # The unsliced solid column is for the GUI, where the view can be turned; in a
+  # flat top-down image it would only hide the sections behind its own outline.
+  args=(-D "FILLET_NO_SOLID=true")
   [[ -n "${FAST:-}" ]] && args+=(-D "FILLET_NO_DIFF=true")
 
   echo "rendering $name  (slice $slice, camera $rot)"
