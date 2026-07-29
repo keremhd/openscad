@@ -27,20 +27,53 @@ Every image here is rendered from the `.scad` beside it:
 
 ```sh
 openscad --backend=manifold --render --viewall --autocenter \
-         --imgsize=1100,620 --projection=p --colorscheme=Cornfield \
+         --imgsize=<W>,<H> --projection=p --colorscheme=Cornfield \
          -o fig-name.png fig-name.scad
 ```
 
-Two exceptions: `pr-body/fig-classify.png` is a preview render (drop `--render`),
-because the debug overlay is a cloud of disjoint marker cubes rather than a
-solid; and `doc-page/fig-brush-one-edge.png` uses `--imgsize=1200,400` to suit
-its three panels.
+**`--imgsize` is per figure and is not a detail.** `--viewall` fits the model to
+whatever canvas it is given, so a height chosen for one figure letterboxes
+another: render the three-panel figures at 620 tall and the panels shrink into a
+band of empty background. The sizes below are the ones each figure was composed
+at. Re-render with the figure's own size, not a single default — and check the
+pixel dimensions afterwards, because a wrong `--imgsize` produces a picture that
+is not obviously wrong on its own, only worse.
 
-Every image was last rendered against the tree at `b6e6bbec3`, the corner-cell
-rework. Re-render after any change to the builder, and check the piece count as
-well as the picture: a figure that cuts a model open can leave bead ends floating
-if its cutting box is not generous enough, which looks exactly like a tool
-shedding crumbs and is not.
+`pr-body/fig-classify` is also the one **preview** render — drop `--render` —
+because the debug overlay is a cloud of disjoint marker cubes rather than a solid.
+
+Then check the piece count as well as the picture: a figure that cuts a model open
+can leave bead ends floating if its cutting box is not generous enough, which
+looks exactly like a tool shedding crumbs and is not. Count the pieces, and
+measure them by **volume, not bounding box** — a bead's cross-section is the same
+`r` across however wide the brush is, so a bounding box cannot tell a 1 mm bead
+from a 6 mm one; volume can.
+
+Everything below was measured against the tree at `5121d87a5`, the fix for a
+spine that turns from one wall onto the next. One piece per panel, unless the
+panel is a marker cloud:
+
+| Figure | `--imgsize` | Pieces | What they are |
+|---|---|---|---|
+| `pr-body/fig-anatomy` | 1100,560 | 5 | two tool solids, plus the seated ball at three stations |
+| `pr-body/fig-classify` | 1100,620 | 225 | disjoint marker cubes, so a cloud is correct |
+| `pr-body/fig-corner` | 1100,560 | 2 | the bare tool for a cube — **one** piece, which is the figure's point — and the cube it is cut from |
+| `pr-body/fig-hard-cases` | 1200,520 | 3 | one per panel; the pocket's cutting box is deliberately oversize, see the note in the script |
+| `doc-page/fig-brush` | 1100,600 | 2 | the two brush variants |
+| `doc-page/fig-brush-one-edge` | 1200,400 | 3 | the three panels |
+| `doc-page/fig-fillet` | 1100,560 | 4 | untouched, both halves, convex only, concave only |
+| `doc-page/fig-min-angle` | 1100,560 | 2 | the two thresholds |
+| `doc-page/fig-tools` | 1100,560 | 8 | four bare tools in the back row, four composed in the front |
+| `wiki-page/fig-curved` | 1100,560 | 3 | the three curved cases |
+| `wiki-page/fig-quickstart` | 1100,560 | 2 | the bracket as written and the same one filleted |
+| `wiki-page/fig-selective` | 1100,600 | 1 | one cutaway part |
+
+Re-rendered at those sizes against `5121d87a5`, every figure but
+`wiki-page/fig-quickstart` comes back **byte-identical** to its render against
+`7cd6a9037`, and that one differs only because its `.scad` was rewritten. Nothing
+in the turn fix changed any existing figure's geometry, which is the check worth
+repeating: if a builder change is meant to be narrow, byte-identical renders are
+what says so.
 
 The figure scripts are also worth keeping as review material in their own right —
 each one is a small worked example with the reasoning in its header comment.

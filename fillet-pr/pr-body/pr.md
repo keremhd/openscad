@@ -160,8 +160,8 @@ they were rules:
 
 | Where | What |
 |---|---|
-| `FilletBuilder_test.cc` | 53 cases, 310 assertions — classification, chains, frames, brushes, the size gate, junctions, runout, debug markers |
-| `FilletCompare_test.cc` | 16 cases, 47 assertions — exact comparison against hand-written reference solids |
+| `FilletBuilder_test.cc` | 54 cases, 535 assertions — classification, chains, frames, brushes, the size gate, junctions, turns, runout, debug markers |
+| `FilletCompare_test.cc` | 16 cases, 63 assertions — exact comparison against hand-written reference solids |
 | `tests/data/scad/3D/features/` | 5 regression models with committed baselines across preview, render, render-cgal, render-manifold, throwntogether and the `.csg` dump |
 
 The comparison tests are the interesting half. Where a blend has a closed form,
