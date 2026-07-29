@@ -434,6 +434,247 @@ TEST_CASE("wedge: an empty chain list builds nothing")
 
 namespace {
 
+// The floor-and-wall L whose single concave crease runs the length of y: the
+// simplest model with one open chain of exactly one segment, so a brush cutting
+// it lands at a parameter that can be read off by hand.
+manifold::Manifold floorAndWall() { return box(10.0, 10.0, 1.0) + box(1.0, 10.0, 10.0); }
+
+// What buildFilletTool does with the node's brush children: drop the chains the
+// brush misses, and give each of the rest the stretches of itself it covers.
+std::vector<Chain> brushed(const MergedMesh& mm, const std::vector<Chain>& chains,
+                           const manifold::Manifold& brush, double size)
+{
+  const BrushVolume volume(brush.GetMeshGL64());
+  std::vector<Chain> out;
+  for (Chain chain : chains) {
+    const size_t n = chain.verts.size();
+    const size_t segments = n < 2 ? 0 : (chain.closed ? n : n - 1);
+    auto keep = chainSelection(mm, chain, volume, 0.01 * size);
+    if (keep.empty()) continue;
+    if (keep.size() == 1 && keep.front().first <= 0.0 &&
+        keep.front().second >= static_cast<double>(segments))
+      keep.clear();
+    chain.keep = std::move(keep);
+    out.push_back(std::move(chain));
+  }
+  return out;
+}
+
+}  // namespace
+
+TEST_CASE("brush: a point is placed by the face it would leave through")
+{
+  // Not by counting crossings: the nearest face a ray meets says which side the
+  // ray started on, and one bad crossing further out cannot flip the answer.
+  const BrushVolume volume(box(2.0, 2.0, 2.0).GetMeshGL64());
+  CHECK(volume.contains(Vector3d(1.0, 1.0, 1.0)));
+  CHECK(volume.contains(Vector3d(0.01, 1.9, 1.0)));
+  CHECK_FALSE(volume.contains(Vector3d(3.0, 1.0, 1.0)));
+  CHECK_FALSE(volume.contains(Vector3d(-0.01, 1.0, 1.0)));
+
+  // A brush with no geometry at all contains nothing; the caller must not read
+  // that as "everything".
+  const BrushVolume nothing{manifold::MeshGL64{}};
+  CHECK(nothing.empty());
+  CHECK_FALSE(nothing.contains(Vector3d::Zero()));
+}
+
+TEST_CASE("brush: the spine is cut where the brush crosses it, not at a station")
+{
+  // The crease runs y = 0 .. 10 with a station only at each end. A brush ending
+  // at y = 4 has to come back as the parameter 0.4 — a fixed physical point —
+  // rather than as a decision about which of the two stations is in.
+  const auto model = floorAndWall();
+  const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/true));
+  REQUIRE(chains.size() == 1);
+  REQUIRE(chains[0].verts.size() == 2);
+  REQUIRE(mm.pos[chains[0].verts.front()].y() == Approx(0.0));
+
+  const auto brush = box(20.0, 5.0, 20.0).Translate(manifold::vec3(-5.0, -1.0, -5.0));
+  const auto keep = chainSelection(mm, chains[0], BrushVolume(brush.GetMeshGL64()), 0.01);
+  REQUIRE(keep.size() == 1);
+  CHECK(keep[0].first == Approx(0.0));
+  CHECK(keep[0].second == Approx(0.4));
+
+  // A brush containing the whole crease reports the whole of it, and one that
+  // contains none of it reports nothing — the two answers the caller has to be
+  // able to tell apart.
+  const auto all = box(40.0, 40.0, 40.0).Translate(manifold::vec3(-10.0, -10.0, -10.0));
+  const auto whole = chainSelection(mm, chains[0], BrushVolume(all.GetMeshGL64()), 0.01);
+  REQUIRE(whole.size() == 1);
+  CHECK(whole[0].first == Approx(0.0));
+  CHECK(whole[0].second == Approx(1.0));
+
+  const auto elsewhere = box(2.0, 2.0, 2.0).Translate(manifold::vec3(50.0, 50.0, 50.0));
+  CHECK(chainSelection(mm, chains[0], BrushVolume(elsewhere.GetMeshGL64()), 0.01).empty());
+}
+
+TEST_CASE("brush: a graze too short to be a bead is dropped")
+{
+  // A brush face nearly tangent to the spine crosses it twice a hair apart. The
+  // stub of bead that would leave is never what anyone asked for, and the user
+  // sees nothing built rather than a sliver they cannot find.
+  const auto model = floorAndWall();
+  const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/true));
+  REQUIRE(chains.size() == 1);
+
+  const auto sliver = box(20.0, 0.001, 20.0).Translate(manifold::vec3(-5.0, -0.0005, -5.0));
+  const BrushVolume volume(sliver.GetMeshGL64());
+  CHECK(chainSelection(mm, chains[0], volume, /*minLength=*/0.005).empty());
+  // The same graze is a real selection when the tool is small enough for it.
+  CHECK(chainSelection(mm, chains[0], volume, /*minLength=*/1e-6).size() == 1);
+}
+
+TEST_CASE("brush: the clipped bead is the whole bead cut by the brush")
+{
+  // The claim the case suite draws as a picture, stated as a volume. Clipping
+  // the spine and clipping the finished tool have to agree — which they only do
+  // because the canal overhangs the wedge's cut: shortening it to match would
+  // let its round cap bulge back through the cut plane and scoop a dish out of
+  // the flat end face.
+  const double r = 0.5;
+  const auto model = floorAndWall();
+  const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/true));
+  REQUIRE(chains.size() == 1);
+
+  const auto brush = box(20.0, 5.0, 20.0).Translate(manifold::vec3(-5.0, -1.0, -5.0));
+  const auto clipped =
+    buildRoundSolid(mm, adj, brushed(mm, chains, brush, r), r, /*concave=*/true, 24);
+  const auto expected = buildRoundSolid(mm, adj, chains, r, /*concave=*/true, 24) ^ brush;
+  REQUIRE_FALSE(clipped.IsEmpty());
+  REQUIRE_FALSE(expected.IsEmpty());
+
+  // Both directions, because they fail differently: material the brush should
+  // have kept is the scoop, and material past the brush is a bead that did not
+  // stop.
+  const double scale = expected.Volume();
+  CHECK((expected - clipped).Volume() < 1e-6 * scale);
+  CHECK((clipped - expected).Volume() < 1e-6 * scale);
+
+  // And the cap is where the brush ends, not at the station beyond it.
+  CHECK(clipped.BoundingBox().max[1] == Approx(4.0).margin(1e-9));
+}
+
+TEST_CASE("brush: a slanted brush face still caps square to the crease")
+{
+  // The brush selects a point along an edge; it does not cut geometry. So the
+  // angle its own surface crosses the spine at must not reach the result: the
+  // cap is the crease's cross-section, square to the spine, wherever the brush
+  // face happens to lean.
+  //
+  // The brush here is a half-space whose plane passes through (1, 4, 1) — a
+  // point ON the crease — with its normal tilted well away from the spine in
+  // both of the directions available to it. Whatever the rotation does, the
+  // plane still contains that point, so the crossing is still at y = 4.
+  const double r = 0.5;
+  const auto model = floorAndWall();
+  const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/true));
+  REQUIRE(chains.size() == 1);
+
+  const auto brush = box(200.0, 200.0, 200.0)
+                       .Translate(manifold::vec3(-100.0, -200.0, -100.0))
+                       .Rotate(20.0, 0.0, 35.0)
+                       .Translate(manifold::vec3(1.0, 4.0, 1.0));
+
+  const auto unclipped = buildRoundSolid(mm, adj, chains, r, /*concave=*/true, 24);
+  const auto clipped =
+    buildRoundSolid(mm, adj, brushed(mm, chains, brush, r), r, /*concave=*/true, 24);
+  REQUIRE_FALSE(clipped.IsEmpty());
+
+  // What it must equal: the bead cut by the plane PERPENDICULAR to the crease
+  // at the point the brush crossed it — not by the brush.
+  const auto square = box(200.0, 204.0, 200.0).Translate(manifold::vec3(-100.0, -200.0, -100.0));
+  const auto expected = unclipped ^ square;
+  const double scale = expected.Volume();
+  CHECK((expected - clipped).Volume() < 1e-6 * scale);
+  CHECK((clipped - expected).Volume() < 1e-6 * scale);
+
+  // And it must NOT equal the bead cut by the brush, or the case proves nothing:
+  // the slanted plane shaves the far side of the bead where the square one does
+  // not, which is exactly the difference being ruled out.
+  const auto slanted = unclipped ^ brush;
+  CHECK((clipped - slanted).Volume() > 1e-3 * scale);
+
+  // Read off the ends: the square cap stops the whole bead at 4, while the brush
+  // surface runs on to 4.35 on the far side of it. If the brush's angle ever
+  // leaked into the result, this is the number that would carry it.
+  CHECK(clipped.BoundingBox().max[1] == Approx(4.0).margin(1e-9));
+  CHECK(slanted.BoundingBox().max[1] > 4.3);
+}
+
+TEST_CASE("brush: a corner every crease still reaches keeps its corner cell")
+{
+  // A brush that takes the corner of a cube but only part of each edge running
+  // out of it. All three creases reach the vertex, so the corner is built; the
+  // beads are capped flat partway along instead of at the far corners, which are
+  // not selected at all and get nothing.
+  const double r = 1.0;
+  const auto cube = box(10.0, 10.0, 10.0);
+  const MergedMesh mm = mergeMesh(cube.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/false));
+  REQUIRE(chains.size() == 12);
+
+  const auto brush = box(5.0, 5.0, 5.0).Translate(manifold::vec3(-1.0, -1.0, -1.0));
+  const auto selected = brushed(mm, chains, brush, r);
+  // Only the three edges at the origin corner meet the brush.
+  REQUIRE(selected.size() == 3);
+
+  const auto junctions = chainJunctions(mm, adj, selected, r, /*concave=*/false);
+  REQUIRE(junctions.size() == 1);
+  CHECK(mm.pos[junctions[0].vert].isApprox(Vector3d::Zero()));
+  CHECK(junctions[0].ballCentres.size() == 1);
+
+  const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24);
+  REQUIRE_FALSE(tool.IsEmpty());
+  // The three beads stop at the brush, a little past it where the corner cell
+  // reaches; nothing runs on to the far corners ten away.
+  CHECK(tool.BoundingBox().max[0] < 4.5);
+  CHECK(tool.BoundingBox().max[1] < 4.5);
+  CHECK(tool.BoundingBox().max[2] < 4.5);
+
+  // What matters more than the extent: the corner closes. A cube with one corner
+  // rounded is still one solid with no hole in it.
+  const auto rounded = cube - tool;
+  REQUIRE_FALSE(rounded.IsEmpty());
+  CHECK(rounded.Genus() == 0);
+}
+
+TEST_CASE("brush: a corner one crease is cut short of gets no corner cell")
+{
+  // The other half of the rule. The brush covers two of the three edges at the
+  // corner and stops short of the third, so the corner is not built: a cell
+  // closing three beads when only two arrive is a lump on the model, not a
+  // corner. The two that are there are capped flat, like any other clip.
+  const double r = 1.0;
+  const auto cube = box(10.0, 10.0, 10.0);
+  const MergedMesh mm = mergeMesh(cube.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/false));
+
+  // Lifted off z = 0, so the two edges in that plane are missed entirely and the
+  // vertical one is taken over z = 2 .. 7.
+  const auto brush = box(5.0, 5.0, 5.0).Translate(manifold::vec3(-1.0, -1.0, 2.0));
+  const auto selected = brushed(mm, chains, brush, r);
+  REQUIRE(selected.size() == 1);
+  CHECK(chainJunctions(mm, adj, selected, r, /*concave=*/false).empty());
+
+  const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24);
+  REQUIRE_FALSE(tool.IsEmpty());
+  CHECK(tool.BoundingBox().min[2] == Approx(2.0).margin(1e-9));
+  CHECK(tool.BoundingBox().max[2] == Approx(7.0).margin(1e-9));
+}
+
+namespace {
+
 // One model put through the size gate: the chains a tool would walk on it, and
 // the verdict on each.
 struct SizeRun

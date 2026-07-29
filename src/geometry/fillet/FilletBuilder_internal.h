@@ -35,6 +35,7 @@
 
 #include <manifold/manifold.h>
 
+#include "geometry/fillet/FilletBrush.h"
 #include "geometry/linalg.h"
 
 class PolySet;
@@ -115,20 +116,49 @@ std::vector<EdgeKey> selectedEdges(const MergedMesh& m,
                                    const std::map<EdgeKey, std::vector<int>>& adj,
                                    double thresholdDeg, bool wantConcave);
 
+// A stretch of one chain, in chain-parameter space: station i sits at parameter
+// i, so a value between two integers names a point partway along that segment.
+// A brush boundary is recorded as that parameter rather than as a nearest
+// station, which is what makes the blend end at a fixed physical point instead
+// of moving when the target's tessellation changes.
+using SpineInterval = std::pair<double, double>;
+
 // A spine: an ordered run of merged vertex indices along one crease. `closed`
 // marks a ring (the hole-mouth case), where the last vertex reconnects to the
 // first. Ordering is canonical (derived from vertex positions, not mesh
 // traversal order) so downstream indices stay put under a small parameter nudge.
+//
+// `keep` is the part of the chain the selection brushes picked out, empty
+// meaning the whole of it — the common case, and the only one when no brush was
+// given at all. A chain the brushes miss entirely is not carried with an empty
+// `keep`; it is dropped from the chain list.
 struct Chain
 {
   std::vector<int> verts;
   bool closed = false;
+  std::vector<SpineInterval> keep;
 };
 
 // Walk the selected edges into chains via shared vertices. Vertices of degree 2
 // are interior stations; degree 1 are open ends; degree >= 3 are branch/junction
 // vertices where chains terminate. Returns chains in canonical order.
 std::vector<Chain> buildChains(const MergedMesh& m, const std::vector<EdgeKey>& edges);
+
+// Which stretches of a chain the brushes select. The spine is intersected, not
+// the tool volume: each segment is cast against the brush and the crossings
+// become interval ends in chain-parameter space, so a brush boundary landing on
+// a station is a parameter near 0 or 1 rather than a coin flip about whether
+// that station is in.
+//
+// Intervals shorter than `minLength` (a length along the spine) are discarded. A
+// brush face nearly tangent to the spine crosses it twice a hair apart, and the
+// stub of bead that would come of it is never what was meant.
+//
+// Returns the intervals covering the whole chain when the brush contains all of
+// it, and nothing at all when it contains none — the caller distinguishes the
+// two, since an empty `Chain::keep` means the opposite of an empty return here.
+std::vector<SpineInterval> chainSelection(const MergedMesh& m, const Chain& chain,
+                                          const BrushVolume& brush, double minLength);
 
 // The two wall normals at one chain station, averaged over the station's
 // incident chain edges. `triA`/`triB` name one triangle of each wall, which is

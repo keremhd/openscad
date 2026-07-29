@@ -13,8 +13,10 @@
 # delete it believing they fixed something.
 #
 # All four tools now build real geometry, and every two-face case — flat and
-# ring, concave and convex — matches its hand reference. What is left below is
-# three specific gaps and nothing else, so the catch-all that used to say "the
+# ring, concave and convex — matches its hand reference, brushed or whole. What
+# is left below is red for reasons outside the operator — a check that cannot
+# express its case's answer, or a kernel downstream that will not dilate a result
+# that is nonetheless correct — so the catch-all that used to say "the
 # rounded tools emit nothing" is gone rather than narrowed: an unlisted check is
 # expected to pass, and that is now the common case rather than the exception.
 
@@ -89,11 +91,12 @@ case_junction_flat_apex     small  sandwich  FAIL
 # that the under-fill was waiting for exists, and is exercised in
 # FilletBuilder_test.cc, which calls the builder without the gate in front.
 
-# Brush selection is not built, so the tool rounds the whole chain instead of the
-# half the brush picks out, and the residual is the half that should not be
-# there. Only the "tool" check sees it: the extra bead is still within size of
-# the model, which is exactly the coarseness "sandwich" is documented to have.
-case_brush_halfchain    *  tool      FAIL
+# Nothing is listed for the brush case any more. The tool clips its spine
+# against the brush and caps the bead flat and square to the crease, which is
+# what the reference builds by intersecting the finished bead with the same box.
+# Only the "tool" check could ever have told the two apart: a bead that runs on
+# past the brush is still within size of the model, which is the coarseness
+# "sandwich" is documented to have.
 
 # Nothing is listed for "drops" any more: a size the feature cannot carry is
 # refused with a warning, one crease at a time, so all five drop variants pass.

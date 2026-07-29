@@ -7,6 +7,11 @@
 // than hidden under the model. Middle: the same bead unioned into the L it came
 // from. Right: a closed chain — the ring where a boss meets its plate — which
 // wraps rather than ending, and so exercises the seam at the wrap point.
+//
+// Far right: the same L again with a selection brush as child 1, so the bead
+// covers only the lower half of the crease and ends on a flat cap square to it.
+// The cap is the point: clipping the spine gives a full cross-section there,
+// where clipping the finished bead's swept ball would leave a scooped end.
 
 $fn = 32;
 
@@ -30,4 +35,12 @@ union() {
 translate([40, 12, 2]) union() {
     boss();
     fillet_tool(r = 2) boss();
+}
+
+translate([70, 0, 0]) union() {
+    ell();
+    fillet_tool(r = 3) {
+        ell();
+        translate([-1, -1, -1]) cube([30, 30, 6]);
+    }
 }

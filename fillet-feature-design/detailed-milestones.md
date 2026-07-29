@@ -696,6 +696,44 @@ catch-all is gone from `expectations.txt`.
 - **Acceptance:** half-chain brush → flat perpendicular cap, no scoop;
   empty-selection warning with counts.
 
+**Landed**, in `FilletBrush.{h,cc}` plus `chainSelection` and `Chain::keep`. See
+[`log-2026-07-29-m10.md`](log-2026-07-29-m10.md). `case_brush_halfchain` — red
+since M1, when it was written against a hand reference — is green, and the
+promoted regression case carries a brushed column.
+
+Three things are worth carrying forward from it.
+
+1. *A crossing knows which way it goes, so there is no parity.* Counting
+   crossings and alternating needs a global inside/outside test per chain and
+   inverts everything downstream of one miscount. The brush is a solid with
+   consistent outward normals, so the sign of the ray against the face it hits
+   says in or out directly; the state before the first crossing is read off that
+   crossing. Only a chain crossing nothing needs a point tested, and that test is
+   the same trick — nearest face, which way does it face — voted over three
+   directions so a ray leaving through an edge is outvoted rather than believed.
+2. *The selection is cut in one space and used in another.* Intervals are
+   parameters along the chain, because that is the space a brush boundary is a
+   fixed physical point in; cells are hulls of consecutive sections. Those agree
+   until a chain meets a junction, where truncation slides an end section off its
+   station and a runout replaces one station with a fan of seven. The first
+   attempt avoided the mismatch by refusing to build a junction unless the whole
+   segment beside it was selected — which loses a cube's corner to *any* partial
+   clip of *any* of its three edges, since each is a single segment. Carrying
+   where each section sits and mapping the selection through the inverse once, at
+   the end, costs one vector per chain and removes the special case.
+3. *A junction needs every incident crease to reach it, and may overshoot the
+   brush by the little truncation takes.* Both are trades. A corner cell closing
+   three beads when two arrive is a lump; a corner lost because the brush stopped
+   a tenth of a segment short of the truncation point is a corner the user asked
+   for and did not get. Brushes have slack designed into them, so the overshoot
+   is the cheaper error.
+
+**Not done, and deliberately.** The size gate still runs before the brush and on
+the whole chain, so a crease that cannot carry the size is refused even where the
+brush selects only the part of it that has room, and the warning fires for
+creases the user did not select. Fixing it means teaching `chainContacts` to read
+`keep`; it is a change to the gate, not to selection.
+
 ### M11 — Re-fillet tagging (riskiest)
 
 - Reserved ID range via `ReserveIDs` (§8); stamp the tool through the **MeshGL

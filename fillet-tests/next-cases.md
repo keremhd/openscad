@@ -272,6 +272,29 @@ rather than wrong answers.
 - **`case_coincident_faces`** — two cubes unioned along a shared face, so the
   merged mesh has coplanar triangles and no crease where the seam was.
 
+## Group 5 — brushes past the half-chain case
+
+**All PREDICTED.** `case_brush_halfchain` covers the one thing selection had to
+get right — a flat cap where the spine crosses the brush, not a scooped one — and
+the unit tests pin the graze guard, the empty selection, the two corner rules and
+the slanted brush face (the cap stays square to the crease; the brush's own angle
+does not reach the result). These are the configurations a picture would say more
+about than a volume does.
+
+- **`case_brush_corner_partial`** — a cube under `round_tool` with a brush over
+  one corner that stops partway along each of its three edges, and a variant
+  lifted so it misses one edge entirely. The first keeps its corner cell and
+  overshoots the brush by what truncation takes; the second builds no corner and
+  caps two beads flat. Both are deliberate, and both look wrong until you know
+  which one you are seeing.
+- **`case_brush_negative`** — `difference() { big_brush(); keep_sharp(); }` as the
+  brush, which is the whole argument for brushes being ordinary CSG. Nothing in
+  the operator knows it happened, so this is a case about the *idiom* reading
+  correctly, not about new code.
+- **`case_brush_ring_arc`** — an arc of the hole-mouth ring. A closed chain whose
+  selection wraps is contiguous across the wrap by construction; one that does
+  not wrap is two caps on the same ring. Neither has been looked at.
+
 ## Harness gaps these keep running into
 
 Not cases, but the reason several cases above have to be read by eye:

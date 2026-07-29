@@ -29,8 +29,11 @@ class FilletNode;
 // (concave/convex plus a tessellation-seam filter), walk the selected edges into
 // chains, and build the tool solid along them.
 //
-// Returns the tool solid, or nullptr where there is nothing to build. The
-// chamfer and bevel tools return the wedge; the rounded tools additionally need
-// the rolling ball subtracted and are still a classify-only no-op.
+// `brush` is the union of the node's selection children, or null when it has
+// none. It narrows the tool to the stretches of crease it covers; the whole of
+// every crease is taken when it is absent.
+//
+// Returns the tool solid, or nullptr where there is nothing to build.
 std::shared_ptr<const Geometry> buildFilletTool(
-  const FilletNode& node, const std::shared_ptr<const ManifoldGeometry>& target);
+  const FilletNode& node, const std::shared_ptr<const ManifoldGeometry>& target,
+  const std::shared_ptr<const ManifoldGeometry>& brush = nullptr);

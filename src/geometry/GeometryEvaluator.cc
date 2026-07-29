@@ -55,6 +55,9 @@
 #include "geometry/cgal/cgalutils.h"
 #endif
 #ifdef ENABLE_MANIFOLD
+#include <manifold/manifold.h>
+
+#include "geometry/manifold/ManifoldGeometry.h"
 #include "geometry/manifold/manifoldutils.h"
 #endif
 
@@ -993,9 +996,9 @@ Response GeometryEvaluator::visit(State& state, const CgalAdvNode& node)
    output: a tool solid, to be unioned (concave tools) or subtracted (convex)
    operation:
     o Extract child 0's mesh, rebuild edge adjacency, classify its edges and walk
-      the selected ones into chains. chamfer_tool/bevel_tool build the wedge
-      along those chains; the rounded tools still emit nothing. Brushes
-      (children 1+) are collected but not yet used.
+      the selected ones into chains, then build the tool along them. Children 1+
+      are unioned into one selection brush; where it is present, only the
+      stretches of crease inside it are built.
  */
 Response GeometryEvaluator::visit(State& state, const FilletNode& node)
 {
@@ -1009,7 +1012,25 @@ Response GeometryEvaluator::visit(State& state, const FilletNode& node)
 #ifdef ENABLE_MANIFOLD
       if (!children.empty() && children.front().second) {
         auto target = ManifoldUtils::createManifoldFromGeometry(children.front().second);
-        geom = buildFilletTool(node, target);
+
+        // Children 1+ are selection brushes, unioned into one volume. They are
+        // ordinary CSG, which is what makes negative selection free: a
+        // difference() of two brushes keeps an edge sharp with no new syntax.
+        std::shared_ptr<const ManifoldGeometry> brush;
+        std::vector<manifold::Manifold> brushParts;
+        for (auto it = std::next(children.begin()); it != children.end(); ++it) {
+          if (!it->second) continue;
+          auto part = ManifoldUtils::createManifoldFromGeometry(it->second);
+          if (part && !part->isEmpty()) brushParts.push_back(part->getManifold());
+        }
+        if (brushParts.size() == 1) {
+          brush = std::make_shared<ManifoldGeometry>(std::move(brushParts.front()));
+        } else if (brushParts.size() > 1) {
+          brush = std::make_shared<ManifoldGeometry>(
+            manifold::Manifold::BatchBoolean(brushParts, manifold::OpType::Add));
+        }
+
+        geom = buildFilletTool(node, target, brush);
       }
 #else
       LOG(message_group::Warning, node.modinst->location(), this->tree.getDocumentPath(),

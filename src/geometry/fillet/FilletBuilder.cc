@@ -324,6 +324,66 @@ std::vector<Chain> buildChains(const MergedMesh& m, const std::vector<EdgeKey>& 
   return chains;
 }
 
+std::vector<SpineInterval> chainSelection(const MergedMesh& m, const Chain& chain,
+                                          const BrushVolume& brush, double minLength)
+{
+  const size_t n = chain.verts.size();
+  const size_t segments = n < 2 ? 0 : (chain.closed ? n : n - 1);
+  if (segments == 0 || brush.empty()) return {};
+
+  struct Event
+  {
+    double p;
+    bool entering;
+  };
+  std::vector<Event> events;
+  std::vector<double> segmentLength(segments);
+  for (size_t i = 0; i < segments; ++i) {
+    const Vector3d& a = m.pos[chain.verts[i]];
+    const Vector3d& b = m.pos[chain.verts[(i + 1) % n]];
+    segmentLength[i] = (b - a).norm();
+    for (const auto& c : brush.segmentCrossings(a, b))
+      events.push_back({static_cast<double>(i) + c.t, c.entering});
+  }
+  std::sort(events.begin(), events.end(),
+            [](const Event& x, const Event& y) { return x.p < y.p; });
+
+  // A crossing says which way it goes, so the state before the first one is
+  // read off it directly. Only a chain that crosses nothing needs the brush
+  // asked about a point, and then one point settles the whole chain.
+  bool inside = events.empty() ? brush.contains(m.pos[chain.verts[0]]) : !events.front().entering;
+
+  std::vector<SpineInterval> keep;
+  double open = inside ? 0.0 : -1.0;
+  for (const Event& e : events) {
+    if (e.entering == (open >= 0)) continue;  // already in that state
+    if (e.entering) {
+      open = e.p;
+    } else {
+      keep.emplace_back(open, e.p);
+      open = -1.0;
+    }
+  }
+  if (open >= 0) keep.emplace_back(open, static_cast<double>(segments));
+
+  // The parameter is not a length — segments differ — so an interval's length
+  // has to be summed over the segments it spans.
+  auto lengthOf = [&](const SpineInterval& iv) {
+    double total = 0.0;
+    for (size_t i = 0; i < segments; ++i) {
+      const double lo = std::clamp(iv.first - static_cast<double>(i), 0.0, 1.0);
+      const double hi = std::clamp(iv.second - static_cast<double>(i), 0.0, 1.0);
+      if (hi > lo) total += (hi - lo) * segmentLength[i];
+    }
+    return total;
+  };
+
+  std::vector<SpineInterval> out;
+  for (const SpineInterval& iv : keep)
+    if (lengthOf(iv) >= minLength) out.push_back(iv);
+  return out;
+}
+
 namespace {
 
 // The two wall triangles of edge a->b, ordered so side A/B is consistent along a
@@ -828,27 +888,122 @@ manifold::Manifold unionCells(std::vector<manifold::Manifold>& cells)
 // per spine segment. A closed chain wraps, so its last station also pairs with
 // its first. Degenerate segments (a zero-length spine step, or a section that
 // collapsed) hull to nothing rather than to a bad solid and are dropped.
-template <typename Section, typename PointsOf>
+//
+// `runs` restricts the work to the stretches the brushes selected, empty meaning
+// all of it. Where a run starts or ends partway along a segment the two sections
+// are interpolated to that parameter, which is exact rather than approximate:
+// hulling two sections IS the linear interpolation of the cross-section between
+// them, so slicing that cell at a parameter and hulling to the section at that
+// parameter give the same solid. What the caller gets is a flat cap square to
+// the spine, carrying the full cross-section.
+template <typename Section, typename PointsOf, typename LerpOf>
 void appendChainCells(const Chain& chain, const std::vector<Section>& sections,
-                      const PointsOf& pointsOf, std::vector<manifold::Manifold>& cells)
+                      const PointsOf& pointsOf, LerpOf lerpOf,
+                      const std::vector<SpineInterval>& runs,
+                      std::vector<manifold::Manifold>& cells)
 {
   const size_t n = sections.size();
   if (n < 2) return;
 
   const size_t segments = chain.closed ? n : n - 1;
-  for (size_t i = 0; i < segments; ++i) {
-    const Section& a = sections[i];
-    const Section& b = sections[(i + 1) % n];
-    if (!a.valid || !b.valid) continue;
+  std::vector<SpineInterval> all;
+  if (runs.empty()) all.emplace_back(0.0, static_cast<double>(segments));
+  const std::vector<SpineInterval>& use = runs.empty() ? all : runs;
 
-    std::vector<manifold::vec3> pts;
-    for (const Section *section : {&a, &b})
-      for (const Vector3d& p : pointsOf(*section)) pts.emplace_back(p.x(), p.y(), p.z());
+  for (const auto& [lo, hi] : use) {
+    for (size_t i = 0; i < segments; ++i) {
+      const double s0 = std::clamp(lo - static_cast<double>(i), 0.0, 1.0);
+      const double s1 = std::clamp(hi - static_cast<double>(i), 0.0, 1.0);
+      if (s1 - s0 <= 1e-12) continue;
 
-    manifold::Manifold cell = manifold::Manifold::Hull(pts);
-    if (cell.IsEmpty()) continue;
-    cells.push_back(std::move(cell));
+      const Section& a = sections[i];
+      const Section& b = sections[(i + 1) % n];
+      if (!a.valid || !b.valid) continue;
+      const Section head = s0 > 0.0 ? lerpOf(a, b, s0) : a;
+      const Section tail = s1 < 1.0 ? lerpOf(a, b, s1) : b;
+      if (!head.valid || !tail.valid) continue;
+
+      std::vector<manifold::vec3> pts;
+      for (const Section *section : {&head, &tail})
+        for (const Vector3d& p : pointsOf(*section)) pts.emplace_back(p.x(), p.y(), p.z());
+
+      manifold::Manifold cell = manifold::Manifold::Hull(pts);
+      if (cell.IsEmpty()) continue;
+      cells.push_back(std::move(cell));
+    }
   }
+}
+
+// The canal has a round cap, so ending it where the wedge ends would let that
+// hemisphere bulge back through the cut plane and scoop a dish out of the flat
+// end face. Run it a segment past instead, in both directions: past the wedge's
+// end the canal has nothing to subtract from and overhanging is free.
+std::vector<SpineInterval> overhang(const std::vector<SpineInterval>& runs, size_t segments)
+{
+  if (runs.empty()) return runs;
+  std::vector<SpineInterval> out;
+  for (const SpineInterval& iv : runs) {
+    const SpineInterval wide{std::max(0.0, iv.first - 1.0),
+                             std::min(static_cast<double>(segments), iv.second + 1.0)};
+    if (!out.empty() && wide.first <= out.back().second) {
+      out.back().second = std::max(out.back().second, wide.second);
+      continue;
+    }
+    out.push_back(wide);
+  }
+  return out;
+}
+
+// Whether a chain's selection reaches its end station. A junction is built only
+// where every chain meeting there does, because a corner cell closing three
+// beads when only two of them exist is a lump sitting on the model rather than a
+// corner. Reaching the vertex is all it takes, not covering some stretch either
+// side of it: the brush is a selection volume with slack designed in, and one
+// that reaches a corner meant to take it, so a corner cell that overshoots the
+// brush by the fraction of a segment truncation needs is the lesser wrong
+// against losing the corner outright.
+bool endAnchored(const Chain& chain, bool front)
+{
+  if (chain.keep.empty()) return true;
+  const size_t n = chain.verts.size();
+  if (n < 2) return false;
+  const double vertex = front ? 0.0 : static_cast<double>(n - 1);
+  for (const SpineInterval& iv : chain.keep)
+    if (iv.first <= vertex + 1e-9 && iv.second >= vertex - 1e-9) return true;
+  return false;
+}
+
+// The selection, rewritten from chain-parameter space into the section-index
+// space the cells are built in. `at` is where each section sits along the chain,
+// and it is increasing, so this is the piecewise-linear inverse of it. Empty
+// intervals stay empty, meaning the whole chain, and an identity `at` is left
+// alone rather than walked.
+std::vector<SpineInterval> toSectionSpace(const std::vector<SpineInterval>& runs,
+                                          const std::vector<double>& at, bool closed)
+{
+  if (runs.empty() || at.size() < 2) return runs;
+  bool identity = true;
+  for (size_t i = 0; i < at.size() && identity; ++i) identity = at[i] == static_cast<double>(i);
+  // A closed chain has no ends to truncate or run out at, so its sections never
+  // leave their stations — and its parameter runs one past the last of them,
+  // which the open-chain clamp below would swallow.
+  if (identity || closed) return runs;
+
+  auto index = [&](double p) {
+    if (p <= at.front()) return 0.0;
+    if (p >= at.back()) return static_cast<double>(at.size() - 1);
+    const auto it = std::upper_bound(at.begin(), at.end(), p);
+    const size_t i = static_cast<size_t>(it - at.begin()) - 1;
+    const double span = at[i + 1] - at[i];
+    return static_cast<double>(i) + (span > 0 ? (p - at[i]) / span : 0.0);
+  };
+
+  std::vector<SpineInterval> out;
+  for (const SpineInterval& iv : runs) {
+    const SpineInterval mapped{index(iv.first), index(iv.second)};
+    if (mapped.second - mapped.first > 1e-12) out.push_back(mapped);
+  }
+  return out;
 }
 
 }  // namespace
@@ -907,11 +1062,21 @@ manifold::Manifold buildWedgeSolid(const MergedMesh& m,
 {
   if (!(t > 0)) return {};
 
+  // The pentagon's corners all move linearly along a straight spine segment, so
+  // the section partway along one is the section's points partway along theirs.
+  auto lerpWedge = [](const WedgeSection& a, const WedgeSection& b, double s) {
+    WedgeSection out;
+    if (!a.valid || !b.valid) return out;
+    for (size_t k = 0; k < a.p.size(); ++k) out.p[k] = a.p[k] + s * (b.p[k] - a.p[k]);
+    out.valid = true;
+    return out;
+  };
+
   std::vector<manifold::Manifold> cells;
   for (const Chain& chain : chains)
     appendChainCells(chain, wedgeSections(m, adj, chain, t, concave),
                      [](const WedgeSection& s) -> const std::array<Vector3d, 5>& { return s.p; },
-                     cells);
+                     lerpWedge, chain.keep, cells);
 
   return unionCells(cells);
 }
@@ -992,11 +1157,16 @@ std::vector<Junction> chainJunctions(const MergedMesh& m,
   // Chains are cut at every vertex whose crease degree is not two, so the number
   // of chain ends landing on a vertex is that degree. A closed ring has no ends
   // and never contributes.
+  //
+  // An end the brushes cut short does not count: the bead is capped there and
+  // never reaches the vertex, so a corner cell closing three beads that are not
+  // all present would be a lump sitting on the model rather than a corner.
   std::map<int, std::vector<int>> ends;  // vertex -> the next station along each end
   for (const Chain& chain : chains) {
     if (chain.closed || chain.verts.size() < 2) continue;
-    ends[chain.verts.front()].push_back(chain.verts[1]);
-    ends[chain.verts.back()].push_back(chain.verts[chain.verts.size() - 2]);
+    if (endAnchored(chain, /*front=*/true)) ends[chain.verts.front()].push_back(chain.verts[1]);
+    if (endAnchored(chain, /*front=*/false))
+      ends[chain.verts.back()].push_back(chain.verts[chain.verts.size() - 2]);
   }
 
   // Every triangle that touches a vertex, so a junction can be asked about the
@@ -1174,6 +1344,18 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   for (const Chain& chain : chains)
     sections.push_back(roundSections(m, adj, chain, r, concave, segs));
 
+  // Where each section sits along its chain, as the chain parameter the brushes'
+  // selection is written in. It starts as the identity — one section per station
+  // — and stops being it below: truncation slides an end section back off its
+  // station, and a runout replaces one with a fan of them. Carrying it is what
+  // lets the selection stay in the space the caller's brush cut it in, which is
+  // the only space where a brush boundary is a fixed physical point.
+  std::vector<std::vector<double>> sectionAt(chains.size());
+  for (size_t ci = 0; ci < chains.size(); ++ci) {
+    sectionAt[ci].resize(sections[ci].size());
+    for (size_t i = 0; i < sectionAt[ci].size(); ++i) sectionAt[ci][i] = static_cast<double>(i);
+  }
+
   // Cut every chain back where its ball first meets a wall of the junction it
   // runs into, and hand the truncated end section to that junction so its corner
   // cell can hull against it. Both ends come off the untruncated sections, so a
@@ -1224,6 +1406,10 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
       if (s < 1.0) s = std::min(1.0, s + nudge);
       consumed += 1.0 - s;
       trimmed[endIdx] = lerpSection(a, b, s);
+      // s runs from the neighbour station toward the end one, so the section now
+      // sits a fraction s of the way from `nbrIdx` to `endIdx` in chain terms.
+      sectionAt[ci][endIdx] = static_cast<double>(nbrIdx) +
+                              s * (static_cast<double>(endIdx) - static_cast<double>(nbrIdx));
 
       // The corner cell hulls against a section a hair further back than the one
       // the wedge stops at, so the two overlap in a thin slab instead of meeting
@@ -1260,13 +1446,18 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
     // curvature; a segment shorter than that ramps over what it has.
     const double rampLength = 2.0 * r;
 
-    auto ramp = [&](size_t endIdx, size_t nbrIdx, std::vector<RoundSection>& into) {
+    // Each sample carries the chain parameter it was taken at, so the selection
+    // can still be read against a chain whose sections no longer line up with
+    // its stations.
+    auto ramp = [&](size_t endIdx, size_t nbrIdx, std::vector<RoundSection>& into,
+                    std::vector<double>& atInto) {
       const StationNormals& end = stations[endIdx];
       const StationNormals& nbr = stations[nbrIdx];
       if (!end.valid || !nbr.valid) return;
       const double segment = (end.v - nbr.v).norm();
       if (segment < 1e-12) return;
       const double length = std::min(rampLength, segment);
+      const double toward = static_cast<double>(nbrIdx) - static_cast<double>(endIdx);
 
       // Samples run from the vertex outward, closest first; the caller puts them
       // in the order its end needs.
@@ -1277,6 +1468,7 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
       tip.C = end.v;
       tip.valid = true;
       into.push_back(std::move(tip));
+      atInto.push_back(static_cast<double>(endIdx));
 
       for (int k = 1; k <= kSamples; ++k) {
         const double d = length * k / kSamples;
@@ -1291,32 +1483,51 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
         const double radius = r * d / length;
         into.push_back(makeRoundSection(v, nA.normalized(), nB.normalized(), radius, concave,
                                         segs, std::max(1e-3 * radius, 1e-9)));
+        atInto.push_back(static_cast<double>(endIdx) + s * toward);
       }
     };
 
     // The ramp is built vertex-first, which is already the order the front end
     // wants; the back end takes the same list reversed.
     std::vector<RoundSection> rebuilt;
-    if (runout[ci][0]) ramp(0, 1, rebuilt);
-    for (size_t i = runout[ci][0] ? 1 : 0; i + (runout[ci][1] ? 1 : 0) < sec.size(); ++i)
+    std::vector<double> rebuiltAt;
+    if (runout[ci][0]) ramp(0, 1, rebuilt, rebuiltAt);
+    for (size_t i = runout[ci][0] ? 1 : 0; i + (runout[ci][1] ? 1 : 0) < sec.size(); ++i) {
       rebuilt.push_back(sec[i]);
+      rebuiltAt.push_back(sectionAt[ci][i]);
+    }
     if (runout[ci][1]) {
       std::vector<RoundSection> back;
-      ramp(sec.size() - 1, sec.size() - 2, back);
+      std::vector<double> backAt;
+      ramp(sec.size() - 1, sec.size() - 2, back, backAt);
       rebuilt.insert(rebuilt.end(), back.rbegin(), back.rend());
+      rebuiltAt.insert(rebuiltAt.end(), backAt.rbegin(), backAt.rend());
     }
+
     sections[ci] = std::move(rebuilt);
+    sectionAt[ci] = std::move(rebuiltAt);
   }
+
+  // Read the selection against where the sections ended up. Everything from here
+  // works in section-index space — the cells are hulls of consecutive sections —
+  // while the intervals were cut in chain-parameter space, and truncation and
+  // runout have moved the two apart at the ends of every chain that meets a
+  // junction.
+  std::vector<std::vector<SpineInterval>> keepOf(chains.size());
+  for (size_t ci = 0; ci < chains.size(); ++ci)
+    keepOf[ci] = toSectionSpace(chains[ci].keep, sectionAt[ci], chains[ci].closed);
 
   std::vector<manifold::Manifold> wedgeCells, canalCells;
   for (size_t ci = 0; ci < chains.size(); ++ci) {
     if (!chainUsable[ci]) continue;
+    const size_t n = sections[ci].size();
+    const size_t segments = n < 2 ? 0 : (chains[ci].closed ? n : n - 1);
     appendChainCells(chains[ci], sections[ci],
                      [](const RoundSection& s) -> const std::array<Vector3d, 5>& { return s.w; },
-                     wedgeCells);
+                     lerpSection, keepOf[ci], wedgeCells);
     appendChainCells(chains[ci], sections[ci],
                      [](const RoundSection& s) -> const std::vector<Vector3d>& { return s.u; },
-                     canalCells);
+                     lerpSection, overhang(keepOf[ci], segments), canalCells);
   }
 
   for (const Junction& j : junctions) {
@@ -1417,7 +1628,8 @@ std::unique_ptr<PolySet> debugSpineMarkers(const MergedMesh& m,
 // out on every invocation (a plain cube yields 12 feature edges, all convex; an
 // inside corner yields a single concave edge).
 std::shared_ptr<const Geometry> buildFilletTool(
-  const FilletNode& node, const std::shared_ptr<const ManifoldGeometry>& target)
+  const FilletNode& node, const std::shared_ptr<const ManifoldGeometry>& target,
+  const std::shared_ptr<const ManifoldGeometry>& brush)
 {
   using namespace fillet::detail;
 
@@ -1514,6 +1726,69 @@ std::shared_ptr<const Geometry> buildFilletTool(
         verdict.fault == SizeFault::OffFace
           ? STR("the blend would leave the surface it is meant to meet, by ", verdict.amount)
           : STR("another feature ", verdict.amount, " away needs the same material"));
+  }
+
+  // The brushes narrow what is built to the stretches of crease they cover. They
+  // are asked about the spine rather than about the tool's volume, so what comes
+  // back is a set of parameter intervals and the bead ends on a flat cap square
+  // to the crease, at a fixed physical point that does not move when the target
+  // is retessellated.
+  //
+  // This comes after the size gate rather than before it, so a crease that
+  // cannot carry the size is refused whether or not a brush picks it out: the
+  // gate's question is about the crease and the model around it, and selecting
+  // half of one does not make the size fit there.
+  if (brush && !brush->isEmpty()) {
+    const BrushVolume volume(brush->getManifold().GetMeshGL64());
+    // A brush face nearly tangent to the spine crosses it twice a hair apart.
+    // The stub that would leave is never intentional, and a hundredth of the
+    // size is far below any bead a user would ask for by hand.
+    const double minLength = 0.01 * node.size;
+
+    std::vector<Chain> selected;
+    size_t candidates = 0, taken = 0;
+    for (Chain& chain : usable) {
+      const size_t segments =
+        chain.verts.size() < 2 ? 0 : (chain.closed ? chain.verts.size() : chain.verts.size() - 1);
+      candidates += segments;
+
+      std::vector<SpineInterval> keep = chainSelection(m, chain, volume, minLength);
+      if (keep.empty()) continue;
+      // A chain the brush covers whole carries no intervals at all, which is
+      // both cheaper downstream and exactly the unbrushed path.
+      if (keep.size() == 1 && keep.front().first <= 0.0 &&
+          keep.front().second >= static_cast<double>(segments))
+        keep.clear();
+      chain.keep = std::move(keep);
+
+      // Counted per edge, since that is the unit the user wrote the model in;
+      // an edge the brush takes any part of counts as taken.
+      if (chain.keep.empty()) {
+        taken += segments;
+      } else {
+        for (size_t i = 0; i < segments; ++i)
+          for (const SpineInterval& iv : chain.keep)
+            if (std::min(iv.second, static_cast<double>(i) + 1.0) -
+                  std::max(iv.first, static_cast<double>(i)) >
+                1e-12) {
+              ++taken;
+              break;
+            }
+      }
+      selected.push_back(std::move(chain));
+    }
+
+    if (selected.empty())
+      LOG(message_group::Warning, node.modinst->location(), "",
+          "%1$s: the selection brush covers none of the %2$d candidate edge(s); nothing is built. "
+          "The brush has to contain part of an edge, not merely touch the model.",
+          node.name(), static_cast<int>(candidates));
+    else
+      LOG(message_group::Echo, node.modinst->location(), "",
+          "%1$s: selection brush takes %2$d of %3$d candidate edge(s)", node.name(),
+          static_cast<int>(taken), static_cast<int>(candidates));
+
+    usable = std::move(selected);
   }
 
   // A corner the solve refuses — walls too nearly parallel to pin a point down,
