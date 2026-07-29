@@ -32,9 +32,10 @@ rather than tuning the case until it stops.
 
 ## Group 3 — curved creases, and junctions on them
 
-Every junction in the suite is polyhedral: a vertex where straight spines meet.
-Nothing tests a junction whose incident creases are curves, and that is *still*
-true after the two cases below, which is what makes it the one real gap left.
+Every junction in the suite used to be polyhedral: a vertex where straight
+spines meet. The first two cases below did not change that — the tee has no
+junction in it at all — and `case_two_bosses` is the one that did. **This group
+is spent.**
 
 ### `case_pipe_tee_fillet` — **BUILT**
 
@@ -75,11 +76,11 @@ cannot carry: what four runouts converging on one point look like. It is red on
 solid dilates when the branch is rotated onto the other axis; see
 `expectations.txt`.
 
-### `case_two_bosses` — the curved junction, and a shape that can hold one
+### `case_two_bosses` — **BUILT, and the junction is in it**
 
-**PREDICTED**, and the replacement for what `case_pipe_tee_equal` was supposed to
-give. A junction on a curved crease needs creases that meet **at an angle**, and
-a tee cannot supply that at any radius. Two overlapping bosses on a plate can:
+The replacement for what `case_pipe_tee_equal` was supposed to give. A junction
+on a curved crease needs creases that meet **at an angle**, and a tee cannot
+supply that at any radius. Two overlapping bosses on a plate can:
 
 ```openscad
 module case_model() {
@@ -95,10 +96,47 @@ cylinders meet. At each crossing: two curved arcs and one straight spine, meetin
 at a real angle. Valence three rather than four, which is not the interesting
 part; the interesting part is that two of the three spines are not lines.
 
-- **watch for:** whether the two rings survive being cut into arcs, and what the
-  corner cell does where a curved spine meets a straight one.
-- the bosses overlap by 6 of their 20 diameter, so the groove is well clear of
-  tangency. Slide them to touch and this becomes `case_pipe_tee_equal` again.
+The bosses overlap by 6 of their 20 diameter, so the groove is well clear of
+tangency. Slide them to touch and this becomes `case_pipe_tee_equal` again.
+
+**The rings do not survive, and that is the right answer.** Each is cut at both
+crossings into a single open arc running round the outside of its own boss, so
+four chains come back — two curved, two straight — and both crossings carry
+three chain ends, which is a junction. The corner solve pins exactly one seated
+ball at each, at every radius probed, and nothing is refused or run out. The
+tool is one connected piece of genus 1: the two arcs close into a loop through
+the two corners. All of that is pinned in `FilletBuilder_test.cc`.
+
+**What the picture found that a count could not.** At `$fn = 48` the tool comes
+back as three pieces — the right one, plus a detached wafer at each junction,
+0.076 x 0.061 x 0.005 and 5.2e-06 of volume, sitting on the plate face where the
+two ring beads' outer edges cross. It is the wedge's eps overshoot again, shed
+by the corner cell, and it is the same corner-cell geometry the pocket cases are
+permanently red for, seen for the first time on a curved junction. At `$fn = 24`
+there is no crumb and the genus is right, so the case is written at 24 — a
+24-gon still turns 15 degrees a facet against a 22.5-degree threshold, so the
+ring is a curve to the classifier either way — and the crumb is recorded rather
+than pinned as correct.
+
+**Red on `sandwich`**, and not about this solid; see `expectations.txt` for the
+controls that separate the kernel from the geometry.
+
+### `case_dome_on_plate` — **BUILT**
+
+Not in the original queue. It came out of the size gate's contact test, which
+used to place the ball's tangency point by stepping along a wall normal and so
+refused every doubly curved wall by the sagitta. The two small variants are that
+fix pinned against regression at the radii that were refused; the picture is the
+first look at a bead running out onto a sphere.
+
+Its oversize variant contradicts what was expected of it. A dome was supposed to
+run out of constant-radius solutions once the blend approached the curvature it
+follows. It does not — on a wide enough plate this `R = 8` dome takes `r = 30`
+without a word, correctly, because the crease is a circle in the plate's plane
+and the seated ball meets the plate one radius outside it. What refuses the
+oversize variant is the **plate's edge**, at `r = 12.017` on a plate reaching 20
+from the axis, with the overshoot tracking `r` one for one above that. Also red
+on `sandwich`, at every sphere tessellation down to `$fn = 16`.
 
 ### `case_rib_into_boss`
 
@@ -116,7 +154,10 @@ Half of this belongs in the unit tests: "does the ring's chain survive being
 interrupted" is `buildChains` returning arcs instead of a loop, which is a count.
 What needs the picture is the corner cell where the rib's straight foot creases
 run into the ring — and `case_two_bosses` shows that with one fewer moving part.
-Build this if the bosses leave a question open.
+Build this if the bosses leave a question open. **They did not**: the ring is cut
+into arcs, the junction is valence 3 with a solved corner, and a rib's foot would
+put the same two curved spines and one straight one at the same kind of vertex.
+Nothing here is worth a second CGAL dilation.
 
 ## Group 5 — brushes past the half-chain case
 

@@ -31,7 +31,9 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
    expected to clear turn out to be a different problem and are still red.
 4. ~~**M12**~~ — **done.** The C++ node, as overruled; see below for the one
    thing the design did not anticipate, and for the parameter it gained.
-5. **T2** — the last case worth building.
+5. ~~**T2**~~ — **done.** Both cases built; the curved junction exists and is
+   solved, and the dome's oversize refusal is not the one that was predicted.
+   See below.
 6. **DOC**, then **CLEAN**.
 
 ---
@@ -434,6 +436,16 @@ which is the signature of a shape problem rather than a constant to tune. It
 wants the corner cell rethought, and it is the same geometry the apex `sandwich`
 lines are already documented as permanently red for. Not reopened here.
 
+**T2 found it a third time, and on a shape that is nothing like a spike.** At
+`$fn = 48` the two-boss tool sheds a detached wafer of the wedge's own eps
+overshoot at each of its two curved junctions — 5.2e-06 of volume, on the plate
+face where the two ring beads' outer edges cross. So the open item is not
+confined to a corner cell hulled against a barely turning bead: an ordinary
+right-angled junction on a curved crease reaches it too, at a tessellation the
+case would otherwise have been written at. Still not reopened — the reason above
+is unchanged, and nothing measured since suggests a constant to tune — but the
+next person to open it has a second, much cheaper reproduction than a pocket.
+
 ### A second filter on face size cannot substitute for this — measured
 
 The obvious cheaper alternative is to leave the mesh alone and filter the
@@ -565,7 +577,51 @@ committed baseline, and a `.csg` dump line for the node.
 
 ---
 
-## T2 — `case_two_bosses`, plus a dome variant
+## T2 — `case_two_bosses`, plus a dome variant — **DONE**
+
+Both cases are in `fillet-tests/cases/`, the counts they raise are pinned in
+`FilletBuilder_test.cc`, and the suite is at 82 checks all matching. Four things
+came out of it, two of which contradict what this section predicted.
+
+- **The curved junction exists and is solved.** Each base ring is cut at both
+  crossings into one open arc, so four chains come back — two curved, two
+  straight — and both crossings carry three chain ends. The corner solve pins
+  exactly one seated ball at each, at every radius probed, nothing is refused or
+  run out, and the tool is one connected piece of genus 1: the two arcs close
+  into a loop through the two corners. The rings did not survive being cut into
+  arcs, and that is the right answer rather than the failure this section was
+  watching for.
+- **The corner cell sheds a crumb at finer tessellation, and it is D2's
+  remainder.** At `$fn = 48` the tool comes back as three pieces: the right one,
+  plus a detached wafer at each junction, 0.076 x 0.061 x 0.005 and 5.2e-06 of
+  volume, on the plate face where the two ring beads' outer edges cross. It is
+  the wedge's eps overshoot shed by the corner cell — the same geometry the
+  pocket cases are permanently red for, seen for the first time on a curved
+  junction, and the first evidence that the open item is not confined to spikes.
+  Not reopened here, for the reason D2 gives: probing the separation the cell is
+  hulled at moves the count without finding a floor. The case is written at
+  `$fn = 24`, where the tool is clean and a 24-gon is still a curve to a
+  22.5-degree threshold, and the crumb is recorded rather than pinned as
+  correct.
+- **The dome does not run out of constant-radius solutions.** This section
+  expected a radius approaching the curvature it follows to have no solution. It
+  has one at every size: on a wide enough plate an `R = 8` dome takes `r = 30`
+  without a word, correctly, because the crease is a circle in the plate's own
+  plane and the seated ball meets the plate one radius outside it. What refuses
+  the oversize variant is the **plate's edge** — 12.017 on a plate reaching 20
+  from the axis, with the overshoot tracking `r` one for one above that. So the
+  dome's curvature is measured to cost the gate nothing, which is the strongest
+  statement available that D6 is fixed rather than merely tolerated.
+- **Neither case can be given a `sandwich` verdict.** CGAL refuses to dilate
+  either applied result, and the controls say it is the kernel: one boss on the
+  same plate dilates at `$fn = 24` and refuses at 48 with no junction in it
+  either way, two bosses dilate at `$fn = 12`, and radius and clip make no
+  difference. The dome refuses down to `$fn = 16`, coarser than the shape is
+  about, so there is no version that keeps its question and passes. Both are in
+  `expectations.txt` with the numbers.
+
+The rest of this section is what was reasoned out beforehand, kept because it is
+the argument for the two shapes that were built.
 
 The one structural unknown left is a **junction where the incident spines are
 curves**. Every junction in the suite is a polyhedral vertex where straight

@@ -651,6 +651,61 @@ TEST_CASE("chains: two seams that cross do so where neither is still a crease")
   }
 }
 
+TEST_CASE("chains: two curved creases and a straight one meet at a real junction")
+{
+  // Two overlapping bosses on a plate. Each base ring is a closed curved
+  // concave crease, the two rings cross at two points, and where the cylinders
+  // interpenetrate a straight crease runs up from each crossing. Unlike the
+  // equal-radius tee above, the creases here meet at an ANGLE — the bosses
+  // overlap by 6 of their 20 diameter, so the groove walls turn about 91
+  // degrees and no pair of surfaces is tangent anywhere near the crossings.
+  // That is what makes this the suite's one junction on a curved spine.
+  //
+  // The rings do not survive as rings. Each is cut at both crossings, leaving
+  // one open arc per boss running from crossing to crossing round the outside
+  // of its own cylinder, so four open chains come back: two curved, two
+  // straight. The crossings then carry three chain ends each, which is a
+  // junction by definition, and the corner solve pins exactly one seated ball
+  // at each — three walls, one corner, the same answer a cube's vertex gives.
+  const double RB = 10.0, HB = 20.0, PT = 6.0;
+  const double xa = 22.0, xb = 36.0, yc = 20.0;
+  const auto boss = [&](double x) {
+    return manifold::Manifold::Cylinder(HB, RB, RB, 24, false)
+      .Translate(manifold::vec3(x, yc, PT));
+  };
+  const manifold::Manifold model = box(60.0, 40.0, PT) + boss(xa) + boss(xb);
+
+  const double threshold = derivedThreshold(discretizer(24));
+  const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, threshold, /*wantConcave=*/true));
+
+  REQUIRE(chains.size() == 4);
+  size_t straight = 0;
+  for (const auto& ch : chains) {
+    CHECK_FALSE(ch.closed);
+    // Both ends of every chain sit on the crossing line x = (xa + xb) / 2. The
+    // grooves run up it; the arcs run from one end of it to the other.
+    CHECK(mm.pos[ch.verts.front()].x() == Approx(0.5 * (xa + xb)));
+    CHECK(mm.pos[ch.verts.back()].x() == Approx(0.5 * (xa + xb)));
+    if (ch.verts.size() == 2) ++straight;
+  }
+  CHECK(straight == 2);   // the two grooves, one segment each
+
+  // Both crossings are junctions, at every size the case is drawn at, and both
+  // are solved rather than run out to the sharp vertex.
+  for (const double r : {1.0, 2.0, 4.0}) {
+    const auto junctions = chainJunctions(mm, adj, chains, r, /*concave=*/true);
+    REQUIRE(junctions.size() == 2);
+    for (const auto& j : junctions) {
+      CHECK(j.faceNormals.size() == 3);
+      CHECK(j.ballCentres.size() == 1);
+      CHECK(mm.pos[j.vert].x() == Approx(0.5 * (xa + xb)));
+      CHECK(mm.pos[j.vert].z() == Approx(PT));
+    }
+  }
+}
+
 TEST_CASE("non-manifold input: shared edges are counted and nothing crashes")
 {
   // Two cubes meeting at one edge, and two meeting at one vertex. Neither is a
@@ -1112,6 +1167,22 @@ TEST_CASE("size: a wall's own curvature is not an overshoot")
   const SizeRun over = sizeRun(perched, 2.0, /*concave=*/true);
   REQUIRE(over.chains.size() == 1);
   CHECK(over.verdicts[0].fault == SizeFault::OffFace);
+
+  // What eventually stops the dome is the plate and not the dome, which is
+  // worth pinning because the opposite was expected: a blend whose radius
+  // approaches the curvature it follows was supposed to run out of solutions.
+  // It does not. The crease is a circle in the plate's own plane, and the ball
+  // seated in it meets the plate one radius outside that circle, so the only
+  // question is whether the plate reaches — the same question a flat wall asks.
+  // The first plate above is 20 from the crease to its edge, so a radius well
+  // over the dome's own 8 still fits, and what refuses the larger one is how
+  // far the plate reaches rather than anything about the sphere.
+  CHECK(sizeRun(dome, 10.0, /*concave=*/true).verdicts[0].fault == SizeFault::Fits);
+  const SizeRun wide = sizeRun(dome, 14.0, /*concave=*/true);
+  const SizeRun wider = sizeRun(dome, 18.0, /*concave=*/true);
+  CHECK(wide.verdicts[0].fault == SizeFault::OffFace);
+  CHECK(wider.verdicts[0].fault == SizeFault::OffFace);
+  CHECK(wider.verdicts[0].amount > wide.verdicts[0].amount);
 }
 
 TEST_CASE("size: only the stretch of crease the brushes kept is asked about")
