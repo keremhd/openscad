@@ -15,6 +15,7 @@
 #include <cmath>
 #include <cstddef>
 #include <functional>
+#include <limits>
 #include <map>
 #include <optional>
 #include <set>
@@ -63,6 +64,33 @@ CurveDiscretizer discretizer(double fn, double fa = 12.0, double fs = 2.0)
 // The crease threshold the operator derives from the tessellation parameters:
 // half again the coarsest seam OpenSCAD would generate at those settings.
 double derivedThreshold(const CurveDiscretizer& d) { return 1.5 * d.getMaxSeamAngle(); }
+
+// A gable prism: a 60 x 10 slab with a roof over it, apex at (30, 18), extruded
+// 40 in z. The two shoulders turn 75 degrees and the apex turns 30, so one solid
+// carries a steep crease and a shallow one and a threshold can fall between
+// them. Both are real features of the shape; neither is a tessellation seam.
+manifold::Manifold roofPrism()
+{
+  const manifold::Polygons section{{{0, 0}, {60, 0}, {60, 10}, {30, 18}, {0, 10}}};
+  return manifold::Manifold::Extrude(section, 40.0);
+}
+
+// Is the edge between two named points selected by this tool at this threshold?
+// Positions rather than indices, because merging renumbers the vertices.
+bool isSelected(const manifold::Manifold& m, double thresholdDeg, const Vector3d& a,
+                const Vector3d& b, bool wantConcave = false)
+{
+  const MergedMesh mm = mergeMesh(m.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  for (const auto& key : selectedEdges(mm, adj, thresholdDeg, wantConcave)) {
+    const Vector3d& p = mm.pos[key.first];
+    const Vector3d& q = mm.pos[key.second];
+    if (((p - a).norm() < 1e-6 && (q - b).norm() < 1e-6) ||
+        ((p - b).norm() < 1e-6 && (q - a).norm() < 1e-6))
+      return true;
+  }
+  return false;
+}
 
 }  // namespace
 
@@ -398,6 +426,246 @@ TEST_CASE("threshold: cylinder side seams are rejected at every tessellation")
 
     CHECK(c.feature == static_cast<size_t>(2 * fn));
     CHECK(c.featureConvex == static_cast<size_t>(2 * fn));
+  }
+}
+
+TEST_CASE("threshold: a real crease shallower than the caller's facets is dropped")
+{
+  // The two tests above check the direction that keeps a cylinder smooth: a seam
+  // must never be read as a crease. This is the other direction, which nothing
+  // covered — a crease the SHAPE really has, shallower than the tessellation the
+  // caller happens to be working at, is silently not a feature.
+  //
+  // The gable's apex turns 30 degrees and its shoulders 75. At $fa = 12 the
+  // threshold is 18 and both are features; at $fn = 8 it is 67.5, and the apex
+  // drops out while the shoulders stay. Nothing is said about it. Fifteen
+  // feature edges become fourteen, and which fourteen depends on a variable the
+  // caller set to control smoothness.
+  const auto roof = roofPrism();
+  const Vector3d apexA(30.0, 18.0, 0.0), apexB(30.0, 18.0, 40.0);
+  const Vector3d shoulderA(0.0, 10.0, 0.0), shoulderB(0.0, 10.0, 40.0);
+
+  // Five vertical edges plus both five-edge rims, so long as the apex counts.
+  CHECK(classify(roof, derivedThreshold(discretizer(0))).feature == 15);     // $fa = 12 -> 18
+  CHECK(classify(roof, derivedThreshold(discretizer(24))).feature == 15);    // -> 22.5
+  CHECK(classify(roof, derivedThreshold(discretizer(8))).feature == 14);     // -> 67.5
+
+  CHECK(isSelected(roof, derivedThreshold(discretizer(0)), apexA, apexB));
+  CHECK_FALSE(isSelected(roof, derivedThreshold(discretizer(8)), apexA, apexB));
+  // And it is only the shallow one that goes: the shoulders clear 67.5, so the
+  // same call rounds one crease of this roof and not the other.
+  CHECK(isSelected(roof, derivedThreshold(discretizer(8)), shoulderA, shoulderB));
+
+  // min_angle= is the way out, and it has to be, because the threshold cannot
+  // both keep a smooth cylinder smooth and pick up a crease shallower than that
+  // cylinder's own facets.
+  CHECK(isSelected(roof, 20.0, apexA, apexB));
+}
+
+TEST_CASE("threshold: a facet angle equal to the threshold breaks arbitrarily")
+{
+  // A model tessellated at one setting and filleted at another, which is what a
+  // $fn inside a module and a $fn at the call site give you. The caller is at
+  // $fn = 24 throughout, so the threshold is 22.5 and only the model moves.
+  //
+  // Either side of it the answer is clean: at $fn = 12 the facets turn 30 and
+  // every vertical seam is taken along with the rims, at $fn = 32 they turn
+  // 11.25 and none is. At $fn = 16 the facets turn 22.5 — the threshold exactly
+  // — and the comparison is `dihedral < threshold`, so all sixteen should be
+  // taken. Twelve are.
+  //
+  // The four that are not are not distinguishable from the other twelve by
+  // anything in the model; the dihedral of a tessellated cylinder simply does
+  // not come out equal at every seam in double precision. The count below is
+  // that noise, pinned. It is not a contract — a strict inequality would only
+  // move which side of the tie is arbitrary — but until the tie is decided by
+  // something other than rounding, a change in this number means the tie
+  // handling changed, and that is worth being told about.
+  const double threshold = derivedThreshold(discretizer(24));
+  CHECK(threshold == Approx(22.5));
+
+  const auto rims = [](int fn) { return static_cast<size_t>(2 * fn); };
+  CHECK(classify(manifold::Manifold::Cylinder(20.0, 10.0, 10.0, 12, false), threshold).feature ==
+        rims(12) + 12);   // facets at 30 degrees: all twelve seams are creases
+  CHECK(classify(manifold::Manifold::Cylinder(20.0, 10.0, 10.0, 32, false), threshold).feature ==
+        rims(32));        // facets at 11.25: none of them is
+  CHECK(classify(manifold::Manifold::Cylinder(20.0, 10.0, 10.0, 16, false), threshold).feature ==
+        rims(16) + 12);   // facets at 22.5 exactly: twelve of sixteen, arbitrarily
+}
+
+TEST_CASE("threshold: a solid with no crease in it selects nothing and builds nothing")
+{
+  // The empty tool is correct here and is byte-for-byte what an operator that
+  // did nothing at all would return, so emptiness alone proves nothing. What the
+  // operator owes is that nothing was SELECTED, not that nothing happened to be
+  // built: a sphere has 768 two-face edges at this tessellation and not one of
+  // them is a crease.
+  const auto sphere = manifold::Manifold::Sphere(10.0, 32);
+  const ClassCounts c = classify(sphere, derivedThreshold(discretizer(32)));
+  CHECK(c.twoFace > 700);
+  CHECK(c.feature == 0);
+  CHECK(c.nonManifold == 0);
+
+  const MergedMesh mm = mergeMesh(sphere.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, derivedThreshold(discretizer(32)),
+                                                    /*wantConcave=*/false));
+  CHECK(chains.empty());
+  CHECK(buildRoundSolid(mm, adj, chains, 1.0, /*concave=*/false, 24).IsEmpty());
+}
+
+TEST_CASE("refillet: a rounded solid re-read carries creases its shape does not have")
+{
+  // Rounding a model that already carries a round is an ordinary thing to write,
+  // and the question it was queued to answer was whether the arc facets fall
+  // under the threshold. They do — that part is uninteresting. What the model
+  // comes back with instead is hundreds of creases of BOTH signs, on a shape
+  // that is convex everywhere and should have none.
+  //
+  // The shape is not what is wrong. The exact rounded cube, built as the hull of
+  // eight spheres, classifies at zero features, and the tool's own result is
+  // within a fraction of a percent of its volume. What is wrong is the mesh: the
+  // beads meet the flat faces and each other tangentially, and a tangential
+  // meeting triangulates into slivers whose normals are numerical noise. On a
+  // 40 mm part the creases below sit on edges four orders of magnitude smaller.
+  //
+  // Those slivers are the same ones that make a filleted pocket impossible to
+  // dilate through CGAL, measured from the other end: there they stop a check
+  // running, here they make the operator's own classifier disagree with the
+  // shape it just built. Reducing the tangential contact is what fixes both.
+  const double r = 5.0, side = 40.0;
+  const auto model = box(side, side, side);
+  const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 18.0, /*wantConcave=*/false));
+  const auto rounded = model - buildRoundSolid(mm, adj, chains, r, /*concave=*/false, 24);
+  REQUIRE_FALSE(rounded.IsEmpty());
+  CHECK(rounded.Genus() == 0);
+
+  // The exact answer: a cube of side-2r grown by a ball of r.
+  const double a = side - 2 * r;
+  const double exactVolume = a * a * a + 6 * a * a * r + 3 * M_PI * a * r * r +
+                             4 * M_PI * r * r * r / 3.0;
+  CHECK(rounded.Volume() == Approx(exactVolume).epsilon(0.01));
+
+  std::vector<manifold::Manifold> balls;
+  for (const double x : {r, side - r})
+    for (const double y : {r, side - r})
+      for (const double z : {r, side - r})
+        balls.push_back(manifold::Manifold::Sphere(r, 48).Translate(manifold::vec3(x, y, z)));
+  CHECK(classify(manifold::Manifold::Hull(balls), 18.0).feature == 0);
+
+  // And the tool's, which is the finding. Bounds rather than exact counts: the
+  // numbers move with the arc tessellation, the fact does not.
+  const ClassCounts c = classify(rounded, 18.0);
+  CHECK(c.feature > 100);
+  CHECK(c.featureConcave > 100);   // on a solid that is convex everywhere
+
+  const MergedMesh rm = mergeMesh(rounded.GetMeshGL64());
+  const auto radj = buildEdgeAdjacency(rm.tris);
+  double shortest = std::numeric_limits<double>::max();
+  for (const auto& key : selectedEdges(rm, radj, 18.0, /*wantConcave=*/true))
+    shortest = std::min(shortest, (rm.pos[key.first] - rm.pos[key.second]).norm());
+  CHECK(shortest < 1e-3 * r);
+}
+
+TEST_CASE("chains: two seams that cross do so where neither is still a crease")
+{
+  // Two perpendicular cylinders of EQUAL radius are the one arrangement whose
+  // seam loops cross rather than sit apart. x^2+y^2 = x^2+z^2 gives y = +-z, so
+  // the seam is two ellipses meeting at (+-R, 0, z). Make the radii unequal and
+  // the algebra gives z^2 = y^2 - (Rr^2 - Rb^2), which has no solution near
+  // y = 0: the loops separate and never meet at all. There is no transversal
+  // version of this crossing — equality is what creates it.
+  //
+  // And equality is also what destroys it. Where the two ellipses meet, the two
+  // cylinders share a tangent plane, so the dihedral of the seam runs to zero on
+  // the way in. It is under the threshold long before it arrives, and the crease
+  // is cut there like any other shallow feature. What comes back is four open
+  // arcs, not two crossing loops, and the crossings are not junctions because by
+  // the time the spine reaches them there is no spine.
+  //
+  // So the valence-four junction on a curved crease that this shape was expected
+  // to provide does not exist in it, and cannot be recovered by tessellating
+  // finer: tangency is the reason the loops cross. A curved junction has to come
+  // from creases that meet at an angle — two bosses overlapping on a plate, say
+  // — and not from this one.
+  const double RR = 10.0, HR = 60.0, ZB = 30.0, LB = 30.0;
+  const auto tee = [&](double rb) {
+    return manifold::Manifold::Cylinder(HR, RR, RR, 48, false) +
+           manifold::Manifold::Cylinder(2 * LB, rb, rb, 48, false)
+             .Translate(manifold::vec3(0.0, 0.0, -LB))
+             .Rotate(-90, 0, 0)
+             .Translate(manifold::vec3(0.0, 0.0, ZB));
+  };
+  const double threshold = derivedThreshold(discretizer(48));
+
+  const MergedMesh equal = mergeMesh(tee(RR).GetMeshGL64());
+  const auto equalAdj = buildEdgeAdjacency(equal.tris);
+  const auto equalChains =
+    buildChains(equal, selectedEdges(equal, equalAdj, threshold, /*wantConcave=*/true));
+  CHECK(equalChains.size() == 4);
+  for (const auto& ch : equalChains) CHECK_FALSE(ch.closed);
+
+  // The stretch that went missing is the tangential one. Every concave edge
+  // within 3 mm of the crossing plane turns by less than the threshold.
+  for (const auto& kv : equalAdj) {
+    if (kv.second.size() != 2) continue;
+    const auto ec = classifyEdge(equal, kv.first, equal.tris[kv.second[0]],
+                                 equal.tris[kv.second[1]]);
+    if (!ec.concave) continue;
+    const Vector3d mid = 0.5 * (equal.pos[kv.first.first] + equal.pos[kv.first.second]);
+    if (std::abs(mid.y()) < 3.0) CHECK(ec.dihedralDeg < threshold);
+  }
+
+  // A branch one millimetre narrower does not cross the run's seam at all: two
+  // closed loops, each entirely clear of the plane the crossings would be in.
+  const MergedMesh apart = mergeMesh(tee(RR - 1.0).GetMeshGL64());
+  const auto apartAdj = buildEdgeAdjacency(apart.tris);
+  const auto apartChains =
+    buildChains(apart, selectedEdges(apart, apartAdj, threshold, /*wantConcave=*/true));
+  REQUIRE(apartChains.size() == 2);
+  for (const auto& ch : apartChains) {
+    CHECK(ch.closed);
+    double nearest = std::numeric_limits<double>::max();
+    for (const int v : ch.verts) nearest = std::min(nearest, std::abs(apart.pos[v].y()));
+    CHECK(nearest > 4.0);   // sqrt(Rr^2 - Rb^2) = 4.36, and the loops start there
+  }
+}
+
+TEST_CASE("non-manifold input: shared edges are counted and nothing crashes")
+{
+  // Two cubes meeting at one edge, and two meeting at one vertex. Neither is a
+  // solid, and OpenSCAD will hand the operator either one without complaint, so
+  // what matters is that the operator reaches a verdict rather than a signal.
+  //
+  // The edge-sharing pair has one edge with four incident triangles, which the
+  // classifier counts as non-manifold and declines to classify — it is not a
+  // two-face edge, so it can be neither concave nor convex and never reaches the
+  // selection. The vertex-sharing pair is subtler and comes out clean: sharing a
+  // point makes no edge non-manifold, so every edge is an ordinary two-face one
+  // and both cubes are rounded independently. Only the genus, -1 for two
+  // components, says anything happened.
+  const auto cube = box(10.0, 10.0, 10.0);
+
+  const auto sharedEdge = cube + cube.Translate(manifold::vec3(10.0, 10.0, 0.0));
+  const ClassCounts e = classify(sharedEdge, 18.0);
+  CHECK(e.nonManifold == 1);
+  CHECK(e.feature == 22);          // 24 cube edges less the two the shared one replaces
+
+  const auto sharedVertex = cube + cube.Translate(manifold::vec3(10.0, 10.0, 10.0));
+  const ClassCounts v = classify(sharedVertex, 18.0);
+  CHECK(v.nonManifold == 0);
+  CHECK(v.feature == 24);
+  CHECK(sharedVertex.Genus() == -1);
+
+  // And the tool builds on both without dying: the shared edge is simply absent
+  // from the chains, so its two cubes are rounded as if they never touched.
+  for (const auto& model : {sharedEdge, sharedVertex}) {
+    const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+    const auto adj = buildEdgeAdjacency(mm.tris);
+    const auto chains = buildChains(mm, selectedEdges(mm, adj, 18.0, /*wantConcave=*/false));
+    CHECK_FALSE(buildRoundSolid(mm, adj, chains, 1.0, /*concave=*/false, 24).IsEmpty());
   }
 }
 

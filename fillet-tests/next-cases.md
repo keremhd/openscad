@@ -8,6 +8,15 @@ in `expectations.txt` is worth more than an untested corner nobody has looked at
 Read [`README.md`](README.md) first for the case-file contract, the four checks
 and what `ref` / `none` / `drop` mean. Everything here assumes it.
 
+**A case here is expensive and a unit test is not.** Every check in this suite
+dilates through CGAL's Nef kernel and costs seconds; `FilletBuilder_test.cc`
+answers a question about a count in milliseconds and pins it exactly. So an entry
+earns a place here only if its answer is a *shape* — something the six columns
+show and a number does not. An entry whose answer is "how many edges were
+selected" belongs in the unit tests, and most of the first draft of this file
+turned out to be that. Two sections below record what was withdrawn and why,
+because a queue that only ever grows stops being a queue.
+
 Each entry is marked:
 
 - **PROBED** — run by hand against the builder, with the numbers below. The case
@@ -21,168 +30,11 @@ rather than tuning the case until it stops.
 
 ---
 
-## Group 1 — the feature threshold is tied to `$fn`, and nothing tests it
-
-**PROBED, and this is the surprising one.** The angle that decides whether an
-edge is a feature is derived from the caller's tessellation setting: it comes out
-at **1.5x the facet angle**. Measured, on `cylinder(r = 10, h = 20, $fn = 17)`
-under `round_tool(r = 1)`, reading the threshold straight off the builder's echo:
-
-| caller's setting | threshold | convex edges selected |
-|---|---|---|
-| `$fn = 8` | 67.5° | 34 — the two rims only |
-| `$fn = 24` | 22.5° | 34 — the two rims only |
-| `$fa = 12` (the default) | 18.0° | 51 — rims **and** all 17 facet edges |
-
-The rule itself is defensible — an edge is a feature when it turns more than the
-tessellation's own facets do, which is what keeps a smooth cylinder from being
-read as a fan of creases. What has no coverage at all is the consequence: **the
-same solid gets different edges rounded depending on `$fn` at the call site**,
-and both of the failure directions are reachable.
-
-### `case_facet_threshold_shallow`
-
-A shallow crease and a steep one in the same solid, swept across settings. The
-roof apex turns 30° (a 150° interior), the two shoulders turn 75°:
-
-```openscad
-module case_model() {
-  linear_extrude(40) polygon([[0, 0], [60, 0], [60, 10], [30, 18], [0, 10]]);
-}
-```
-
-so at `$fa = 12` (18°) both are features, and at `$fn = 8` (67.5°) the shoulders
-still are and **the apex silently is not** — a chamfer a user asked for and did
-not get, with no warning, decided by a variable that was supposed to be about
-smoothness. One model, both sides of the threshold, and the picture shows which
-edge was taken.
-
-- variants: one per setting rather than per size — `$fn = 8`, `$fn = 24`, default.
-  The size stays fixed; it is the threshold being varied, and mixing the two into
-  one case would hide both.
-- **watch for:** which of the two shallow creases is picked up at each setting,
-  and whether anything is said when none is. The interesting verdict is whether
-  a tool that selects nothing should warn; today it is indistinguishable from a
-  tool that was refused.
-
-### `case_faceted_cylinder_round`
-
-**PROBED.** A faceted cylinder under `round_tool(r = 1)`, at `$fn` either side of
-the tie, all three measured with the caller at `$fn = 24` — so the threshold is
-22.5° throughout and only the model changes. Rims are `2n` edges; anything beyond
-that is the vertical facet edges being rounded too, which turns a prism into a
-blob:
-
-| model `$fn` | facet turn | selected (rims = 2n) | vertical edges taken |
-|---|---|---|---|
-| 12 | 30.0° | 36 (24) | all 12 |
-| 16 | 22.5° | 44 (32) | **12 of 16** |
-| 32 | 11.25° | 64 (64) | none |
-
-The middle row is the one to pin. At `$fn = 16` under a `$fn = 24` caller the
-facet angle equals the threshold **exactly**, and the tie breaks 12 one way and
-4 the other — a partial, arbitrary selection that leaves four facet edges sharp
-and rounds the rest. Nothing about the model distinguishes those four. Whatever
-the fix is (a strict inequality is not it — it just moves which side of the tie
-is arbitrary), the case is what stops it regressing.
-
-- tool: `round_tool`, `"subtract"`, `none`, `size = 1`.
-- **watch for:** the four unrounded facet edges in the picture, and whether the
-  count is stable across runs.
-
-### `case_smooth_solid_noop`
-
-**PROBED.** `round_tool(r = 1) sphere(10, $fn = 32)` classifies **0 feature
-edges**, one surface, and emits an empty tool — correct, and silent. Worth a case
-mainly to fix the contract: an empty tool from a solid with nothing to round is
-right, but it is byte-for-byte what an unimplemented operator produces. This is
-the same argument that gave `drops` its warning requirement.
-
-- kind: this needs a `drop` variant or a new one; `emits` would fail it for doing
-  the correct thing, which is why it is listed here rather than written blind.
-
-## Group 2 — obstacles that are faces, not creases
-
-The size gate refuses a crease whose seated ball reaches another **crease's**
-contact line. The obstacle in general is a **face**, and a blocking face need not
-carry any selected crease within reach.
-
-**Which sign can even have this problem** is worth stating, because I got it
-backwards first and the probe corrected me. For a **concave** crease the seated
-ball rolls in *air*, so a foreign face can sit in its way — that is the near-wall
-case and the one below. For a **convex** edge the ball rolls *inside the solid*,
-so the only thing that can block it is the solid's own thinness, and that is
-already what the off-face test measures. There is no convex twin of this group.
-
-### `case_overhang_fillet`
-
-**PROBED, and weaker than it looks — build it to pin the negative.** A concave
-crease with a cantilevered slab passing over it, attached far enough away that
-its own creases are out of range of the ball:
-
-```openscad
-module case_model() {
-  cube([60, 40, 5]);                       // floor
-  cube([4, 40, 30]);                       // the wall carrying the crease
-  translate([50, 0, 5]) cube([10, 40, 9]); // far pillar
-  translate([8, 0, 10]) cube([52, 40, 4]); // slab, underside at z = 10
-}
-```
-
-At `r = 8` the seated ball is centred at `(12, 13)` and the slab's underside
-cuts 3 mm below that centre, so the ball is deeply blocked — and the gate says
-nothing about this crease, exactly as predicted. But the tool puts **no volume
-inside the slab at all** (measured: empty), because the bead is the sliver
-*between the corner and the ball*, which hugs the corner while only the ball
-itself reaches the obstacle. Blocking the ball is not the same as damaging
-anything.
-
-So what is actually wrong here is narrower than "the bead rolls through a face":
-the surface built is no longer one a ball of that radius could sweep, which is a
-statement about reachability rather than about the solid. Whether the operator
-should care is a real question — it is the same question as whether a fillet you
-could not machine is still a fillet — and it should be settled deliberately
-rather than discovered.
-
-- **watch for:** nothing in the slab (that is the pin), and in the picture, a
-  bead whose arc implies a ball that could never have got in there.
-
-### `case_obstacle_in_the_bead`
-
-**PREDICTED**, and the sharpened version of the above: put the obstacle inside
-the bead's own footprint rather than merely inside the ball. The bead spans
-`x 4..12` along the floor at `r = 8`, so a rail floating at `x 6..9, z 6..8` —
-attached far away, touching neither floor nor wall, therefore carrying no crease
-within reach — is *in the material the bead claims*.
-
-A union tool cannot gouge it, so the failure is not a gouge: the bead and the
-rail simply weld into one lump, and the blend surface that should have been
-interrupted by the rail is not. That is the case that decides whether "the ball
-must be able to reach" belongs in the size gate at all.
-
-### `case_round_past_boss`
-
-**PROBED — already correct.** A boss standing closer to the plate's edge than the
-round's own reach:
-
-```openscad
-module case_model() {
-  cube([40, 40, 10]);
-  translate([7.5, 20, 10]) cylinder(r = 6, h = 15);   // 1.5 from the x = 0 edge
-}
-```
-
-At `r = 2` this warns `the blend would leave the surface it is meant to meet, by
-0.371` and drops the chain, leaving no tool volume over the boss footprint. So
-the off-face test reads the face's actual outline and not merely its plane — the
-contact point lands inside the boss's footprint and is correctly judged off the
-free surface. Write it as a regression pin, not as a hunt: it is cheap, it is
-green, and the property it holds is easy to lose.
-
 ## Group 3 — curved creases, and junctions on them
 
-Every junction case so far is polyhedral, and every closed chain so far has
-constant curvature. Both of those are the easy half.
+Every junction in the suite is polyhedral: a vertex where straight spines meet.
+Nothing tests a junction whose incident creases are curves, and that is *still*
+true after the two cases below, which is what makes it the one real gap left.
 
 ### `case_pipe_tee_fillet` — **BUILT**
 
@@ -195,39 +47,62 @@ segments, no station refused, and the bead covers the whole curve — the seam
 spans `z 23..37` and the tool measures `z 21..39` and `z 19..41`, seam plus
 radius at both ends.
 
-The correction worth keeping: a branch that *crosses* the run leaves two separate
-seam loops, which is two easy cases rather than one hard one — hence the stub.
-And there is no saddle in this shape, contrary to what the first draft of this
-file claimed. The saddle needs the case below.
+### `case_pipe_tee_equal` — **BUILT, and it does not contain the junction**
 
-### `case_pipe_tee_equal` — the saddle
+Equal radii, branch crossing rather than stubbing, so the two seam loops cross
+each other. **The crossings are not junctions and cannot be made into them.**
 
-**PREDICTED.** Give the branch the *same* radius as the run and the two seam
-loops stop being separate: they cross each other at two points, on the plane of
-the two axes. Those crossings are junctions of valence four **on a curved
-crease** — the only kind the suite has no case for, since every junction it owns
-is a polyhedral vertex where straight spines meet.
+The reason is in the algebra, and the first draft of this file had it backwards.
+With the branch along X the seam solves to `(z-Zb)^2 = x^2 - (Rr^2 - Rb^2)`. A
+narrower branch makes that negative near `x = 0`, so the loops start only where
+it turns positive and never touch — a branch at 9 against a run at 10 does not
+cross transversally, it does not cross at all, and its seam comes back as two
+closed chains of 80 whose nearest approach to the crossing plane is the 4.36 the
+constant predicts. Only equality kills the constant and lets the loops meet.
+
+And equality is exactly what destroys the junction. Where the ellipses meet, the
+two cylinders share a tangent plane, so the seam's dihedral runs to zero on the
+way in, falls under the crease threshold well before it arrives, and is cut there
+like any other shallow feature. Measured: every concave edge within 3 mm of the
+crossing plane turns by less than the threshold, and the chains come back as
+**four open arcs**, not two crossing loops. Tessellating finer does not recover
+them, because tangency is the reason the loops cross in the first place.
+
+Both halves are pinned in `FilletBuilder_test.cc` — "chains: two seams that cross
+do so where neither is still a crease". The case exists for the half a count
+cannot carry: what four runouts converging on one point look like. It is red on
+`sandwich` for the pocket cases' reason, with the useful twist that the same
+solid dilates when the branch is rotated onto the other axis; see
+`expectations.txt`.
+
+### `case_two_bosses` — the curved junction, and a shape that can hold one
+
+**PREDICTED**, and the replacement for what `case_pipe_tee_equal` was supposed to
+give. A junction on a curved crease needs creases that meet **at an angle**, and
+a tee cannot supply that at any radius. Two overlapping bosses on a plate can:
 
 ```openscad
 module case_model() {
-  cylinder(r = 10, h = 60, $fn = 48);
-  translate([0, 0, 30]) rotate([-90, 0, 0]) cylinder(r = 10, h = 30, $fn = 48);
+  cube([60, 40, 6]);
+  translate([22, 20, 6]) cylinder(r = 10, h = 20, $fn = 48);
+  translate([36, 20, 6]) cylinder(r = 10, h = 20, $fn = 48);
 }
 ```
 
-- **watch for:** whether the crossings are found as junctions at all — chain
-  building walks a crease until it meets another, and two seams meeting at a
-  tangential crossing is the case where "meets" is hardest to decide.
-- the equal radii make the crossing exactly tangential, which is the degenerate
-  end of it. A branch at 9 against a run at 10 crosses transversally and is the
-  easier variant; build both if the equal one turns out to be a knife edge.
+Each boss has a base ring — a closed curved concave crease — the two rings cross
+at two points, and a straight concave crease runs up the groove where the two
+cylinders meet. At each crossing: two curved arcs and one straight spine, meeting
+at a real angle. Valence three rather than four, which is not the interesting
+part; the interesting part is that two of the three spines are not lines.
+
+- **watch for:** whether the two rings survive being cut into arcs, and what the
+  corner cell does where a curved spine meets a straight one.
+- the bosses overlap by 6 of their 20 diameter, so the groove is well clear of
+  tangency. Slide them to touch and this becomes `case_pipe_tee_equal` again.
 
 ### `case_rib_into_boss`
 
-**PREDICTED.** A straight crease running into a closed curved one: a rib whose
-end lands on a cylindrical boss standing on the same plate. The rib's two foot
-creases and the boss's base ring meet at two junctions, and the ring is a closed
-chain that is *not* closed once those junctions cut it.
+**PREDICTED**, and worth building only after the one above, which it overlaps.
 
 ```openscad
 module case_model() {
@@ -237,40 +112,11 @@ module case_model() {
 }
 ```
 
-- **watch for:** whether the ring's chain survives being interrupted, and what
-  the corner cell does where a straight spine meets a curved one.
-
-### `case_boss_base_oversize`
-
-**PREDICTED.** A fillet whose radius exceeds the curvature it has to follow: a
-boss of radius 5 with `r = 6` at its base. The bead's inner envelope collapses
-through the axis, so no constant-radius blend exists — the concave-side analogue
-of the size limit, and one the current gate may not express, since it measures
-against other creases and faces rather than against the chain's own curvature.
-
-- expect either a clean refusal (then it is a `drop`) or a self-intersecting
-  bead. Both are worth knowing; only one is worth keeping.
-
-## Group 4 — extremes and robustness
-
-**All PREDICTED.** Cheap to write, and the kind of thing that turns up crashes
-rather than wrong answers.
-
-- **`case_crease_near_180`** — two plates meeting at 178°. The setback is
-  `r*tan(89°)`, some 57 radii, so almost any size fails off-face. Check that the
-  refusal is the reason given and that nothing divides by a vanishing normal.
-- **`case_crease_near_0`** — a 5° V-groove. The seated ball sits ~23 radii down
-  the groove; the mirror of the needle, on a concave crease.
-- **`case_refillet`** — `fillet_tool` applied to a model that already carries a
-  fillet. The arc facets are shallow, so they should fall under the threshold and
-  be ignored — but see Group 1: that depends on the `$fn` in force, and a fillet
-  tessellated at one setting re-read at another is exactly the collision.
-- **`case_edge_only_contact`** — two cubes sharing exactly one edge, and a
-  variant sharing exactly one vertex. Non-manifold input; the builder reports
-  non-manifold edge counts in its echo, so the contract is presumably "refuse
-  cleanly". Nobody has checked.
-- **`case_coincident_faces`** — two cubes unioned along a shared face, so the
-  merged mesh has coplanar triangles and no crease where the seam was.
+Half of this belongs in the unit tests: "does the ring's chain survive being
+interrupted" is `buildChains` returning arcs instead of a loop, which is a count.
+What needs the picture is the corner cell where the rib's straight foot creases
+run into the ring — and `case_two_bosses` shows that with one fewer moving part.
+Build this if the bosses leave a question open.
 
 ## Group 5 — brushes past the half-chain case
 
@@ -295,6 +141,114 @@ about than a volume does.
   selection wraps is contiguous across the wrap by construction; one that does
   not wrap is two caps on the same ring. Neither has been looked at.
 
+## Moved to `FilletBuilder_test.cc`
+
+Each of these was queued here as a case and each turned out to assert a count, so
+it is answered where a count is cheap and exact. They stay listed because the
+reason they are not cases is worth having written down — and because one of them
+found something much larger than the question it was asked.
+
+- **the `$fn`-derived threshold, in the direction nothing covered.** The two
+  existing threshold tests only check that a tessellation seam is never read as a
+  crease. The other direction — a crease the shape really *has*, shallower than
+  the facets the caller happens to be working at, silently not selected — had no
+  coverage at all. A gable prism whose apex turns 30 degrees and whose shoulders
+  turn 75 loses the apex at `$fn = 8` (threshold 67.5) and keeps it at `$fa = 12`
+  (18), with nothing said and only the shoulders rounded. `min_angle=` is the way
+  out and has to be: the threshold cannot both keep a cylinder smooth and pick up
+  a crease shallower than that cylinder's own facets.
+- **the exact tie.** A model tessellated at `$fn = 16` and read by a caller at
+  `$fn = 24` puts the facet angle exactly on the threshold. The comparison is
+  `dihedral < threshold`, so all sixteen seams should be taken; **twelve are**,
+  and nothing in the model distinguishes the other four. The count is pinned as
+  the float noise it is — a strict inequality is not the fix, it would only move
+  which side of the tie is arbitrary.
+- **a solid with nothing to round.** A sphere selects zero of its 768 two-face
+  edges and builds an empty tool. Correct, and worth pinning, but it needed a new
+  harness `kind` to live here and its whole assertion is `feature == 0`.
+- **re-filleting**, which was queued as a threshold question and is not one. The
+  arc facets do fall under the threshold; that part is uninteresting. What a
+  rounded cube comes back with is **hundreds of creases of both signs on a solid
+  that is convex everywhere** — 650 feature edges, 383 of them concave, at
+  `r = 5` on a 40 mm cube. The shape is right: it is within a fraction of a
+  percent of the exact rounded cube's volume, and the exact one — a hull of eight
+  spheres — classifies at zero. The *mesh* is not. The beads meet the flat faces
+  and each other tangentially, and the slivers that leaves carry creases on edges
+  four orders of magnitude below the part.
+
+  This is the same defect `expectations.txt` already blames for the pocket cases
+  refusing to dilate, measured from the other end, and now seen a third time in
+  `case_pipe_tee_equal`. **Reducing tangential contact is the one change that
+  turns all three green, and it is the most valuable thing in this file.**
+- **non-manifold input.** Two cubes sharing one edge, and two sharing one vertex.
+  Neither crashes. The shared edge has four incident triangles, is counted
+  non-manifold and never reaches the selection, so its two cubes are rounded as
+  if they never touched. The vertex-sharing pair is subtler and comes out
+  entirely clean — sharing a point makes no edge non-manifold — so nothing marks
+  it as degenerate at all except the genus.
+
+## Withdrawn, with the reason
+
+Deleting these is half the point of the review that produced this revision. A
+case that pins something already pinned costs a CGAL dilation on every run and
+tells its next reader it is load-bearing.
+
+- **`case_round_past_boss`** — probed and already correct, and `size: a blend
+  wider than the face it must meet is refused` and `size: a cube's rounds are
+  limited by the edge across the face` already pin `OffFace` from both
+  directions. The only new claim was that the off-face test reads a face's
+  outline and not merely its plane, which the L-shape test already exercises.
+- **`case_boss_base_oversize`** — covered twice over, and the premise was wrong.
+  `case_boss_base_fillet` runs `r = 24` on a boss of radius 12 as a `ref` variant
+  that passes, and `FilletCompare_test.cc` carries "a boss base fillet larger
+  than the boss still matches". A boss *base* ring is concave outward: its
+  envelope opens away from the axis and cannot collapse through it. The collapse
+  this entry described needs a concave ring on the inside of a bore, which is a
+  different shape and was not the one proposed.
+- **`case_crease_near_180`** — `case_junction_flat_apex` is already a 1.9-degree
+  knife edge whose setback is some sixty radii, and its permanent `sandwich`
+  failure is documented for exactly that reason. A second shape at the same ratio
+  adds a second red line and no information.
+- **`case_crease_near_0`** — bracketed on both sides already, in `spine: a slit
+  too narrow to roll a ball into is skipped, not solved`: a 60-degree groove is
+  ordinary geometry and a half-degree slit is refused. Five degrees is an
+  interpolation between two pinned endpoints.
+- **`case_coincident_faces`** — the union deletes the shared face, so the merged
+  mesh is one box and the case would test Manifold rather than the fillet. What
+  the operator does with coplanar input is already in `surfaces: a seam joins two
+  triangles into one wall, a crease does not`.
+
+### And the whole of Group 2 — obstacles that are faces, not creases
+
+This was the most promising-looking group in the file. It has no reachable
+failure, and the arithmetic is worth keeping so nobody re-queues it.
+
+`case_overhang_fillet` probed empty: a cantilever that blocks the seated ball
+puts no tool volume anywhere, because the bead is the sliver *between the corner
+and the ball* and only the ball ever reaches the obstacle. `case_obstacle_in_the_bead`
+was the sharpened version — put the obstacle inside the bead's own footprint
+rather than merely inside the ball — and the bead has almost no footprint to put
+anything into. For a right-angle crease its area is `0.215 r^2` against the
+ball's `0.785 r^2`, and its thickness away from the corner falls off fast:
+
+| distance along the face | bead thickness |
+|---|---|
+| `0.25 r` | `0.34 r` |
+| `0.50 r` | `0.13 r` |
+| `0.75 r` | `0.03 r` |
+
+Probed with a pier hung 1 mm above the floor and 5 mm from the wall, at `r = 8`:
+no warning, all four creases built, and **no tool volume inside the pier** — at
+`x = 9` the bead reaches only `z = 5.58`, below the pier's underside at `z = 6`.
+An obstacle that is inside the bead and not inside the model has to sit within a
+fraction of a millimetre of a crease, which is not a part anyone makes.
+
+So "the ball must be able to reach" does not belong in the size gate; the gate is
+right to measure against creases and faces rather than against reachability, and
+there is no case to write. The one place the arithmetic changes is an acute
+groove, where the ball sits far up and the bead is genuinely long — and that is
+`case_crease_near_0` territory, already pinned at 0.5 and 60 degrees.
+
 ## Harness gaps these keep running into
 
 Not cases, but the reason several cases above have to be read by eye:
@@ -305,6 +259,10 @@ Not cases, but the reason several cases above have to be read by eye:
   check — no point of the model within the tool's reach of a selected crease may
   be left unblended — would have caught the near-wall collapse and the needle
   runout on the day they appeared.
+- **`sandwich` cannot see a tangency either**, for a different reason: CGAL will
+  not dilate a result whose surfaces meet tangentially, so the check returns no
+  verdict rather than a wrong one. Four cases are red for this and not one of
+  them is red about its own geometry.
 - **`drops` is per-node, refusal is per-crease.** A `drop` variant asserts the
   whole tool comes out empty, but the gate refuses one crease at a time, so a
   model with one bad crease and one good one can only be `none` today. That is
@@ -314,4 +272,6 @@ Not cases, but the reason several cases above have to be read by eye:
 
 The list in [`junction-cases.md`](junction-cases.md) still holds — unequal radii
 per edge, oversize radii as their own cases, and anything claiming a hand-written
-reference for a blend that has no closed form.
+reference for a blend that has no closed form. Add to it: **anything whose answer
+is a count.** It goes in `FilletBuilder_test.cc`, where it is exact, free, and
+does not have to be read off a picture.

@@ -91,6 +91,21 @@ case_junction_flat_apex     small  sandwich  FAIL
 # that the under-fill was waiting for exists, and is exercised in
 # FilletBuilder_test.cc, which calls the builder without the gate in front.
 
+# The equal-radius tee is the pocket cases' failure a third time, and the one
+# place it can be shown to be the kernel rather than the geometry. Where the two
+# seam ellipses cross, the cylinders share a tangent plane, and four spines run
+# out onto that tangency; the triangles that leaves are too small to survive CGAL
+# quantising its input, so the dilation "sandwich" needs cannot be taken.
+#
+# The applied result itself is fine, and identical either way round: with the
+# branch along X and with it along Y the operator reports the same 852 edges and
+# the same 80 selected creases, and both results come back NoError, genus 0. Only
+# the dilation differs, because rotating the branch moves where the near-tangent
+# slivers land relative to the quantising grid. A check that one orientation
+# passes and its mirror image fails is measuring the kernel, not the solid. The
+# case keeps the orientation whose picture is legible.
+case_pipe_tee_equal     small  sandwich  FAIL
+
 # Nothing is listed for the brush case any more. The tool clips its spine
 # against the brush and caps the bead flat and square to the crease, which is
 # what the reference builds by intersecting the finished bead with the same box.
