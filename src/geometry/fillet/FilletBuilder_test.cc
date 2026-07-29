@@ -859,6 +859,85 @@ TEST_CASE("brush: the spine is cut where the brush crosses it, not at a station"
   CHECK(chainSelection(mm, chains[0], BrushVolume(elsewhere.GetMeshGL64()), 0.01).empty());
 }
 
+namespace {
+
+// A rectangular column, meshed the way a `translate() cube()` brush reaches the
+// operator: every face split in two, and the end faces split along the diagonal
+// that runs from one corner to its opposite in x and y — which is the line a
+// spine down the middle of the column arrives on.
+manifold::MeshGL64 column(double w, double z0, double z1)
+{
+  const double lo = -w / 2, hi = w / 2;
+  const double xyz[8][3] = {{lo, lo, z0}, {hi, lo, z0}, {hi, hi, z0}, {lo, hi, z0},
+                            {lo, lo, z1}, {hi, lo, z1}, {hi, hi, z1}, {lo, hi, z1}};
+  const int tri[12][3] = {{0, 2, 1}, {0, 3, 2}, {7, 5, 6}, {5, 7, 4}, {0, 1, 5}, {0, 5, 4},
+                          {1, 2, 6}, {1, 6, 5}, {2, 3, 7}, {2, 7, 6}, {3, 0, 4}, {3, 4, 7}};
+  manifold::MeshGL64 mesh;
+  mesh.numProp = 3;
+  for (const auto& v : xyz)
+    for (const double c : v) mesh.vertProperties.push_back(c);
+  for (const auto& t : tri)
+    for (const int v : t) mesh.triVerts.push_back(v);
+  return mesh;
+}
+
+}  // namespace
+
+TEST_CASE("brush: a spine down the middle of a brush face is still cut by it")
+{
+  // The two triangles of a quad face meet on a diagonal through its centre, and
+  // a brush is drawn symmetric about the crease it selects more often than not —
+  // a column straddling one edge is how a model names that edge — so the spine
+  // meets the brush's end face exactly on the line between its two triangles.
+  // Tested exactly, both can reject it: the barycentric coordinate that decides
+  // is 1 to within an ulp and lands the wrong side on each. The crossing is then
+  // lost and the brush goes on selecting the crease while no longer bounding it
+  // — the bead runs to the end of the chain instead of stopping at the brush.
+  //
+  // Whether it is lost depends on the magnitudes in the arithmetic, so it comes
+  // and goes with the width of the column: measured over these widths, every one
+  // at or below 0.4 lost it and every one above kept it.
+  for (const double w : {0.02, 0.2, 0.3, 0.4, 0.5, 1.0, 4.0}) {
+    const BrushVolume volume(column(w, -1.0, 14.0));
+
+    const auto out = volume.segmentCrossings(Vector3d(0.0, 0.0, 0.0), Vector3d(0.0, 0.0, 20.0));
+    REQUIRE(out.size() == 1);
+    CHECK(out[0].t == Approx(0.7));
+    CHECK_FALSE(out[0].entering);
+
+    // In through one end face and out through the other is one passage each and
+    // not two: the pair of triangles sharing the line report the same crossing,
+    // and it is collapsed rather than counted twice.
+    const auto through =
+      volume.segmentCrossings(Vector3d(0.0, 0.0, -6.0), Vector3d(0.0, 0.0, 14.0));
+    REQUIRE(through.size() == 2);
+    CHECK(through[0].entering);
+    CHECK(through[0].t == Approx(0.25));
+    CHECK_FALSE(through[1].entering);
+    CHECK(through[1].t == Approx(1.0));
+  }
+
+  // And the same thing where it is reached from: the width decides which creases
+  // are selected, never how far along one the selection runs.
+  const auto model = floorAndWall();
+  const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/true));
+  REQUIRE(chains.size() == 1);
+
+  for (const double w : {0.02, 0.3, 4.0}) {
+    // The crease runs along y at (x, z) = (1, 1); the column straddles it and
+    // stops at y = 4, which is the parameter 0.4 of the one segment.
+    const manifold::Manifold across =
+      manifold::Manifold(column(w, -2.0, 4.0)).Rotate(-90.0, 0.0, 0.0).Translate(
+        manifold::vec3(1.0, 0.0, 1.0));
+    const auto keep = chainSelection(mm, chains[0], BrushVolume(across.GetMeshGL64()), 0.01);
+    REQUIRE(keep.size() == 1);
+    CHECK(keep[0].first == Approx(0.0));
+    CHECK(keep[0].second == Approx(0.4));
+  }
+}
+
 TEST_CASE("brush: a graze too short to be a bead is dropped")
 {
   // A brush face nearly tangent to the spine crosses it twice a hair apart. The

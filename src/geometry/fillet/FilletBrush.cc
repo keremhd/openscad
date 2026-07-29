@@ -37,6 +37,20 @@ namespace {
 // costs more than testing the faces outright.
 constexpr int kLeafSize = 4;
 
+// How far outside a triangle, in barycentric terms, still counts as hitting it.
+// A ray that meets a face exactly on an edge or a vertex has to be caught by
+// every triangle that owns it, not by none of them: a brush is drawn symmetric
+// about the crease it selects far more often than not — a column straddling one
+// edge of a cube is the standard way to name that edge — and the spine then runs
+// exactly through the diagonal where the two triangles of the brush's end face
+// meet. Tested exactly, both reject on opposite sides of a coordinate that is 1
+// to within an ulp, the crossing is lost, and the brush silently stops bounding
+// the crease along its length. Caught by both, the pair is one passage in the
+// same direction and collapses to a single crossing below. A ninth of a
+// nanometre of barycentric slack is seven orders above that noise and far below
+// any brush face a model could mean to place.
+constexpr double kEdgeSlack = 1e-9;
+
 // Moller-Trumbore, with `d` left unnormalized so `t` comes back in the caller's
 // own parameter (a segment's 0..1, or a distance when d is a unit vector).
 // Returns false for a ray parallel to the triangle's plane, which is the one
@@ -51,11 +65,11 @@ bool rayFace(const Vector3d& o, const Vector3d& d, const Vector3d& a, const Vect
 
   const Vector3d tv = o - a;
   const double u = tv.dot(p) * inv;
-  if (u < 0.0 || u > 1.0) return false;
+  if (u < -kEdgeSlack || u > 1.0 + kEdgeSlack) return false;
 
   const Vector3d q = tv.cross(ab);
   const double v = d.dot(q) * inv;
-  if (v < 0.0 || u + v > 1.0) return false;
+  if (v < -kEdgeSlack || u + v > 1.0 + kEdgeSlack) return false;
 
   t = ac.dot(q) * inv;
   return true;

@@ -36,9 +36,22 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
 5. ~~**T2**~~ — **done.** Both cases built; the curved junction exists and is
    solved, and the dome's oversize refusal is not the one that was predicted.
    See below.
-6. **BRUSH-WIDTH** — two cheap builder tests and a comment, pinning behaviour the
-   doc page now relies on. Independent of everything else; do it whenever.
-7. **DOC**, then **CLEAN**.
+6. ~~**D7**~~ — **done.** The overloaded sentinel is split at the caller; the
+   junction path was already right. See below for the table after the fix.
+7. ~~**D8**~~ — **done.** The crowding question is asked of the corner the blend
+   occupies, not of the seated ball; a cube now takes every radius up to half its
+   side. See below for what the sketch did not say about sharp creases.
+8. ~~**D9**~~ — **done.** A corner is built only where the brush covers the
+   setback down every edge of it. The beads there are still built; dropping
+   those too is BRUSH-WIDTH's row 2, which reuses this rule.
+9. ~~**D10**~~ — **done, and it was not a width threshold.** A spine that meets a
+   brush face exactly on the line between its two triangles could be caught by
+   neither. See below.
+10. **BRUSH-WIDTH** — now a bug, not a tidy-up: a brush containing the entire
+   model can build nothing, with a warning saying the opposite. Reproduction in
+   the section. Fix by scoping the length test to the interval's endpoints, then
+   the two builder tests. Take it after D9 so beads and corners share one rule.
+11. **DOC**, then **CLEAN**.
 
 ---
 
@@ -786,6 +799,331 @@ load-bearing, but until then it is the only reason that figure is right.
 
 ---
 
+## D8 — the crowding test refuses a third of the radii that fit — **DONE**
+
+Fixed as written: the question was replaced, not the tolerance. The test now asks
+whether the other crease's contact point lands in the corner region the blend
+occupies — under each wall by no more than the corner reaches, and no further
+from the ball centre than the crease itself — instead of whether it lands
+anywhere in the seated ball. All three bounds come off `C`, `TA`, `TB` and `v`,
+which the contacts already carry, so nothing new is computed or stored.
+
+The one thing the sketch above does not say: **how deep under a wall the corner
+reaches is not the radius except at a right angle.** The tool runs out along each
+wall to the tangency point, and that point sits `r(1 - cos phi)` under the
+*other* wall, `phi` being the angle between the two wall normals — `r` at 90
+degrees, `1.5 r` at a 60-degree crease, half of it at a shallow one. Using `r`
+flat would have been a new false refusal on shallow creases and a false
+acceptance on sharp ones.
+
+The face tolerance now **widens** the region asked about, where it used to
+loosen the ball test. That is deliberate and it costs the top 2% of the band:
+the last radius accepted on a cube is `r/L = 0.4917`, not 0.5. The doubtful case
+there is two beads meeting exactly tangentially, which is the contact that
+leaves slivers — refusing it is the right side to fall on.
+
+Measured after the fix, `round_tool` on a cube, all twelve creases:
+
+| cube side | last radius accepted | as `r/L` |
+|---|---|---|
+| 5 | 2.4167 | 0.4917 |
+| 10 | 4.8333 | 0.4917 |
+| 20 | 9.6667 | 0.4917 |
+
+`round_tool(r = 2) cube(5)` builds: genus 0, volume **83.9693** at 64 segments —
+the same six figures as the independently built hull of eight spheres, whose
+symmetric difference with it is 0.013% of the solid. Past the limit every crease
+is refused as `Crowded`, and the number reported is now the distance from the
+crease to the competing feature rather than from the ball centre to it.
+
+**Nothing bought this by getting looser.** Every `drop` variant is still refused
+and still for its stated reason, checked by reading the warnings rather than only
+the emptiness: `case_outer_edge_round`/`_bevel` large and `case_hole_mouth_round`
+large stay `Crowded`; `case_inner_corner_fillet`/`_chamfer` large, the dome's
+oversize variant and the boss 1.5 mm from a plate edge at `r = 2` stay `OffFace`;
+that boss still builds at `r = 1.4`. The whole `fillet-tests` suite matches
+expectations, `ctest -R fillet` is green, and the existing crowding unit test —
+two walls 10 mm apart, fitting at `r = 3` and crowded at `r = 8` — is unchanged,
+its limit being 5 either way.
+
+Pinned by `size: two beads sharing a face fit until their tangency lines meet`
+in `FilletBuilder_test.cc`, on all three cube sizes, plus the hull comparison.
+
+---
+
+## D8 — the crowding test refuses a third of the radii that fit (as written)
+
+**A false refusal, measured, scale-invariant, and on the most ordinary shape
+there is.** `round_tool` on a cube refuses every radius past `r/L = 0.34`, where
+the geometry runs out at `r/L = 0.5`:
+
+| cube side | last radius accepted | as `r/L` | geometric limit |
+|---|---|---|---|
+| 5 | 1.7 | 0.34 | 0.5 |
+| 10 | 3.4 | 0.34 | 0.5 |
+| 20 | 6.8 | 0.34 | 0.5 |
+
+At `r = 2` on `cube(5)` all twelve creases are refused and the result is the bare
+cube, when the answer is an ordinary rounded cube with 1 x 1 mm of flat left on
+each face. Built independently as the hull of eight spheres it is a clean solid,
+genus 0, volume 83.9693 — there is nothing degenerate about the shape the gate
+declines to make.
+
+**Cause: the crowding question is asked of the ball, not of the material the
+blend uses.** The test is whether another crease's contact line sits inside this
+crease's seated ball. That ball is a full sphere of radius `r` centred `r` off
+each wall, so it reaches `r` *along* the face past its own tangency line — into
+material the finished blend never touches. The blend occupies only the strip
+between the two tangency lines. Two blends on a shared face are compatible while
+their tangency lines do not cross, which is `L - 2r >= 0`; the ball test refuses
+at `L - 2r < r`, which is `r > L/3`. The measured 0.34 is that third plus the
+existing face tolerance.
+
+So the band from `r/L = 1/3` to `1/2` is refused and should not be. A 10 mm cube
+cannot be given a 4 mm round today.
+
+**Do not fix this by loosening the tolerance** — the tolerance is calibrated for
+tessellation error and would have to grow with `r` to cover this, which is the
+same mistake D6 rejected. The question itself is the wrong one. Ask whether the
+two tangency lines overlap — the contact points are already computed and are
+exactly the right objects — rather than whether a contact line falls inside a
+ball whose far half the blend does not use.
+
+**Watch what this must not break.** The gate exists to refuse real collisions and
+several cases pin it: `case_round_past_boss` (a boss 1.5 mm from a plate edge,
+correctly refused at `r = 2`), `case_near_wall_fillet`, and every `drop` variant.
+The obstacle in those is a wall the ball genuinely runs into, not another blend's
+tangency line, so a test on tangency-line overlap has to keep answering them —
+verify before committing, because "the gate must not buy this by getting looser"
+is the whole reason D6 was done the way it was.
+
+**Acceptance:** `round_tool(r = 2) cube(5)` builds, and matches the hull of eight
+spheres to the comparison test's tolerance. `r = 2.5` on `cube(5)` is refused, or
+builds with zero flat left, but does not silently produce a self-intersection.
+Every existing `drop` variant stays refused for its stated reason.
+
+---
+
+## D9 — a corner cell is built at full size however little of it the brush covers — **DONE**
+
+Done as written, in the one place it belongs: `endAnchored` no longer asks
+whether the selection arrives at the end vertex but whether it covers `r` of
+crease measured back from it, walked station by station because segments differ
+in length. `chainJunctions` calls it with the radius it already has. A chain no
+brush touched still anchors on sight, as before.
+
+**What it is worth, measured.** `cube(20)`, `r = 3`, a box reaching `D` past the
+top vertex, tool volume:
+
+| `D` | before | after |
+|---|---|---|
+| 1 | 13.52 | 2.06 |
+| 2 | 13.52 | 2.08 |
+| 3 | 14.83 | 14.83 |
+| 6 | 35.59 | 35.59 |
+
+Below the setback the full corner cell — the seated ball hulled against the
+sections the beads stop at, and 13.5 of it whatever was selected — is gone.
+At and above the setback nothing changed at all.
+
+**The acceptance table in the sketch below cannot be met as written, and the
+measurement it rests on is confounded.** It reads the tool's bounding box, and a
+bead's cross-section is `r` across whatever the brush is: three beads meeting at
+a corner fill an `r`-sided box around the vertex whether they are 1 mm long or 6.
+That is BRUSH-WIDTH's rule — a brush selects, it does not shape — and it is why
+the `D = 1` row read 3.003 rather than 1. Per spine, which is the axis the brush
+contract is about, the cut is exact: the beads stop where the brush does, at
+every `D` measured. What was actually broken is the corner cell, and it is the
+volume above that shows it.
+
+**What is deliberately still built at `D < r`: the beads.** Three short beads
+meeting at an unclosed corner, mutually cut by each other's canals — 2.06 rather
+than the 5.79 three separate 1 mm beads would be. That is the same answer the
+operator already gives at any corner it refuses to close, and it is the rule the
+existing "a corner one crease is cut short of gets no corner cell" case pins.
+Dropping the beads as well — which is what "build nothing at a corner" in the
+sketch below asks for — is **BRUSH-WIDTH row 2**, whose whole point is to decide
+that by the interval's endpoints and to reuse this rule for the threshold. It
+is deliberately not done here: doing it inside `chainJunctions` would put half of
+that decision in the wrong file. When it lands, the warning below has to change
+with it.
+
+**The warning.** A corner the brush reaches without covering now says so, since
+otherwise the user's box is answered with a corner that silently is not there:
+
+```
+WARNING: round_tool: the brush reaches the corner at [0, 0, 20] but covers less
+         than the radius 3 of the creases meeting there; the beads are built and
+         the corner is left open. A corner cell is the full size whatever is
+         selected, so it is built only where the brush reaches the radius down
+         every edge of it.
+```
+
+`uncoveredCorners` is what finds them: three or more ends land on the vertex and
+are selected up to it, fewer than three cover the setback.
+
+**What this does to D7.** On a cube, D7's collapse is now unreachable from the
+brush: a selection that maps to nothing had to lie inside the truncation, and a
+chain that does not cover the setback no longer gets a junction to be truncated
+by. The guard stays, and stays live, where the truncation setback exceeds the
+radius — a sharp corner, where the seated ball stands further back along each
+crease than `r`. Its test still passes and still pins the surrounding behaviour,
+but it is D9 that decides that case now; the comment there says so.
+
+**Acceptance:** `case_brush_halfchain` and every brush case in
+`FilletBuilder_test.cc` are unchanged, the whole `fillet-tests` suite matches
+expectations, and `ctest -R fillet` is green. Pinned by `brush: a corner the
+brush reaches but does not cover is not built`, which checks the junction count,
+the reported corner, the volume either side of the threshold, and — above it —
+that the beads stop at the brush and not at the setback.
+
+---
+
+## D9 — a corner cell is built at full size however little of it the brush covers (as written)
+
+**The brush contract is exact along an edge and not at a corner, and the gap is
+as large as `r`.** Measured on `cube(20)` at `r = 3`, brushing the top vertex
+with a box reaching `D` past it, reading the tool solid's own bounding box:
+
+| `D` | brush covers | tool reaches |
+|---|---|---|
+| 1 mm | 1 mm down each edge | **3.003 mm** |
+| 3 mm | 3 mm | 3.003 mm |
+| 6 mm | 6 mm | 6.000 mm |
+
+At `D = 1` the corner cell overshoots the brush by 2 mm, three times what was
+selected. Mid-edge the same brush is honoured exactly: the bead is cut square at
+the brush wall, which is the whole point of `case_brush_halfchain`. So the
+operator promises "cut square at the brush" everywhere except at a junction,
+where it silently builds out to the setback.
+
+**It is deliberate, and the reasoning has a range of validity it outgrew.**
+`endAnchored` says a junction is built where every chain meeting there *reaches
+the vertex*, and its comment argues the overshoot is "the fraction of a segment
+truncation needs" and is the lesser wrong against losing the corner outright.
+That is true when the brush is comparable to `r`. It is false by a factor of
+three at `D = r/3`, and unbounded as `D` shrinks: the corner cell is always the
+full seated ball, so the smaller the brush the larger the overshoot in relative
+terms.
+
+**A corner cell genuinely cannot be clipped**, which is why the decision is
+binary rather than a matter of trimming it. It is hulled from the seated ball and
+the sections the beads stop at; there is no perpendicular to cut it against in
+three directions at once. So the question is only where the threshold sits, not
+whether to build a partial corner.
+
+**Do:** require the selection to cover the stretch the corner cell actually
+occupies — the setback, which is the same `D >= r` the beads already effectively
+have since D7 — rather than merely to touch the vertex. Below that, no corner.
+The contract then reads the same everywhere: nothing is built outside the brush.
+
+Note this makes `D < r` build **nothing** at a corner, where today it builds a
+corner with no beads attached. That is the honest answer to "round this corner
+with a box smaller than the radius", and it is worth a warning naming the radius,
+because it is the one case where a brush the user drew is answered with silence.
+
+**Acceptance:** the table above becomes `tool reaches <= D` in every row. The
+figure on the doc page (a 12 mm box at `r = 3`) is unaffected, as is
+`case_brush_corner_partial` if it is ever written. `case_brush_halfchain` and the
+brush cases in `FilletBuilder_test.cc` are unchanged — none of them brushes a
+junction more tightly than the setback.
+
+---
+
+## D10 — a brush thinner than about 0.5 mm loses its cut along the spine — **DONE, and the width was a red herring**
+
+The section below says to find the tolerance before choosing a fix. **There is no
+tolerance, and there is no threshold.** Extending the measurement past the five
+widths it was taken at breaks the story immediately — `W` = 0.25 bounded the
+crease correctly, 0.3 did not, 0.35 did, 0.4 and 0.45 did not, 0.49 did. Not
+monotonic, so not a threshold, and nothing was going to be found by hunting for
+the constant. Offsetting the same brush by a hundredth of a millimetre off centre
+made every width correct.
+
+**The cause.** A brush drawn symmetric about the crease it selects — the standard
+way to name one edge — puts the spine exactly on the diagonal where the two
+triangles of the brush's end face meet. Möller–Trumbore then decides the hit on a
+barycentric coordinate that is 1 to within an ulp, and **both** triangles can
+reject on opposite sides of it. The crossing is lost, `chainSelection` reports the
+whole chain as covered, the node's whole-chain rule clears the interval, and the
+brush goes on selecting the crease while no longer bounding it. Which way the ulp
+falls depends on the magnitudes in the arithmetic, which is why it looked like
+width and looked like a threshold.
+
+Two details worth keeping, because they cost an hour to find:
+
+- **The split direction matters.** A face split from `(lo,lo)` to `(hi,hi)` loses
+  nothing; the same face split the other way, `(lo,hi)` to `(hi,lo)`, is what
+  fails — and that is the one OpenSCAD's `cube()` produces. A reproduction built
+  with the first split passes at every width and proves nothing.
+- **It is not visible at the operator's own tolerances.** The crossing is not
+  merely misplaced, it is absent, so nothing downstream can notice.
+
+**The fix** is one constant in `rayFace`: a barycentric slack of `1e-9`, so a ray
+that meets a face on an edge or a vertex is caught by *every* triangle owning it
+rather than by none. The pair is one passage in the same direction and the
+existing collapse in `segmentCrossings` reduces it to a single crossing — that
+code was already written for exactly this shape of event, it was simply never
+reached. Seven orders above the noise it absorbs and far below any brush face a
+model could mean to place.
+
+**Measured after the fix**, `cube(20)` at `r = 3`, a column of width `W`
+straddling one vertical edge and stopping at `z = 14`:
+
+| `W` | 0.02 | 0.2 | 0.3 | 0.4 | 0.45 | 0.5 | 1 | 4 |
+|---|---|---|---|---|---|---|---|---|
+| bead top | 14.00 | 14.00 | 14.00 | 14.00 | 14.00 | 14.00 | 14.00 | 14.00 |
+
+The selection counts are unchanged at every width (1 of 12 at 0.02, 3 of 12
+above it), which is the half that was always right.
+
+**Acceptance:** pinned by `brush: a spine down the middle of a brush face is
+still cut by it`, over the same widths, on a hand-built column with the failing
+split — the mesh has to be written out in the test, since a manifold primitive
+splits the other way and would pin nothing. Verified to fail with the slack
+removed. The doc page's single-edge recipe is unaffected, as the section below
+predicted.
+
+---
+
+## D10 — a brush thinner than about 0.5 mm loses its cut along the spine (as written)
+
+**A brush narrow enough across the crease stops bounding the crease along it.**
+Measured on `cube(20)`, a column of width `W` straddling one vertical edge and
+stopping at `z = 14` on an edge that runs 0 to 20:
+
+| `W` | selected | bead top |
+|---|---|---|
+| 0.02 | 1 of 12 | **20.00** — runs the whole edge |
+| 0.2 | 3 of 12 | **20.00** — runs the whole edge |
+| 0.5 | 3 of 12 | 14.00 — correct |
+| 1 | 3 of 12 | 14.00 — correct |
+| 4 | 3 of 12 | 14.00 — correct |
+
+The selection is right in every row — the brush restricts *which* creases are
+taken, at every width. What is lost below the threshold is the **cut along the
+spine**: the interval's far end stops being honoured and the bead is built to the
+end of the chain.
+
+**It does not scale with the size.** Identical rows at `r = 1`, `r = 3` and
+`r = 6`: the cutoff sits between `W = 0.2` and `W = 0.5` in all three. So this is
+a tolerance somewhere in the brush's own geometry — read off the mesh or the
+model's extent — and not one of the size-derived constants. Whoever picks this up
+should find what that tolerance is before choosing a fix; the measurement above
+says where to look but not which constant it is.
+
+**Why it has not bitten:** every brush in the suite and in the regression models
+is millimetres wide. The one place it is reachable is the single-edge recipe on
+the doc page, which uses a 0.02 mm column — and there the brush runs past both
+end faces anyway, so the interval is the whole chain either way and the picture
+is the same. That recipe therefore survives a fix; it is not resting on this.
+
+**Acceptance:** the table above reads 14.00 at every width down to the point
+where the brush no longer contains the spine at all. Below that it should select
+nothing rather than select-and-not-bound.
+
+---
+
 ## BRUSH-WIDTH — pin what a narrow brush does, and say it on purpose
 
 Found while writing the doc figures, measured, and currently correct but
@@ -966,6 +1304,10 @@ is the warning D9 added at an uncovered corner — it says the beads are built
 there, and would have to say something else.
 
 **Do:**
+
+0. Settle `minLength` per the above, once D9 is in. Whatever is chosen, record
+   the number and the reason at the constant, because the next person will read
+   `0.01` and assume it is a debounce.
 
 1. A unit test in `FilletBuilder_test.cc` pinning the section against brush
    width — two brushes of very different widths over the same stretch of one
