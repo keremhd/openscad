@@ -249,13 +249,79 @@ nothing about the wall's curvature.
 
 **Do not fix this by enlarging the tolerance.** A tolerance big enough to swallow
 the sagitta at `r = 2` is 0.25 mm of slack handed to every crease in every model,
-which gives back the refusals the gate exists to make. The contact point needs to
-be judged against the wall's actual surface rather than against the station's
-tangent plane — the smooth-surface grouping the gate already builds is what
-identifies which triangles that is. Read `chainContacts` before choosing between
-projecting the stepped point back onto the surface and measuring against the
-nearest triangle of it; the point is that curvature must be measured, not
-tolerated.
+which gives back the refusals the gate exists to make.
+
+#### This is not the tapered-stick problem, and the difference decides the fix
+
+Worth separating, because both defects are in the off-face test and the two ask
+for opposite things.
+
+The needle and the `$fn = 3` cone are a **sampling-density** problem: each sample
+is correct, and the room runs out *between* two of them. The answer there was to
+sample more finely, which is why the walk scales with the size.
+
+D6 is a **per-sample construction** problem: sampling has nothing to do with it.
+Every sample on a dome is wrong, in the same direction, by the same
+`r^2 / 2R`. Sampling a thousand times gets the same refusal, because the error is
+in how each contact point is built:
+
+```cpp
+c.C  = s.v + dir * (r / cos(phi/2)) * bis;
+c.TA = c.C - dir * r * s.nA;     // stepped off C along a vertex-averaged normal
+c.TB = c.C - dir * r * s.nB;
+```
+
+`TA` and `TB` are *constructed* by stepping off the ball centre along averaged
+wall normals, and `pointTriangleDistance` then measures how far that constructed
+point sits from the wall. The measurement is exact. The construction assumes the
+wall is flat, so on a curved wall the point it produces is genuinely off the
+surface and the gate genuinely reports it.
+
+Note that `mitreSlack` already exists as a tolerance for this same species of
+error from a different source — where a chain bends, the averaged normals put the
+contact in the air at the mitre between two walls. Curvature is the second source
+and the slack was only ever calibrated for the first. Adding a curvature term to
+the slack would be the third patch on a construction that should not need one.
+
+#### The exact route, which is the analytic idea in its cheap form
+
+Stop constructing the contact point. **Take `TA` as the nearest point on wall A's
+triangles to the ball centre `C`.** Then it lies on the wall by construction, on a
+dome as much as on a plate, and no curvature term or tolerance is involved.
+
+Both of the gate's questions fall out of that one query, exactly:
+
+- **Off-face** becomes: is the nearest point in the *interior* of the wall, or on
+  the wall's boundary? A ball whose nearest contact is a boundary edge is hanging
+  off the end of that wall — which is precisely what "the blend would leave the
+  surface it is meant to meet" is trying to say, stated exactly instead of as a
+  distance against a tolerance.
+- **Crowding** comes free from the distance itself: `|C - TA|` should equal `r`.
+  Less than `r` means something is in the way. Asked against the whole mesh
+  rather than only against other creases' contact lines, this also closes the
+  "obstacles that are faces, not creases" gap that the old case queue's Group 2
+  was written for — a face can block a ball without carrying any crease.
+
+**The machinery already exists.** `pointTriangleDistance` is in the internal
+header, and `BrushVolume` in `FilletBrush.{h,cc}` already builds an AABB tree over
+mesh triangles with exactly the traversal this needs. This is the plan's "ask a
+distance field whether the offset surface stays on the model" in its cheap,
+concrete form — an exact query against the mesh, not the expensive "build the
+tool and test it" the plan priced.
+
+**What it removes:** the tangent-plane approximation, `mitreSlack` and its
+calibration, and most likely the corner exemptions — a nearest point landing on a
+wall boundary near a junction is correct information rather than the misreading
+the exemptions were invented to suppress.
+
+**What it does not remove: sampling.** The questions are still asked at discrete
+points along a crease, so the tapered-stick reasoning and the size-scaled walk
+stay exactly as they are. Removing sampling altogether needs the continuous
+formulation, which is a much larger job and is not proposed here. Do not conflate
+the two while implementing.
+
+Verify against the body of `chainContacts` before committing to this — the
+sketch above is read off the construction, not from having built it.
 
 **Acceptance:** the dome above builds at `r = 1` and `r = 2`. Every existing
 `drop` variant stays refused, and for the same stated reason — the gate must not
