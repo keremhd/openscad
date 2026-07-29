@@ -815,6 +815,156 @@ drop, so the user sees the answer without a warning about a stub they never
 asked for. Do not add one — a warning would fire on the accidental case the rule
 was written for, which is exactly the case nobody needs told about.
 
+### The threshold is one constant answering two different questions — split it
+
+The obvious framing is "pick a value for `minLength`", and it looks like a trade:
+raise it and the recipes become writable, but deliberate short work disappears.
+**That trade is an artefact of applying one constant everywhere, and it goes away
+if the rule is split by position instead.** Settle this before writing the tests
+below, since they pin whichever rule is chosen.
+
+**Formulate it on the interval's endpoints, not on its length.** The question at
+each end of a kept interval is *what put it there* — the brush cut the chain, or
+the chain simply ends. Three cases, and only one of them has a length condition:
+
+| ends the brush cut | what the interval is | rule |
+|---|---|---|
+| neither | the brush covers the whole crease | build it, at any length |
+| one | the brush runs off one end of the crease | length matters only for the corner at the covered end |
+| both | a window strictly inside the crease | debounce only |
+
+The first row is the case a length test gets wrong: a crease **shorter than the
+setback, selected whole**. Nothing is being clipped there — the crease is simply
+that short — so a rule phrased as "cover the setback" would refuse a selection
+that asked for everything there is. `chainSelection` already distinguishes the
+two kinds of end: an interval starting at `0.0` or ending at `segments` is
+chain-ended, anything else is a brush crossing.
+
+**"At any length" has to mean no length test at all, debounce included.** The
+debounce exists for a brush face grazing the spine and crossing it twice a hair
+apart — an artefact that by definition has *two brush-cut ends*. A chain-ended
+interval cannot be that artefact, so applying the debounce to one is a category
+error, and it is not a harmless one: `minLength` scales with the size, so at
+`r = 30` it is 0.3 mm in absolute terms and a legitimately whole-covered chain
+shorter than that would vanish. Scope the debounce to the third row only.
+
+Note what that also fixes: `chainSelection` runs **only when a brush is present**,
+so today a chain shorter than `0.01 * size` builds with no brush and disappears
+the moment any brush is added, including one that covers the entire model. A
+brush covering everything must be a no-op, and today that is true only because
+the failing case is hard to reach.
+
+**Reachable, and here is the reproduction.** A long thin L decouples the crease's
+length from everything the gate measures: the arms give the blend all the room it
+needs along both walls, while the crease itself is only as long as the plate is
+thick.
+
+```openscad
+module part() { cube([1000, 5, 2]); cube([5, 1000, 2]); }
+
+fillet_tool(r = 400) part();                       // builds, genus 0
+
+fillet_tool(r = 400) {                             // builds NOTHING
+    part();
+    translate([-9000, -9000, -9000]) cube(18000);  // a brush containing the model
+}
+```
+
+The one concave crease is 2 long; `minLength` is `0.01 * 400` = 4. Both
+invocations classify identically — `selects 1 concave edge(s)` — and the second
+then reports:
+
+```
+WARNING: fillet_tool: the selection brush covers none of the 1 candidate edge(s);
+         nothing is built. The brush has to contain part of an edge, not merely
+         touch the model.
+```
+
+which is false twice over: the brush contains the whole model, and it covers the
+whole edge. **A brush that contains everything is not a no-op**, and the message
+blames the user for the opposite of what they did.
+
+Note what makes it reachable — a large `r` with a short crease, which needs the
+crease's length to be independent of the room the blend has. On a boss or a plate
+those are the same number and the size gate refuses first, which is why an
+earlier probe across twelve rounded shapes found nothing. On an L they are the
+arm length and the plate thickness, and nothing couples them.
+
+**Acceptance:** the second invocation above builds the same tool as the first.
+Add it as a builder test — it is two cubes and a count, no render.
+
+**Measured, that first row appears to be unreachable today, and for a good
+reason.** A plate with a square boss at `r = 3`, where each base crease is `W`
+long:
+
+| `W` | result |
+|---|---|
+| 12 mm | builds, blend volume 72.342 |
+| 6 mm | builds, 38.850 |
+| 4 mm | refused by the size gate |
+| 2 mm | refused by the size gate |
+
+and the refusal is correct — a crease `W` long puts its two end junctions `W`
+apart, so the creases meeting there are separated by `W`, and `W < r` means two
+blends genuinely competing for the same material. Short crease and crowded
+neighbours are the same condition seen twice. So the first row costs nothing to
+support and should still be written that way: it is the honest statement, it is
+free, and the day a shape reaches it the alternative would be a silent refusal of
+a selection that asked for everything available.
+
+The remaining two rows are the populations that do overlap in practice:
+
+- **An interval that reaches a chain end.** Its end is a junction, and the
+  material there belongs to the corner cell. This is the one D9 is about, and it
+  wants the setback: cover less than that and neither a bead nor a corner is
+  honest.
+- **An interval strictly inside a chain.** Nothing about a junction applies. The
+  only reason to drop one is the artefact the constant was written for — a brush
+  face nearly tangent to the spine, crossing it twice a hair apart — and that
+  wants a debounce, not a size.
+
+Measured on `cube(20)` at `r = 3`, mid-edge intervals are exact at every length
+tried: `L` = 0.5, 1, 2, 3, 6 and 12 mm remove `1.9315 L` to within 2%. There is
+nothing wrong with a 2 mm round of 3 mm radius; it is mostly end caps, and it is
+what was asked for.
+
+**And the two populations line up exactly with what each recipe needs.** In the
+single-edge brush, the four neighbour stubs to be dropped all begin *at the
+shared vertex* — they are end-touching by construction, because the brush
+straddles the edge those four meet. The window to be kept is mid-chain. So:
+
+| rule | single-edge recipe | mid-edge window | whole short crease |
+|---|---|---|---|
+| `0.01 r` everywhere (today) | needs a 0.02 mm column | works | works |
+| `1.00 r` everywhere | 2.9 mm slab — writable | **lost** | **lost** |
+| by endpoint, as above | **2.9 mm slab — writable** | **works** | **works** |
+
+The third row is strictly better than either uniform value, and it is the same
+rule D9 is already putting at corners rather than a second one to explain. The
+whole brush contract then reads: *a selection is honoured where it lies, except
+that reaching a junction means covering the setback there.*
+
+`endAnchored` already asks precisely "does this interval reach the end", so the
+test that distinguishes the two populations exists and is in the same file.
+
+**Why after D9.** D9 fixes the end case at corners. Doing this one first would
+mean choosing a threshold that D9 then has to agree with; doing it after means
+reusing D9's, whatever it is. The two must not disagree — that is the failure
+this whole item exists to prevent.
+
+**D9 is in, and here is the threshold to reuse.** It is
+`endAnchored(m, chain, front, r)` in `FilletBuilder.cc` — does this chain's
+selection cover `r` of crease measured back from that end vertex, walked station
+by station. D9 uses it in one place only, `chainJunctions`, to decide whether a
+corner cell is built; the *bead* on such an end is still built, which is row 2 of
+the table above and is left to this item deliberately. `endTouched` next to it is
+the old arrives-at-the-vertex test, which is what row 2 needs to tell "the brush
+cut this end" from "the chain ends here". Row 1 already falls out of it: the walk
+stops at the far end of the chain, so a crease shorter than `r` and selected
+whole is covered by definition and anchors. The one thing to carry when it lands
+is the warning D9 added at an uncovered corner — it says the beads are built
+there, and would have to say something else.
+
 **Do:**
 
 1. A unit test in `FilletBuilder_test.cc` pinning the section against brush

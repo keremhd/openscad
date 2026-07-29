@@ -1067,6 +1067,52 @@ TEST_CASE("brush: a selection swallowed by the junction setback builds no bead")
   CHECK(rounded.Genus() == 0);
 }
 
+TEST_CASE("brush: a corner the brush reaches but does not cover is not built")
+{
+  // A corner cell is a fixed size: it is hulled from the seated ball and the
+  // sections the beads stop at, and there is no perpendicular to clip it against
+  // in three directions at once. So a brush that reaches the vertex by a
+  // fraction of the setback and gets the whole cell is the brush contract broken
+  // by the rest of it — while along an edge the same brush is honoured exactly.
+  // The rule is therefore coverage of the setback, not arrival at the vertex.
+  const double r = 3.0;
+  const auto cube = box(20.0, 20.0, 20.0);
+  const MergedMesh mm = mergeMesh(cube.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/false));
+
+  // Two boxes on the same corner, one reaching 2 mm down each edge from it and
+  // one reaching 6. Both select the same three creases.
+  for (const double D : {2.0, 6.0}) {
+    const auto brush =
+      box(D + 1.0, D + 1.0, D + 1.0).Translate(manifold::vec3(-1.0, -1.0, 20.0 - D));
+    const auto selected = brushed(mm, chains, brush, r);
+    REQUIRE(selected.size() == 3);
+
+    const auto junctions = chainJunctions(mm, adj, selected, r, /*concave=*/false);
+    const auto uncovered = uncoveredCorners(mm, selected, r);
+    const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24);
+    REQUIRE_FALSE(tool.IsEmpty());
+
+    if (D < r) {
+      CHECK(junctions.empty());
+      REQUIRE(uncovered.size() == 1);
+      CHECK(mm.pos[uncovered[0]].isApprox(Vector3d(0.0, 0.0, 20.0)));
+      // The cell alone is an order of magnitude more than this; what is left is
+      // three beads two millimetres long.
+      CHECK(tool.Volume() < 3.0);
+    } else {
+      REQUIRE(junctions.size() == 1);
+      CHECK(mm.pos[junctions[0].vert].isApprox(Vector3d(0.0, 0.0, 20.0)));
+      CHECK(uncovered.empty());
+      CHECK(tool.Volume() > 30.0);
+      // And the beads run out exactly as far as the brush does, not to the
+      // setback: 6 mm down each edge from the vertex.
+      CHECK(tool.BoundingBox().min[2] == Approx(20.0 - D).margin(1e-6));
+    }
+  }
+}
+
 namespace {
 
 // One model put through the size gate: the chains a tool would walk on it, and

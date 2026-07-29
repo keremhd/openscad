@@ -420,6 +420,13 @@ std::vector<Junction> chainJunctions(const MergedMesh& m,
                                      const std::map<EdgeKey, std::vector<int>>& adj,
                                      const std::vector<Chain>& chains, double r, bool concave);
 
+// The corners a brush arrives at without covering: three or more chain ends land
+// on the vertex and are selected up to it, but too few of them cover the setback
+// the corner cell occupies for one to be built. The beads are still built and
+// meet there unclosed, which is a valid shape and not the one a brush drawn
+// around a corner looks like it asked for — so the caller says so.
+std::vector<int> uncoveredCorners(const MergedMesh& m, const std::vector<Chain>& chains, double r);
+
 // Build the fillet/round tool solid: the wedge W hulled from consecutive
 // sections along every chain, plus a corner cell at each junction, minus the
 // canal U hulled the same way, plus a ball at each corner. Spines are truncated
