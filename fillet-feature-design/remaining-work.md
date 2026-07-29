@@ -24,7 +24,8 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
 
 1. ~~**D4, D5, T1**~~ — **done.** T1 was already in the tree; see below for what
    it changed.
-2. **D1 and D6 together** — both live in the size gate's contact test.
+2. ~~**D1 and D6**~~ — **done.** See below for what the nearest-point route did
+   and did not replace.
 3. **D2** — no longer merely cosmetic. T1 showed the same slivers make the
    operator's own output unreadable by the operator, so this is worth more than
    the timebox it was given.
@@ -156,9 +157,37 @@ counts become.
 
 ---
 
-## D1 + D6 — the size gate's contact test
+## D1 + D6 — the size gate's contact test — **DONE**
 
-Both live in `chainContacts`. Do them in one pass.
+Both lived in `chainContacts` and were done in one pass. What landed, and the
+one place it stops short of the sketch below:
+
+- **D1.** The brush block now runs *before* the size gate, so the gate is asked
+  about the chains as the brushes left them, and `chainContacts` answers only at
+  samples inside a kept interval — points outside one come back as invalid
+  placeholders, keeping the ends of the list the ends of the chain for the
+  callers that exempt them. The comment arguing the gate belongs first is
+  replaced by the reasoning above. The spike brushed to its lower half now
+  builds; brushed to its upper half it is still refused, and at a sample the
+  brush kept rather than wherever on the crease the room first ran out.
+- **D6.** `TA`/`TB` are the nearest points on their walls to the ball centre, and
+  the off-face question is the exact one: is that point inside the wall, or on
+  the wall's rim? `mitreSlack` and the face tolerance are gone from that test
+  along with the tangent-plane construction, which now only supplies the *number*
+  the warning reports — how far past the wall's end the blend would stop, which
+  is what the L-arm test pins at 5. The dome builds at every radius probed; the
+  boss 1.5 mm from a plate edge is still refused at `r = 2` and builds at 1.4;
+  every existing `drop` variant and every size test is unchanged.
+- **Not done: crowding from the same query.** It still asks other chains'
+  contact lines, not the whole mesh. The junction exemptions that test gets from
+  chain adjacency have no equivalent in a distance field — at any convex corner
+  the third wall sits inside the ball — so "free" it is not, and the Group 2 gap
+  it would close has no reachable failure (see `next-cases.md`). The corner
+  exemptions in the off-face test were kept for the same reason; the sketch
+  below guessed they would go, and nothing measured says they can.
+
+The rest of this section is what was reasoned out beforehand, kept because the
+measurements in it are the argument for the route that was taken.
 
 ### What `chainContacts` is, before the two bugs
 

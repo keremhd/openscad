@@ -240,6 +240,12 @@ std::vector<int> smoothSurfaces(const MergedMesh& m,
 // which is the same object for the purpose of asking how much room the tool
 // needs. `surfaceA`/`surfaceB` are the surfaces the two contact points must land
 // on for the tool to meet the model tangentially at all.
+//
+// `TA`/`TB` are the points of those surfaces nearest the ball centre, so they
+// lie on the model rather than being stepped off C along a wall normal — which
+// would assume the wall flat and miss a curved one by its sagitta. `offFace` is
+// non-zero where the nearest point has run onto the boundary of its surface,
+// which is the ball hanging off the end of a wall it is meant to meet.
 struct ChainContact
 {
   Vector3d v;
@@ -247,14 +253,20 @@ struct ChainContact
   Vector3d TA, TB;
   double radius = 0.0;
   int surfaceA = -1, surfaceB = -1;
-  int vert = -1;      // the mesh vertex, or -1 between two of them
-  double slack = 0.0; // how far off its wall this contact point may legitimately sit
+  int vert = -1;        // the mesh vertex, or -1 between two of them
+  double offFace = 0.0; // how far past the end of its wall the blend would stop
   bool valid = false;
 };
 
 // The contact points and seated ball along a chain. `wedge` selects the
 // chamfer/bevel reading of `size` (a setback taken directly) over the rounded
 // one (a radius, whose setback is r*tan(phi/2)).
+//
+// Only the stretches of the chain named by `Chain::keep` are answered for: a
+// point the brushes left out carries no bead, so nothing about the model there
+// can refuse a size nobody asked to build. Those points come back in place, as
+// invalid contacts, so the list still runs from one end of the chain to the
+// other.
 //
 // `samplesPerSegment` is the FEWEST points to add between two stations, with the
 // walls interpolated; a segment long against the size gets more, one sample per
@@ -299,9 +311,10 @@ struct SizeVerdict
 
 // Check every chain against the size asked for, in two ways.
 //
-// The tool has to *touch* the model: a contact point past the far side of its
-// wall means no size-preserving blend exists there at all (the arms of an L
-// shorter than the radius). And it has to have the room it needs: a crease that
+// The tool has to *touch* the model: a seated ball whose nearest point on a wall
+// has run onto that wall's boundary is hanging off the end of it, and no
+// size-preserving blend exists there at all (the arms of an L shorter than the
+// radius). And it has to have the room it needs: a crease that
 // is not this one, sitting closer to the seated ball than the ball's own radius,
 // is a crease whose bead this one would eat — the two features are competing for
 // the same material, and neither can be built as asked.

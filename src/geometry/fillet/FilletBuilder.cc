@@ -403,6 +403,48 @@ bool sidedTris(const MergedMesh& m, const std::map<EdgeKey, std::vector<int>>& a
   return true;
 }
 
+// The point of a closed triangle nearest p: the usual region test on the
+// barycentric coordinates, then the point on whichever feature (face, edge or
+// corner) turned out to be nearest.
+Vector3d closestPointOnTriangle(const Vector3d& p, const Vector3d& a, const Vector3d& b,
+                                const Vector3d& c)
+{
+  const Vector3d ab = b - a, ac = c - a, ap = p - a;
+  const double d1 = ab.dot(ap), d2 = ac.dot(ap);
+  if (d1 <= 0 && d2 <= 0) return a;
+
+  const Vector3d bp = p - b;
+  const double d3 = ab.dot(bp), d4 = ac.dot(bp);
+  if (d3 >= 0 && d4 <= d3) return b;
+
+  const double vc = d1 * d4 - d3 * d2;
+  if (vc <= 0 && d1 >= 0 && d3 <= 0) return a + (d1 / (d1 - d3)) * ab;
+
+  const Vector3d cp = p - c;
+  const double d5 = ab.dot(cp), d6 = ac.dot(cp);
+  if (d6 >= 0 && d5 <= d6) return c;
+
+  const double vb = d5 * d2 - d1 * d6;
+  if (vb <= 0 && d2 >= 0 && d6 <= 0) return a + (d2 / (d2 - d6)) * ac;
+
+  const double va = d3 * d6 - d5 * d4;
+  if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0)
+    return b + ((d4 - d3) / ((d4 - d3) + (d5 - d6))) * (c - b);
+
+  const double denom = 1.0 / (va + vb + vc);
+  return a + ab * (vb * denom) + ac * (vc * denom);
+}
+
+// Distance from a point to a closed segment.
+double pointSegmentDistance(const Vector3d& p, const Vector3d& a, const Vector3d& b)
+{
+  const Vector3d ab = b - a;
+  const double len2 = ab.squaredNorm();
+  if (len2 < 1e-24) return (p - a).norm();
+  const double t = std::clamp(ab.dot(p - a) / len2, 0.0, 1.0);
+  return (p - (a + t * ab)).norm();
+}
+
 }  // namespace
 
 std::vector<StationNormals> chainNormals(const MergedMesh& m,
@@ -533,6 +575,78 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
   const std::vector<StationNormals> stations = chainNormals(m, adj, chain);
   const double dir = concave ? 1.0 : -1.0;
 
+  // The walls, as surfaces rather than triangles: which triangles each is made
+  // of, and the segments that bound it. A wall's boundary is the creases around
+  // it — including the one being blended — so a ball whose nearest point on a
+  // wall lands on one of those segments has reached the end of that wall.
+  std::vector<std::vector<int>> surfaceTris;
+  for (size_t t = 0; t < surfaceOf.size() && t < m.tris.size(); ++t) {
+    if (surfaceOf[t] < 0) continue;
+    if (static_cast<size_t>(surfaceOf[t]) >= surfaceTris.size())
+      surfaceTris.resize(surfaceOf[t] + 1);
+    surfaceTris[surfaceOf[t]].push_back(static_cast<int>(t));
+  }
+  std::vector<std::vector<EdgeKey>> surfaceRim(surfaceTris.size());
+  for (const auto& [key, ts] : adj) {
+    std::set<int> touching;
+    for (const int t : ts)
+      if (static_cast<size_t>(t) < surfaceOf.size() && surfaceOf[t] >= 0)
+        touching.insert(surfaceOf[t]);
+    // Two triangles of the same surface make an interior seam; anything else —
+    // a crease, a non-manifold edge, a border — ends the surface.
+    if (ts.size() == 2 && touching.size() == 1) continue;
+    for (const int s : touching)
+      if (static_cast<size_t>(s) < surfaceRim.size()) surfaceRim[s].push_back(key);
+  }
+
+  auto nearestOnSurface = [&](const Vector3d& p, int surface, Vector3d *onWall) {
+    double best = std::numeric_limits<double>::infinity();
+    if (surface < 0 || static_cast<size_t>(surface) >= surfaceTris.size()) return best;
+    for (const int t : surfaceTris[surface]) {
+      const Tri& tri = m.tris[t];
+      const Vector3d q =
+        closestPointOnTriangle(p, m.pos[tri.v[0]], m.pos[tri.v[1]], m.pos[tri.v[2]]);
+      const double d = (p - q).norm();
+      if (d < best) {
+        best = d;
+        if (onWall) *onWall = q;
+      }
+    }
+    return best;
+  };
+
+  // Where the ball really touches one of its walls, and whether that is a touch
+  // at all. Stepping off the ball centre along an averaged wall normal — the
+  // construction the sections themselves use — assumes the wall is flat, and on
+  // a doubly curved one the point it produces sits off the surface by the
+  // sagitta, r^2/2R, however finely the wall is tessellated: a bead on a dome
+  // would be refused for a miss that is an artefact of the construction. Asking
+  // the wall for its nearest point to the centre instead puts the contact on the
+  // wall by construction, curved or not.
+  //
+  // That also states the question exactly rather than as a distance against a
+  // tolerance: the blend leaves the surface it is meant to meet precisely when
+  // the nearest point is on the wall's boundary rather than inside it, because
+  // then the wall has ended and the ball is hanging off it. The boundary is part
+  // of the wall, so its distance is never less than the wall's own; equal is
+  // what says the contact sits on it.
+  auto seatOn = [&](ChainContact& c, const Vector3d& n, int surface, Vector3d& T) {
+    Vector3d onWall;
+    const double d = nearestOnSurface(c.C, surface, &onWall);
+    if (!std::isfinite(d)) return;  // no wall to ask; leave the constructed point
+    T = onWall;
+
+    double rim = std::numeric_limits<double>::infinity();
+    for (const EdgeKey& e : surfaceRim[surface])
+      rim = std::min(rim, pointSegmentDistance(c.C, m.pos[e.first], m.pos[e.second]));
+    if (rim > d + 1e-9 * std::max(1.0, d)) return;
+
+    // Hanging off the end of this wall. What the user can act on is how far past
+    // it the blend would stop, so report the miss of the point the bead would
+    // actually be built to.
+    c.offFace = std::max(c.offFace, nearestOnSurface(c.C - dir * c.radius * n, surface, nullptr));
+  };
+
   auto contactAt = [&](const StationNormals& s, int vert) {
     ChainContact c;
     c.v = s.v;
@@ -559,20 +673,24 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
     if (s.triB >= 0 && static_cast<size_t>(s.triB) < surfaceOf.size())
       c.surfaceB = surfaceOf[s.triB];
     c.valid = std::isfinite(r) && c.C.allFinite();
+    if (c.valid) {
+      seatOn(c, s.nA, c.surfaceA, c.TA);
+      seatOn(c, s.nB, c.surfaceB, c.TB);
+    }
     return c;
   };
 
-  // How far a contact point may legitimately sit off the wall it is named
-  // against. Where a chain turns, the wall normals it is built from are an
-  // average of two walls and the contact lands in the air at the mitre between
-  // them; the same happens at a sample, whose walls are interpolated between its
-  // two stations'. Either way the miss is an angle applied at the ball centre,
-  // so it is the distance from the crease to that centre that sets the scale —
-  // and on a nearly flat crease that distance is many radii, which is why the
-  // slack cannot be written in terms of the radius alone.
-  auto mitreSlack = [&](const Vector3d& u, const Vector3d& w, double lever) {
-    const double c = std::clamp(u.dot(w), -1.0, 1.0);
-    return lever * std::sin(std::acos(c));
+  // Which stretches of the chain are being built. The brushes narrow a crease to
+  // the parts they cover, and the question of whether the blend still meets its
+  // walls is only about the parts there is a bead on: the far half of a crease
+  // running off the end of its face says nothing about the near half, which is
+  // all the user asked for. Station i sits at parameter i, and a sample partway
+  // along segment i at parameter i + t; an empty `keep` is the whole chain.
+  auto isBuilt = [&](double param) {
+    if (chain.keep.empty()) return true;
+    for (const SpineInterval& iv : chain.keep)
+      if (param >= iv.first && param <= iv.second) return true;
+    return false;
   };
 
   const size_t n = stations.size();
@@ -581,18 +699,15 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
   std::vector<ChainContact> out;
   out.reserve(n * (1 + std::max(samplesPerSegment, 0)));
   for (size_t i = 0; i < n; ++i) {
-    ChainContact station = contactAt(stations[i], chain.verts[i]);
-    if (station.valid) {
-      // The station's own walls come from one of its incident edges; if the
-      // other edge rides different walls, this is the corner case above.
-      const int prev = i > 0 ? chain.verts[i - 1] : (chain.closed ? chain.verts[n - 1] : -1);
-      const int next = i + 1 < n ? chain.verts[i + 1] : (chain.closed ? chain.verts[0] : -1);
-      int pA = -1, pB = -1, nA2 = -1, nB2 = -1;
-      const double lever = (station.C - station.v).norm() + station.radius;
-      if (prev >= 0 && next >= 0 && sidedTris(m, adj, prev, chain.verts[i], pA, pB) &&
-          sidedTris(m, adj, chain.verts[i], next, nA2, nB2))
-        station.slack = std::max(mitreSlack(m.tris[pA].normal, m.tris[nA2].normal, lever),
-                                 mitreSlack(m.tris[pB].normal, m.tris[nB2].normal, lever));
+    // A point the brushes left out is carried as an invalid placeholder rather
+    // than left out of the list, so the ends of the list are still the ends of
+    // the chain — which is what the callers that exempt them are asking about.
+    ChainContact station;
+    if (isBuilt(static_cast<double>(i))) {
+      station = contactAt(stations[i], chain.verts[i]);
+    } else {
+      station.v = stations[i].v;
+      station.vert = chain.verts[i];
     }
     out.push_back(std::move(station));
     if (i >= segments || samplesPerSegment <= 0) continue;
@@ -631,56 +746,22 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
       s.nA.normalize();
       s.nB.normalize();
       s.valid = true;
-      ChainContact sample = contactAt(s, -1);
-      if (sample.valid) {
-        const double lever = (sample.C - sample.v).norm() + sample.radius;
-        sample.slack = std::max(mitreSlack(s.nA, m.tris[segA].normal, lever),
-                                mitreSlack(s.nB, m.tris[segB].normal, lever));
+      if (!isBuilt(static_cast<double>(i) + t)) {
+        ChainContact skipped;
+        skipped.v = s.v;
+        out.push_back(std::move(skipped));
+        continue;
       }
-      out.push_back(std::move(sample));
+      out.push_back(contactAt(s, -1));
     }
   }
   return out;
 }
 
-// Distance from a point to a closed triangle: the usual region test on the
-// barycentric coordinates, then the distance to whichever feature (face, edge or
-// corner) turned out to be nearest.
 double pointTriangleDistance(const Vector3d& p, const Vector3d& a, const Vector3d& b,
                              const Vector3d& c)
 {
-  const Vector3d ab = b - a, ac = c - a, ap = p - a;
-  const double d1 = ab.dot(ap), d2 = ac.dot(ap);
-  if (d1 <= 0 && d2 <= 0) return ap.norm();
-
-  const Vector3d bp = p - b;
-  const double d3 = ab.dot(bp), d4 = ac.dot(bp);
-  if (d3 >= 0 && d4 <= d3) return bp.norm();
-
-  const double vc = d1 * d4 - d3 * d2;
-  if (vc <= 0 && d1 >= 0 && d3 <= 0) {
-    const double t = d1 / (d1 - d3);
-    return (p - (a + t * ab)).norm();
-  }
-
-  const Vector3d cp = p - c;
-  const double d5 = ab.dot(cp), d6 = ac.dot(cp);
-  if (d6 >= 0 && d5 <= d6) return cp.norm();
-
-  const double vb = d5 * d2 - d1 * d6;
-  if (vb <= 0 && d2 >= 0 && d6 <= 0) {
-    const double t = d2 / (d2 - d6);
-    return (p - (a + t * ac)).norm();
-  }
-
-  const double va = d3 * d6 - d5 * d4;
-  if (va <= 0 && (d4 - d3) >= 0 && (d5 - d6) >= 0) {
-    const double t = (d4 - d3) / ((d4 - d3) + (d5 - d6));
-    return (p - (b + t * (c - b))).norm();
-  }
-
-  const double denom = 1.0 / (va + vb + vc);
-  return (p - (a + ab * (vb * denom) + ac * (vc * denom))).norm();
+  return (p - closestPointOnTriangle(p, a, b, c)).norm();
 }
 
 std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
@@ -692,13 +773,6 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
   if (!(size > 0) || chains.empty()) return verdicts;
 
   const std::vector<int> surfaceOf = smoothSurfaces(m, adj, thresholdDeg);
-  std::vector<std::vector<int>> surfaceTris;
-  for (size_t t = 0; t < surfaceOf.size(); ++t) {
-    if (surfaceOf[t] < 0) continue;
-    if (static_cast<size_t>(surfaceOf[t]) >= surfaceTris.size())
-      surfaceTris.resize(surfaceOf[t] + 1);
-    surfaceTris[surfaceOf[t]].push_back(static_cast<int>(t));
-  }
 
   std::vector<std::vector<ChainContact>> contacts;
   contacts.reserve(chains.size());
@@ -706,26 +780,14 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
     contacts.push_back(chainContacts(m, adj, chain, size, concave, wedge, surfaceOf,
                                      /*samplesPerSegment=*/3));
 
-  // A contact point computed from averaged normals does not sit exactly on a
-  // tessellated wall: the average leans away from each facet by up to half a
-  // seam angle, so the point misses the surface by about that much of the
-  // radius. The crease threshold is the largest seam the tessellation can
-  // produce, which makes it the bound on that miss, and it also swallows the
-  // float noise the plan asks be clamped silently rather than dropped.
+  // The crowding question is asked of a distance between two contact points, and
+  // those sit on a tessellated wall: each is within about half a seam angle of
+  // where the smooth surface would put it. The crease threshold is the largest
+  // seam the tessellation can produce, which makes it the bound on that, and it
+  // also swallows the float noise the plan asks be clamped silently rather than
+  // dropped.
   const double faceTol =
     std::max(size * (1.0 - std::cos(thresholdDeg * M_PI / 180.0)), 1e-9 * size);
-
-  auto offSurface = [&](const Vector3d& p, int surface, double tol) {
-    if (surface < 0 || static_cast<size_t>(surface) >= surfaceTris.size()) return 0.0;
-    double best = std::numeric_limits<double>::infinity();
-    for (const int t : surfaceTris[surface]) {
-      const Tri& tri = m.tris[t];
-      best = std::min(best, pointTriangleDistance(p, m.pos[tri.v[0]], m.pos[tri.v[1]],
-                                                  m.pos[tri.v[2]]));
-      if (best <= tol) break;
-    }
-    return best <= tol ? 0.0 : best;
-  };
 
   std::vector<std::set<int>> chainVerts(chains.size());
   for (size_t ci = 0; ci < chains.size(); ++ci)
@@ -779,9 +841,9 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
   for (size_t ci = 0; ci < chains.size(); ++ci) {
     SizeVerdict& verdict = verdicts[ci];
 
-    // Does the tool still touch the walls it is blending? A contact point past
-    // the far side of its wall means the blend hangs in space there, and no
-    // blend of the size asked for exists there at all.
+    // Does the tool still touch the walls it is blending? A ball whose nearest
+    // point on a wall is on that wall's boundary has reached the end of it, and
+    // no blend of the size asked for exists there at all.
     //
     // Not at the two ends of an open chain, though. A crease that stops does so
     // at the boundary of its own walls — at a junction, or where the feature
@@ -800,11 +862,8 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
       for (const Vector3d& p : junctionPos)
         if ((c.v - p).norm() < junctionReach) { nearJunction = true; break; }
       if (nearJunction) continue;
-      const double tol = faceTol + c.slack;
-      const double a =
-        std::max(offSurface(c.TA, c.surfaceA, tol), offSurface(c.TB, c.surfaceB, tol));
-      if (a > 0.0) {
-        verdict = {SizeFault::OffFace, c.v, a};
+      if (c.offFace > 0.0) {
+        verdict = {SizeFault::OffFace, c.v, c.offFace};
         break;
       }
     }
@@ -1732,40 +1791,20 @@ std::shared_ptr<const Geometry> buildFilletTool(
     return nullptr;
   }
 
-  // A size the feature cannot carry is refused, one crease at a time, and never
-  // quietly resized: a clamp would have to be agreed with every crease this one
-  // meets, and following that through runs a minimum over the whole connected
-  // network, so one tight corner would shrink a fillet on the far side of the
-  // part where nobody is looking.
-  const std::vector<SizeVerdict> verdicts =
-    checkChainSizes(m, adj, chains, node.size, wantConcave, isWedgeOnly, thresholdDeg);
-  std::vector<Chain> usable;
-  for (size_t ci = 0; ci < chains.size(); ++ci) {
-    const SizeVerdict& verdict = verdicts[ci];
-    if (verdict.fault == SizeFault::Fits) {
-      usable.push_back(chains[ci]);
-      continue;
-    }
-    LOG(message_group::Warning, node.modinst->location(), "",
-        "%1$s: %2$s %3$g does not fit the crease at [%4$.4g, %5$.4g, %6$.4g] - %7$s. "
-        "That crease is dropped; the size is never clamped to make it fit.",
-        node.name(), isWedgeOnly ? "setback" : "radius", node.size, verdict.where.x(),
-        verdict.where.y(), verdict.where.z(),
-        verdict.fault == SizeFault::OffFace
-          ? STR("the blend would leave the surface it is meant to meet, by ", verdict.amount)
-          : STR("another feature ", verdict.amount, " away needs the same material"));
-  }
-
   // The brushes narrow what is built to the stretches of crease they cover. They
   // are asked about the spine rather than about the tool's volume, so what comes
   // back is a set of parameter intervals and the bead ends on a flat cap square
   // to the crease, at a fixed physical point that does not move when the target
   // is retessellated.
   //
-  // This comes after the size gate rather than before it, so a crease that
-  // cannot carry the size is refused whether or not a brush picks it out: the
-  // gate's question is about the crease and the model around it, and selecting
-  // half of one does not make the size fit there.
+  // This comes before the size gate, so that the gate is asked about the bead
+  // that is actually going to be built. Whether the blend still meets the
+  // surface it is meant to meet is a question about a place on the crease, and
+  // selecting half of one genuinely does change the answer: the half that runs
+  // off the end of its face is not being built, and refusing the half that fits
+  // — with a warning naming a crease the user never picked out — is refusing
+  // work nobody asked for.
+  std::vector<Chain> usable = chains;
   if (brush && !brush->isEmpty()) {
     const BrushVolume volume(brush->getManifold().GetMeshGL64());
     // A brush face nearly tangent to the spine crosses it twice a hair apart.
@@ -1806,10 +1845,9 @@ std::shared_ptr<const Geometry> buildFilletTool(
       selected.push_back(std::move(chain));
     }
 
-    // Only blame the brush when there was something for it to miss. Candidates
-    // are counted after the size gate, so a target whose creases were all
-    // refused arrives here with none left, and saying the brush covered zero of
-    // zero would put a second, wrong diagnosis on top of the right ones.
+    // Only blame the brush when there was something for it to miss. A target
+    // with no crease of this sign has already said so and returned, so what is
+    // left here is a brush that really did cover none of them.
     if (selected.empty() && candidates > 0)
       LOG(message_group::Warning, node.modinst->location(), "",
           "%1$s: the selection brush covers none of the %2$d candidate edge(s); nothing is built. "
@@ -1822,6 +1860,31 @@ std::shared_ptr<const Geometry> buildFilletTool(
 
     usable = std::move(selected);
   }
+
+  // A size the feature cannot carry is refused, one crease at a time, and never
+  // quietly resized: a clamp would have to be agreed with every crease this one
+  // meets, and following that through runs a minimum over the whole connected
+  // network, so one tight corner would shrink a fillet on the far side of the
+  // part where nobody is looking.
+  const std::vector<SizeVerdict> verdicts =
+    checkChainSizes(m, adj, usable, node.size, wantConcave, isWedgeOnly, thresholdDeg);
+  std::vector<Chain> fitting;
+  for (size_t ci = 0; ci < usable.size(); ++ci) {
+    const SizeVerdict& verdict = verdicts[ci];
+    if (verdict.fault == SizeFault::Fits) {
+      fitting.push_back(std::move(usable[ci]));
+      continue;
+    }
+    LOG(message_group::Warning, node.modinst->location(), "",
+        "%1$s: %2$s %3$g does not fit the crease at [%4$.4g, %5$.4g, %6$.4g] - %7$s. "
+        "That crease is dropped; the size is never clamped to make it fit.",
+        node.name(), isWedgeOnly ? "setback" : "radius", node.size, verdict.where.x(),
+        verdict.where.y(), verdict.where.z(),
+        verdict.fault == SizeFault::OffFace
+          ? STR("the blend would leave the surface it is meant to meet, by ", verdict.amount)
+          : STR("another feature ", verdict.amount, " away needs the same material"));
+  }
+  usable = std::move(fitting);
 
   // A corner the solve refuses — walls too nearly parallel to pin a point down,
   // or a ball seated so far from the vertex that the answer is not a corner of

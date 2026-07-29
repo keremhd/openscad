@@ -1085,6 +1085,66 @@ TEST_CASE("size: creases closer together than the tool's reach are refused")
       CHECK(over.verdicts[i].where.x() < 15.0);
 }
 
+TEST_CASE("size: a wall's own curvature is not an overshoot")
+{
+  // A dome standing on a plate: one closed concave crease, where the sphere
+  // meets the top face, and room to spare on both walls. Stepping off the ball
+  // centre along a wall normal to find the contact point assumes the wall flat,
+  // and on a doubly curved one it lands off the surface by the sagitta, r^2/2R
+  // — 0.0625 at r = 1 on this R = 8 dome, and four times that at r = 2 — which
+  // is a miss of the construction, not of the model, and no finer tessellation
+  // reduces it. Asking the wall for its nearest point instead puts the contact
+  // on the dome, and the question becomes whether that point is inside the wall
+  // or on its rim.
+  const auto dome = box(40.0, 40.0, 10.0) + manifold::Manifold::Sphere(8.0, 64)
+                                              .Translate(manifold::vec3(20.0, 20.0, 10.0));
+  for (const double r : {0.3, 1.0, 2.0}) {
+    const SizeRun run = sizeRun(dome, r, /*concave=*/true);
+    REQUIRE(run.chains.size() == 1);
+    CHECK(run.verdicts[0].fault == SizeFault::Fits);
+  }
+
+  // And the gate has not gone quiet on the curved wall: crowd the same crease
+  // against the edge of a plate that barely holds the dome, and it is refused
+  // for having run off it.
+  const auto perched = box(18.0, 18.0, 10.0).Translate(manifold::vec3(11.0, 11.0, 0.0)) +
+                       manifold::Manifold::Sphere(8.0, 64).Translate(manifold::vec3(20.0, 20.0, 10.0));
+  const SizeRun over = sizeRun(perched, 2.0, /*concave=*/true);
+  REQUIRE(over.chains.size() == 1);
+  CHECK(over.verdicts[0].fault == SizeFault::OffFace);
+}
+
+TEST_CASE("size: only the stretch of crease the brushes kept is asked about")
+{
+  // The spike's slant creases run out of room for a radius of 1 above z = 80,
+  // and are refused whole. A brush that picks out the lower half picks out the
+  // half that has the room, so there is nothing left to refuse — the bead the
+  // user asked for is buildable, and warning about the part of the crease they
+  // did not select would be refusing work nobody asked for.
+  const auto needle = manifold::Manifold::Cylinder(120.0, 3.0, 0.0, 3, false);
+  const MergedMesh mm = mergeMesh(needle.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 20.0, /*wantConcave=*/false));
+  REQUIRE(chains.size() == 6);
+
+  const auto whole = checkChainSizes(mm, adj, chains, 1.0, /*concave=*/false, false, 20.0);
+  CHECK(countFault(whole, SizeFault::OffFace) == 3);
+
+  const auto low = box(20.0, 20.0, 60.0).Translate(manifold::vec3(-10.0, -10.0, -10.0));
+  const auto lowChains = brushed(mm, chains, low, 1.0);
+  REQUIRE(lowChains.size() == 6);
+  CHECK(countFault(checkChainSizes(mm, adj, lowChains, 1.0, false, false, 20.0),
+                   SizeFault::Fits) == 6);
+
+  // The other half is still refused, and the sample it is refused at is one the
+  // brush kept rather than wherever on the crease the room first ran out.
+  const auto high = box(20.0, 20.0, 40.0).Translate(manifold::vec3(-10.0, -10.0, 90.0));
+  const auto highChains = brushed(mm, chains, high, 1.0);
+  const auto verdicts = checkChainSizes(mm, adj, highChains, 1.0, false, false, 20.0);
+  CHECK(countFault(verdicts, SizeFault::OffFace) == highChains.size());
+  for (const auto& v : verdicts) CHECK(v.where.z() > 90.0);
+}
+
 TEST_CASE("size: a cube's rounds are limited by the edge across the face")
 {
   // Nothing is off its face here — r = 30 reaches back only 30 of the 40 mm
