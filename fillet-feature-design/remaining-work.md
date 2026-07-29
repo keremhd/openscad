@@ -30,7 +30,7 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
    [`log-2026-07-29-d2.md`](log-2026-07-29-d2.md). Two `sandwich` lines it was
    expected to clear turn out to be a different problem and are still red.
 4. ~~**M12**~~ — **done.** The C++ node, as overruled; see below for the one
-   thing the design did not anticipate and the one parameter left off.
+   thing the design did not anticipate, and for the parameter it gained.
 5. **T2** — the last case worth building.
 6. **DOC**, then **CLEAN**.
 
