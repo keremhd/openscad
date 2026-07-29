@@ -52,7 +52,9 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
    and a stretch reaching a corner it does not cover is dropped with the corner.
    See below, and [`log-2026-07-30-brush-width.md`](log-2026-07-30-brush-width.md),
    which also records D9 and D10 re-measured.
-11. **DOC**, then **CLEAN**.
+11. **D11** — an L bracket's only concave crease is refused by `4.4e-16`, so
+   `fillet()` on the shape everyone will try first builds no inner blend.
+12. **DOC**, then **CLEAN**.
 
 ---
 
@@ -1388,6 +1390,42 @@ there, and would have to say something else.
    artifact would otherwise break a documented recipe with no test in the way.
 
 Note the two tests are cheap — they are builder-level, not renders.
+
+---
+
+## D11 — a crease that runs to the edge of its wall is refused by zero
+
+**A false refusal at float-noise magnitude, on the most ordinary shape the
+feature has.** An L bracket — two slabs, one reflex crease running the full
+length of both — loses that crease, which is the only concave one it has, so
+`fillet()` builds no inner blend at all:
+
+```
+WARNING: fillet: radius 2 does not fit the crease at [0, 10, 12] - the blend
+         would leave the surface it is meant to meet, by 4.44089e-16.
+```
+
+`4.44e-16` is zero. The point named is the crease's own **endpoint**, where it
+reaches the open face, so the contact point there lands exactly on the wall's
+boundary rather than inside it — which is the off-face test's pass/fail line, met
+exactly, and decided by the last bit of a double.
+
+Measured: it fires on every straight L tried — `30x10x26 + 30x26x12`,
+`20x6x26 + 20x26x6` — at `r = 1` and `r = 2` alike, so it is not radius
+dependent. A curved elbow of the same proportions is clean, and the L shapes in
+the existing figures escape only because their creases run in the extrusion
+direction.
+
+The gate already exempts the ends of a chain from the touching question for this
+exact reason. Either that exemption is not reaching this sample, or the boundary
+comparison needs to accept "on the boundary" rather than requiring strictly
+inside. Whichever it is, the fix is small and the symptom is large: the headline
+example of the whole feature, `fillet(r) l_bracket()`, silently does half its job.
+
+**Acceptance:** `fillet(r = 2)` on `cube([30,10,26]); cube([30,26,12]);` builds
+the inner bead along the full reflex crease with no warning. Every existing
+`drop` variant stays refused for its stated reason — this must not become a
+loosened tolerance.
 
 ---
 
