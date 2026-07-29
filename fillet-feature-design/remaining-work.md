@@ -47,10 +47,11 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
 9. ~~**D10**~~ — **done, and it was not a width threshold.** A spine that meets a
    brush face exactly on the line between its two triangles could be caught by
    neither. See below.
-10. **BRUSH-WIDTH** — now a bug, not a tidy-up: a brush containing the entire
-   model can build nothing, with a warning saying the opposite. Reproduction in
-   the section. Fix by scoping the length test to the interval's endpoints, then
-   the two builder tests. Take it after D9 so beads and corners share one rule.
+10. ~~**BRUSH-WIDTH**~~ — **done, with one row of its table changed and the
+   warning scoped.** The length test is scoped to the stretches the brush cut,
+   and a stretch reaching a corner it does not cover is dropped with the corner.
+   See below, and [`log-2026-07-30-brush-width.md`](log-2026-07-30-brush-width.md),
+   which also records D9 and D10 re-measured.
 11. **DOC**, then **CLEAN**.
 
 ---
@@ -906,6 +907,16 @@ Every existing `drop` variant stays refused for its stated reason.
 
 ## D9 — a corner cell is built at full size however little of it the brush covers — **DONE**
 
+**Re-measured 2026-07-30, and correct, including the excuse.** Built one chain at
+a time, each bead spans exactly `[0, D]` along its own crease at `D` = 0.5, 1, 2,
+3 and 6, with volume linear in `D` — so the per-spine claim below holds and the
+bounding-box confounding it blames is real (any one bead's box reads `r` across
+the other two directions). The junction appears at `D = r` and not before. The
+volume table below does not reproduce as printed — 24 arc segments give 1.68,
+1.70, 13.52 and 31.69 against its 2.06, 2.08, 14.83 and 35.59 — same ratios, same
+conclusions, different tessellation, which the table should have recorded. Details
+in [`log-2026-07-30-brush-width.md`](log-2026-07-30-brush-width.md).
+
 Done as written, in the one place it belongs: `endAnchored` no longer asks
 whether the selection arrives at the end vertex but whether it covers `r` of
 crease measured back from it, walked station by station because segments differ
@@ -961,6 +972,13 @@ WARNING: round_tool: the brush reaches the corner at [0, 0, 20] but covers less
 
 `uncoveredCorners` is what finds them: three or more ends land on the vertex and
 are selected up to it, fewer than three cover the setback.
+
+**Both paragraphs above are superseded by BRUSH-WIDTH, which has landed.** The
+beads are dropped with the corner now, `uncoveredCorners` is
+`dropUncoveredCorners`, and the warning reads "nothing is built there" and only
+fires where nothing at that vertex was covered. The test named in the acceptance
+below absorbed D7's and no longer checks beads stopping at the brush below the
+threshold, because there are none.
 
 **What this does to D7.** On a cube, D7's collapse is now unreachable from the
 brush: a selection that maps to nothing had to lie inside the truncation, and a
@@ -1031,6 +1049,12 @@ junction more tightly than the setback.
 ---
 
 ## D10 — a brush thinner than about 0.5 mm loses its cut along the spine — **DONE, and the width was a red herring**
+
+**Re-measured 2026-07-30, and correct.** With `kEdgeSlack` set to zero the test
+fails on its first width — zero crossings where it needs one — so the fix is held
+rather than merely present. The non-monotonicity is exactly as described below;
+the test's own comment implied a threshold and has been reworded. Table in
+[`log-2026-07-30-brush-width.md`](log-2026-07-30-brush-width.md).
 
 The section below says to find the tolerance before choosing a fix. **There is no
 tolerance, and there is no threshold.** Extending the measurement past the five
@@ -1124,7 +1148,49 @@ nothing rather than select-and-not-bound.
 
 ---
 
-## BRUSH-WIDTH — pin what a narrow brush does, and say it on purpose
+## BRUSH-WIDTH — pin what a narrow brush does, and say it on purpose — **DONE**
+
+Done, and two things about it are not as the sketch below expects. Both are in
+[`log-2026-07-30-brush-width.md`](log-2026-07-30-brush-width.md) with the
+measurements; in short:
+
+**Row 2 of the table keeps the debounce.** The sketch argues that a chain-ended
+interval cannot be the tangency artefact and so needs no length test. `brush: a
+graze too short to be a bead is dropped` is a counterexample already in the tree:
+its 0.001 mm slab straddles the crease's start vertex, so the stub it leaves is
+chain-ended at one end and is still the artefact. One cut end is enough to ask
+the question. The exemption is therefore scoped to a stretch the brush cut at
+*neither* end — the whole crease, selected entire — which is the row the reported
+bug is in, and the L reproduction below now builds the same tool as the unbrushed
+call, byte for byte.
+
+**Row 2's corner rule is in, and its warning had to be scoped.**
+`dropUncoveredCorners` (replacing `uncoveredCorners`) drops every stretch that
+reaches a corner without covering `r` of crease back from it, so `D < r` at a
+corner now builds nothing rather than three stubs — which is what D9 left to this
+item. But warning at every such corner would fire on the single-edge recipe,
+whose four neighbour stubs are dropped by exactly this rule: precisely the case
+this item's own text says not to warn about. So the warning is scoped to a corner
+where *nothing* was covered — a brush drawn around a corner and answered with
+silence — and a corner some crease through it does cover is silent, with the echo
+line's edge count reporting the drop.
+
+That scoping is what makes the recipe writable with a brush a model can draw:
+1 of 12 at every width up to just under `2 r` across, 5 of 12 above it, the limit
+being how far the brush reaches *from* the edge. The doc page no longer needs the
+0.02 mm column and no longer explains the recipe by the debounce, which had
+become the wrong reason.
+
+`minLength` is `debounce` now, at both ends, and the comment at the constant says
+nothing rests on its value — the sketch's item 3 asked for the opposite, because
+when it was written the constant was what made the recipe work.
+
+The three "Do" items below are done as written except item 0, which is the row
+above, and item 3, which inverted with it. The sketch follows unchanged.
+
+---
+
+## BRUSH-WIDTH — pin what a narrow brush does, and say it on purpose (as written)
 
 Found while writing the doc figures, measured, and currently correct but
 unpinned and unstated.

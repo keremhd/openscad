@@ -787,10 +787,18 @@ namespace {
 // it lands at a parameter that can be read off by hand.
 manifold::Manifold floorAndWall() { return box(10.0, 10.0, 1.0) + box(1.0, 10.0, 10.0); }
 
-// What buildFilletTool does with the node's brush children: drop the chains the
-// brush misses, and give each of the rest the stretches of itself it covers.
-std::vector<Chain> brushed(const MergedMesh& mm, const std::vector<Chain>& chains,
-                           const manifold::Manifold& brush, double size)
+// An L whose two faces are `arm` long: one concave crease, and the only thing
+// limiting the size is how far each face reaches.
+manifold::Manifold ell(double arm, double thickness, double height)
+{
+  return box(arm, thickness, height) + box(thickness, arm, height);
+}
+
+// What buildFilletTool does with the node's brush children, in two halves. The
+// selection the node makes before it asks about corners: every chain the brush
+// covers any part of, carrying the stretches of itself it covers.
+std::vector<Chain> selection(const MergedMesh& mm, const std::vector<Chain>& chains,
+                             const manifold::Manifold& brush, double size)
 {
   const BrushVolume volume(brush.GetMeshGL64());
   std::vector<Chain> out;
@@ -806,6 +814,40 @@ std::vector<Chain> brushed(const MergedMesh& mm, const std::vector<Chain>& chain
     out.push_back(std::move(chain));
   }
   return out;
+}
+
+// And the whole of what the node does with a brush: the selection above, with
+// the stretches that arrive at a corner without covering it dropped.
+std::vector<Chain> brushed(const MergedMesh& mm, const std::vector<Chain>& chains,
+                           const manifold::Manifold& brush, double size)
+{
+  std::vector<Chain> out = selection(mm, chains, brush, size);
+  dropUncoveredCorners(mm, out, size);
+  return out;
+}
+
+// How many edges a selection takes, the way the echo line counts them: an edge
+// any part of a kept interval overlaps.
+size_t takenEdges(const std::vector<Chain>& chains)
+{
+  size_t taken = 0;
+  for (const Chain& chain : chains) {
+    const size_t n = chain.verts.size();
+    const size_t segments = n < 2 ? 0 : (chain.closed ? n : n - 1);
+    if (chain.keep.empty()) {
+      taken += segments;
+      continue;
+    }
+    for (size_t i = 0; i < segments; ++i)
+      for (const SpineInterval& iv : chain.keep)
+        if (std::min(iv.second, static_cast<double>(i) + 1.0) -
+              std::max(iv.first, static_cast<double>(i)) >
+            1e-12) {
+          ++taken;
+          break;
+        }
+  }
+  return taken;
 }
 
 }  // namespace
@@ -895,8 +937,10 @@ TEST_CASE("brush: a spine down the middle of a brush face is still cut by it")
   // — the bead runs to the end of the chain instead of stopping at the brush.
   //
   // Whether it is lost depends on the magnitudes in the arithmetic, so it comes
-  // and goes with the width of the column: measured over these widths, every one
-  // at or below 0.4 lost it and every one above kept it.
+  // and goes with the width of the column, and not in any order: tested exactly,
+  // 0.25 and 0.35 keep the crossing while 0.2, 0.3, 0.4 and 0.45 lose it. There
+  // is no width to look for, which is why the fix is in the intersection and not
+  // a threshold — the widths below are a spread, not a boundary.
   for (const double w : {0.02, 0.2, 0.3, 0.4, 0.5, 1.0, 4.0}) {
     const BrushVolume volume(column(w, -1.0, 14.0));
 
@@ -943,6 +987,11 @@ TEST_CASE("brush: a graze too short to be a bead is dropped")
   // A brush face nearly tangent to the spine crosses it twice a hair apart. The
   // stub of bead that would leave is never what anyone asked for, and the user
   // sees nothing built rather than a sliver they cannot find.
+  //
+  // One cut end is enough to ask the question. The graze here happens to sit on
+  // the crease's own start vertex, so the stub it leaves runs from there — and it
+  // is still an artefact of a brush face crossing the spine twice, not a crease
+  // the brush took whole.
   const auto model = floorAndWall();
   const MergedMesh mm = mergeMesh(model.GetMeshGL64());
   const auto adj = buildEdgeAdjacency(mm.tris);
@@ -951,9 +1000,40 @@ TEST_CASE("brush: a graze too short to be a bead is dropped")
 
   const auto sliver = box(20.0, 0.001, 20.0).Translate(manifold::vec3(-5.0, -0.0005, -5.0));
   const BrushVolume volume(sliver.GetMeshGL64());
-  CHECK(chainSelection(mm, chains[0], volume, /*minLength=*/0.005).empty());
+  CHECK(chainSelection(mm, chains[0], volume, /*debounce=*/0.005).empty());
   // The same graze is a real selection when the tool is small enough for it.
-  CHECK(chainSelection(mm, chains[0], volume, /*minLength=*/1e-6).size() == 1);
+  CHECK(chainSelection(mm, chains[0], volume, /*debounce=*/1e-6).size() == 1);
+}
+
+TEST_CASE("brush: a crease selected end to end is kept however short it is")
+{
+  // The debounce is about what a brush cut, so it has nothing to say about a
+  // crease the brush did not cut at all. A brush that contains the whole model
+  // has to be a no-op, and it stops being one the moment the crease it contains
+  // is shorter than a hundredth of the size — which needs the crease's length to
+  // be independent of the room the blend has, and on a long thin L it is: the
+  // arms give the blend all the room it needs while the crease is only as long as
+  // the plate is thick.
+  const double r = 400.0;
+  const auto part = ell(1000.0, 5.0, 2.0);  // one concave crease, 2 long
+  const MergedMesh mm = mergeMesh(part.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/true));
+  REQUIRE(chains.size() == 1);
+
+  // A brush swallowing the model whole, against a debounce of 0.01 * 400 = 4.
+  const auto everything =
+    box(18000.0, 18000.0, 18000.0).Translate(manifold::vec3(-9000.0, -9000.0, -9000.0));
+  const auto selected = brushed(mm, chains, everything, r);
+  REQUIRE(selected.size() == 1);
+  // Covered end to end, which is carried as no intervals at all: the same state
+  // the unbrushed path is in, and the reason the two build the same thing.
+  CHECK(selected[0].keep.empty());
+
+  const auto bare = buildRoundSolid(mm, adj, chains, r, /*concave=*/true, 24);
+  const auto brushedTool = buildRoundSolid(mm, adj, selected, r, /*concave=*/true, 24);
+  REQUIRE_FALSE(bare.IsEmpty());
+  CHECK(brushedTool.Volume() == Approx(bare.Volume()));
 }
 
 TEST_CASE("brush: the clipped bead is the whole bead cut by the brush")
@@ -1100,14 +1180,16 @@ TEST_CASE("brush: a corner one crease is cut short of gets no corner cell")
   CHECK(tool.BoundingBox().max[2] == Approx(7.0).margin(1e-9));
 }
 
-TEST_CASE("brush: a selection swallowed by the junction setback builds no bead")
+TEST_CASE("brush: a corner the brush reaches but does not cover is not built")
 {
-  // A brush reaching the corner by less than the setback the junction truncates
-  // each spine by selects a stretch that no longer has any sections in it: what
-  // it asked for is already inside the corner cell. That has to build nothing
-  // along the creases, not everything — the empty selection is the map of a real
-  // one, and the whole-chain reading of an empty list is for chains no brush
-  // touched at all.
+  // A corner cell is a fixed size: it is hulled from the seated ball and the
+  // sections the beads stop at, and there is no perpendicular to clip it against
+  // in three directions at once. So a brush that reaches the vertex by a fraction
+  // of the setback and gets the whole cell is the brush contract broken by the
+  // rest of it — while along an edge the same brush is honoured exactly. The rule
+  // is therefore coverage of the setback, not arrival at the vertex; and short of
+  // it the stretches that would have met in the cell go too, since a bead ending
+  // inside the corner it was asked to close meets nothing there.
   const double r = 3.0;
   const auto cube = box(20.0, 20.0, 20.0);
   const MergedMesh mm = mergeMesh(cube.GetMeshGL64());
@@ -1115,79 +1197,116 @@ TEST_CASE("brush: a selection swallowed by the junction setback builds no bead")
   const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/false));
   REQUIRE(chains.size() == 12);
 
-  // Reaching 2 mm past the origin corner, against a setback of r = 3 at a
-  // 90-degree crease.
-  const auto brush = box(5.0, 5.0, 5.0).Translate(manifold::vec3(-3.0, -3.0, -3.0));
-  const auto selected = brushed(mm, chains, brush, r);
-  REQUIRE(selected.size() == 3);
+  // Two boxes on the same corner, one reaching 2 mm down each edge from it and
+  // one reaching 6. Both cover part of the same three creases.
+  for (const double D : {2.0, 6.0}) {
+    const auto brush =
+      box(D + 1.0, D + 1.0, D + 1.0).Translate(manifold::vec3(-1.0, -1.0, 20.0 - D));
+    auto selected = selection(mm, chains, brush, r);
+    REQUIRE(selected.size() == 3);
 
-  const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24);
-  REQUIRE_FALSE(tool.IsEmpty());
-  // Nothing runs the length of an edge: the tool stays inside the corner it was
-  // pointed at. The whole-chain reading would take all three creases end to end.
-  CHECK(tool.BoundingBox().max[0] < 5.0);
-  CHECK(tool.BoundingBox().max[1] < 5.0);
-  CHECK(tool.BoundingBox().max[2] < 5.0);
+    const auto uncovered = dropUncoveredCorners(mm, selected, r);
+    const auto junctions = chainJunctions(mm, adj, selected, r, /*concave=*/false);
+    const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24);
 
-  // And it removes less than the same corner asked for over a stretch that does
-  // survive the mapping, rather than nine times more.
-  const auto wide = box(20.0, 20.0, 20.0).Translate(manifold::vec3(-3.0, -3.0, -3.0));
-  const auto full = buildRoundSolid(mm, adj, brushed(mm, chains, wide, r), r,
-                                    /*concave=*/false, 24);
-  const double removed = (cube - (cube - tool)).Volume();
-  const double removedFull = (cube - (cube - full)).Volume();
-  CHECK(removed < removedFull);
-
-  // A brush this far inside the setback no longer gets a corner cell either —
-  // covering the vertex is not covering the stretch a corner occupies — so what
-  // is left here is three short beads meeting unclosed. Still one solid.
-  const auto rounded = cube - tool;
-  REQUIRE_FALSE(rounded.IsEmpty());
-  CHECK(rounded.Genus() == 0);
+    if (D < r) {
+      REQUIRE(uncovered.size() == 1);
+      CHECK(mm.pos[uncovered[0]].isApprox(Vector3d(0.0, 0.0, 20.0)));
+      // Nothing at all: no cell, and none of the three stretches that ran into
+      // it. Reading the emptied selection as "no brush" instead would round all
+      // three creases end to end, which is thirty times the material and the
+      // opposite of what was asked for.
+      CHECK(selected.empty());
+      CHECK(junctions.empty());
+      CHECK(tool.IsEmpty());
+    } else {
+      REQUIRE_FALSE(tool.IsEmpty());
+      CHECK(uncovered.empty());
+      REQUIRE(junctions.size() == 1);
+      CHECK(mm.pos[junctions[0].vert].isApprox(Vector3d(0.0, 0.0, 20.0)));
+      CHECK(tool.Volume() > 30.0);
+      // And the beads run out exactly as far as the brush does, not to the
+      // setback: 6 mm down each edge from the vertex.
+      CHECK(tool.BoundingBox().min[2] == Approx(20.0 - D).margin(1e-6));
+      // The corner closes: a cube with one corner rounded is still one solid.
+      const auto rounded = cube - tool;
+      REQUIRE_FALSE(rounded.IsEmpty());
+      CHECK(rounded.Genus() == 0);
+    }
+  }
 }
 
-TEST_CASE("brush: a corner the brush reaches but does not cover is not built")
+TEST_CASE("brush: width selects the crease and does not shape the blend")
 {
-  // A corner cell is a fixed size: it is hulled from the seated ball and the
-  // sections the beads stop at, and there is no perpendicular to clip it against
-  // in three directions at once. So a brush that reaches the vertex by a
-  // fraction of the setback and gets the whole cell is the brush contract broken
-  // by the rest of it — while along an edge the same brush is honoured exactly.
-  // The rule is therefore coverage of the setback, not arrival at the vertex.
+  // A brush clips the spine, not the section. So the blend along a selected
+  // stretch is the full requested profile however narrow the brush is across the
+  // crease — which is what makes a brush a selection and not a cutting tool, and
+  // what lets the documentation promise that a brush can be as thin as it likes.
   const double r = 3.0;
   const auto cube = box(20.0, 20.0, 20.0);
   const MergedMesh mm = mergeMesh(cube.GetMeshGL64());
   const auto adj = buildEdgeAdjacency(mm.tris);
   const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/false));
 
-  // Two boxes on the same corner, one reaching 2 mm down each edge from it and
-  // one reaching 6. Both select the same three creases.
-  for (const double D : {2.0, 6.0}) {
-    const auto brush =
-      box(D + 1.0, D + 1.0, D + 1.0).Translate(manifold::vec3(-1.0, -1.0, 20.0 - D));
+  // The same 10 mm of one vertical edge, taken by a hair and by a slab 400 times
+  // wider. Both stop short of either end face, so neither reaches a corner.
+  double reference = 0.0;
+  for (const double w : {0.02, 8.0}) {
+    const auto brush = manifold::Manifold(column(w, 5.0, 15.0));
     const auto selected = brushed(mm, chains, brush, r);
-    REQUIRE(selected.size() == 3);
-
-    const auto junctions = chainJunctions(mm, adj, selected, r, /*concave=*/false);
-    const auto uncovered = uncoveredCorners(mm, selected, r);
+    REQUIRE(selected.size() == 1);
     const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24);
     REQUIRE_FALSE(tool.IsEmpty());
+    // Square-capped at the brush at both ends, so the volume is the section area
+    // times the 10 mm selected, whichever brush cut it.
+    CHECK(tool.BoundingBox().min[2] == Approx(5.0).margin(1e-6));
+    CHECK(tool.BoundingBox().max[2] == Approx(15.0).margin(1e-6));
+    if (reference == 0.0) reference = tool.Volume();
+    else CHECK(tool.Volume() == Approx(reference).epsilon(1e-9));
+  }
+}
 
-    if (D < r) {
-      CHECK(junctions.empty());
-      REQUIRE(uncovered.size() == 1);
-      CHECK(mm.pos[uncovered[0]].isApprox(Vector3d(0.0, 0.0, 20.0)));
-      // The cell alone is an order of magnitude more than this; what is left is
-      // three beads two millimetres long.
-      CHECK(tool.Volume() < 3.0);
+TEST_CASE("brush: one whole edge and only that edge is a brush a model can draw")
+{
+  // Any brush tall enough to hold a full vertical edge of a cube also holds the
+  // first millimetres of the four horizontal edges meeting it, so the obvious
+  // brush takes 5 of 12 and not 1. What drops the four is the corner rule: those
+  // stubs all start at a shared vertex, and a stub short of the radius there is
+  // dropped with the corner it cannot close. The documented recipe rests on that
+  // rule and not on the debounce, so a slab the model can actually draw is enough
+  // — it only has to stay under the radius across the edge.
+  const double r = 3.0;
+  const auto cube = box(20.0, 20.0, 20.0);
+  const MergedMesh mm = mergeMesh(cube.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/false));
+  REQUIRE(chains.size() == 12);
+
+  // Columns straddling one vertical edge over its whole height, of a width that
+  // reaches less than r down the four neighbours and of one that reaches more.
+  for (const double w : {0.02, 2.9, 8.0}) {
+    const auto brush = manifold::Manifold(column(w, -1.0, 21.0));
+    auto selected = selection(mm, chains, brush, r);
+    // And nothing is reported at either vertex: the four stubs go because the
+    // brush was aimed along the fifth crease, which is the rule doing its job
+    // and not a corner anyone was denied. The count of edges taken says the
+    // rest.
+    CHECK(dropUncoveredCorners(mm, selected, r).empty());
+    if (w < 2.0 * r) {
+      CHECK(takenEdges(selected) == 1);
+      REQUIRE(selected.size() == 1);
+      // And the one edge is blended over the whole of its height, since the brush
+      // never cut it: no corner cell at either end, so the blend runs out to both
+      // sharp vertices.
+      const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24);
+      REQUIRE_FALSE(tool.IsEmpty());
+      CHECK(tool.BoundingBox().min[2] == Approx(0.0).margin(1e-6));
+      CHECK(tool.BoundingBox().max[2] == Approx(20.0).margin(1e-6));
     } else {
-      REQUIRE(junctions.size() == 1);
-      CHECK(mm.pos[junctions[0].vert].isApprox(Vector3d(0.0, 0.0, 20.0)));
-      CHECK(uncovered.empty());
-      CHECK(tool.Volume() > 30.0);
-      // And the beads run out exactly as far as the brush does, not to the
-      // setback: 6 mm down each edge from the vertex.
-      CHECK(tool.BoundingBox().min[2] == Approx(20.0 - D).margin(1e-6));
+      // Wide enough and the four stubs cover the radius, so they are what the
+      // brush asked for: five edges, and a corner cell at each end of the one.
+      CHECK(takenEdges(selected) == 5);
+      CHECK(chainJunctions(mm, adj, selected, r, /*concave=*/false).size() == 2);
     }
   }
 }
@@ -1221,13 +1340,6 @@ size_t countFault(const std::vector<SizeVerdict>& verdicts, SizeFault fault)
   return static_cast<size_t>(
     std::count_if(verdicts.begin(), verdicts.end(),
                   [fault](const SizeVerdict& v) { return v.fault == fault; }));
-}
-
-// An L whose two faces are `arm` long: one concave crease, and the only thing
-// limiting the size is how far each face reaches.
-manifold::Manifold ell(double arm, double thickness, double height)
-{
-  return box(arm, thickness, height) + box(thickness, arm, height);
 }
 
 }  // namespace

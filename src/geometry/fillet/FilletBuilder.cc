@@ -325,7 +325,7 @@ std::vector<Chain> buildChains(const MergedMesh& m, const std::vector<EdgeKey>& 
 }
 
 std::vector<SpineInterval> chainSelection(const MergedMesh& m, const Chain& chain,
-                                          const BrushVolume& brush, double minLength)
+                                          const BrushVolume& brush, double debounce)
 {
   const size_t n = chain.verts.size();
   const size_t segments = n < 2 ? 0 : (chain.closed ? n : n - 1);
@@ -378,9 +378,20 @@ std::vector<SpineInterval> chainSelection(const MergedMesh& m, const Chain& chai
     return total;
   };
 
+  // The length test asks what put an interval's ends where they are. A brush cut
+  // at least one of them wherever the interval starts past the first station or
+  // stops before the last, and the tangency artefact the debounce exists for is
+  // one of those. An interval the brush cut at neither end is the whole crease,
+  // selected entire: nothing there is being clipped, the crease is simply as long
+  // as it is, and dropping it would make a brush that contains the whole model
+  // build less than no brush at all.
+  const double span = static_cast<double>(segments);
   std::vector<SpineInterval> out;
-  for (const SpineInterval& iv : keep)
-    if (lengthOf(iv) >= minLength) out.push_back(iv);
+  for (const SpineInterval& iv : keep) {
+    const bool cut = iv.first > 1e-9 || iv.second < span - 1e-9;
+    if (cut && lengthOf(iv) < debounce) continue;
+    out.push_back(iv);
+  }
   return out;
 }
 
@@ -1052,6 +1063,12 @@ std::vector<SpineInterval> overhang(const std::vector<SpineInterval>& runs, size
   return out;
 }
 
+// Whether one interval of a chain's selection contains a stretch of it.
+bool intervalCovers(const SpineInterval& iv, double lo, double hi)
+{
+  return iv.first <= lo + 1e-9 && iv.second >= hi - 1e-9;
+}
+
 // Whether a chain's selection merely arrives at its end station.
 bool endTouched(const Chain& chain, bool front)
 {
@@ -1060,34 +1077,17 @@ bool endTouched(const Chain& chain, bool front)
   if (n < 2) return false;
   const double vertex = front ? 0.0 : static_cast<double>(n - 1);
   for (const SpineInterval& iv : chain.keep)
-    if (iv.first <= vertex + 1e-9 && iv.second >= vertex - 1e-9) return true;
+    if (intervalCovers(iv, vertex, vertex)) return true;
   return false;
 }
 
-// Whether a chain's selection covers the whole stretch a corner cell would take
-// from it: `reach` of crease measured back from the end vertex, which is where
-// the bead is truncated and the corner takes over.
-//
-// A junction is built only where every chain meeting there covers it. Two
-// reasons, and the second is why touching the vertex is not enough. A corner
-// cell closing three beads when only two of them exist is a lump sitting on the
-// model rather than a corner. And the cell is a fixed size — it is hulled from
-// the seated ball and the sections the beads stop at, and there is no
-// perpendicular to clip it against in three directions at once — so a brush that
-// reaches a corner by a fraction of the setback still gets the whole of it,
-// which is the brush contract broken by however much was missing. Along an edge
-// the same brush is honoured to the micron. The decision is therefore binary at
-// the setback: cover it and get a corner, fall inside it and get none — the
-// beads that meet there are still built, and meet unclosed.
-bool endAnchored(const MergedMesh& m, const Chain& chain, bool front, double reach)
+// The stretch a corner cell at one end of a chain occupies, in that chain's
+// parameter: `reach` of crease measured back from the end vertex, walked station
+// by station because segments differ in length. A chain shorter than the reach
+// gives the whole of itself.
+SpineInterval endWindow(const MergedMesh& m, const Chain& chain, bool front, double reach)
 {
-  if (chain.keep.empty()) return true;
   const size_t n = chain.verts.size();
-  if (n < 2) return false;
-
-  // The parameter `reach` in from the end vertex, walked station by station
-  // because segments differ in length. A chain shorter than the reach asks for
-  // the whole of itself.
   const double vertex = front ? 0.0 : static_cast<double>(n - 1);
   const double step = front ? 1.0 : -1.0;
   double param = vertex;
@@ -1103,10 +1103,33 @@ bool endAnchored(const MergedMesh& m, const Chain& chain, bool front, double rea
     left -= seg;
     param = static_cast<double>(j);
   }
+  return {std::min(vertex, param), std::max(vertex, param)};
+}
 
-  const double lo = std::min(vertex, param), hi = std::max(vertex, param);
+// Whether a chain's selection covers the whole stretch a corner cell would take
+// from it: `reach` of crease measured back from the end vertex, which is where
+// the bead is truncated and the corner takes over.
+//
+// A junction is built only where every chain meeting there covers it. Two
+// reasons, and the second is why touching the vertex is not enough. A corner
+// cell closing three beads when only two of them exist is a lump sitting on the
+// model rather than a corner. And the cell is a fixed size — it is hulled from
+// the seated ball and the sections the beads stop at, and there is no
+// perpendicular to clip it against in three directions at once — so a brush that
+// reaches a corner by a fraction of the setback still gets the whole of it,
+// which is the brush contract broken by however much was missing. Along an edge
+// the same brush is honoured to the micron. The decision is therefore binary at
+// the setback: cover it and get a corner, fall inside it and get none — and the
+// stretch that fell inside is dropped with the corner rather than built as a stub
+// meeting nothing, which is what dropUncoveredCorners does to it.
+bool endAnchored(const MergedMesh& m, const Chain& chain, bool front, double reach)
+{
+  if (chain.keep.empty()) return true;
+  if (chain.verts.size() < 2) return false;
+
+  const SpineInterval window = endWindow(m, chain, front, reach);
   for (const SpineInterval& iv : chain.keep)
-    if (iv.first <= lo + 1e-9 && iv.second >= hi - 1e-9) return true;
+    if (intervalCovers(iv, window.first, window.second)) return true;
   return false;
 }
 
@@ -1310,7 +1333,7 @@ std::vector<RoundSection> roundSections(const MergedMesh& m,
   return out;
 }
 
-std::vector<int> uncoveredCorners(const MergedMesh& m, const std::vector<Chain>& chains, double r)
+std::vector<int> dropUncoveredCorners(const MergedMesh& m, std::vector<Chain>& chains, double r)
 {
   std::map<int, int> touching, covering;
   for (const Chain& chain : chains) {
@@ -1324,11 +1347,52 @@ std::vector<int> uncoveredCorners(const MergedMesh& m, const std::vector<Chain>&
   }
 
   // Three ends is what makes a vertex a corner, and three covered ends is what
-  // builds one; a vertex short of the second while over the first is a corner
-  // the brush asked for and did not get.
-  std::vector<int> out;
+  // builds one; a vertex over the first and short of the second is a corner that
+  // cannot be had, and everything cut short at it goes.
+  std::set<int> uncovered;
   for (const auto& [v, count] : touching)
-    if (count >= 3 && covering[v] < 3) out.push_back(v);
+    if (count >= 3 && covering[v] < 3) uncovered.insert(v);
+  if (uncovered.empty()) return {};
+
+  // Of those, the ones worth telling the caller about are where nothing at all
+  // was covered: the brush was drawn around that corner and gets nothing there,
+  // which is the one place a brush is answered with silence. Where some crease
+  // through the vertex was covered, the brush was aimed along it and the stubs
+  // going with the corner are the neighbours it inevitably clipped — dropping
+  // those is what makes "this edge and no other" expressible, the count of edges
+  // taken already reports it, and a warning would fire on every use of it.
+  std::vector<int> out;
+  for (const int v : uncovered)
+    if (covering[v] == 0) out.push_back(v);
+
+  // Every stretch running into an uncovered corner, cut short of the cell it
+  // would have met, goes with it. A stretch is short at one end at most — one
+  // covering the whole of its chain covers both ends by definition — so one pass
+  // settles this, and the counts above stay the counts the decision was made on.
+  std::vector<Chain> keeping;
+  for (Chain& chain : chains) {
+    const size_t n = chain.verts.size();
+    if (!chain.keep.empty() && !chain.closed && n >= 2) {
+      std::vector<SpineInterval> kept;
+      for (const SpineInterval& iv : chain.keep) {
+        bool drop = false;
+        for (const bool front : {true, false}) {
+          const int v = front ? chain.verts.front() : chain.verts.back();
+          if (uncovered.count(v) == 0) continue;
+          const double vertex = front ? 0.0 : static_cast<double>(n - 1);
+          const SpineInterval window = endWindow(m, chain, front, r);
+          if (intervalCovers(iv, vertex, vertex) &&
+              !intervalCovers(iv, window.first, window.second))
+            drop = true;
+        }
+        if (!drop) kept.push_back(iv);
+      }
+      if (kept.empty()) continue;  // nothing of this chain survives
+      chain.keep = std::move(kept);
+    }
+    keeping.push_back(std::move(chain));
+  }
+  chains = std::move(keeping);
   return out;
 }
 
@@ -2082,17 +2146,23 @@ std::shared_ptr<const Geometry> buildFilletTool(
     const BrushVolume volume(brush->getManifold().GetMeshGL64());
     // A brush face nearly tangent to the spine crosses it twice a hair apart.
     // The stub that would leave is never intentional, and a hundredth of the
-    // size is far below any bead a user would ask for by hand.
-    const double minLength = 0.01 * node.size;
+    // size is far below any bead a user would ask for by hand. It is a debounce
+    // and nothing else: it applies only where the brush cut the stretch it is
+    // measuring, never to a crease selected end to end, whose length is the
+    // model's business and not the brush's. Nothing else rests on the value —
+    // what makes the one-edge-only selection of the documentation reachable is
+    // dropUncoveredCorners below, which drops the neighbouring stubs whatever
+    // this is set to.
+    const double debounce = 0.01 * node.size;
 
     std::vector<Chain> selected;
-    size_t candidates = 0, taken = 0;
+    size_t candidates = 0;
     for (Chain& chain : usable) {
       const size_t segments =
         chain.verts.size() < 2 ? 0 : (chain.closed ? chain.verts.size() : chain.verts.size() - 1);
       candidates += segments;
 
-      std::vector<SpineInterval> keep = chainSelection(m, chain, volume, minLength);
+      std::vector<SpineInterval> keep = chainSelection(m, chain, volume, debounce);
       if (keep.empty()) continue;
       // A chain the brush covers whole carries no intervals at all, which is
       // both cheaper downstream and exactly the unbrushed path.
@@ -2100,28 +2170,53 @@ std::shared_ptr<const Geometry> buildFilletTool(
           keep.front().second >= static_cast<double>(segments))
         keep.clear();
       chain.keep = std::move(keep);
+      selected.push_back(std::move(chain));
+    }
 
-      // Counted per edge, since that is the unit the user wrote the model in;
-      // an edge the brush takes any part of counts as taken.
+    // A corner the selection arrives at without covering the stretch a corner
+    // cell occupies gets neither the cell nor the stretches that would have met
+    // in it. What comes back is the corners where that took everything, which is
+    // the one case where a brush drawn around a corner is answered with nothing:
+    // the neighbour stubs a brush along one edge clips off its corners go the
+    // same way and are silent, since that is the rule working. The wedge tools
+    // build no corner cell, so nothing there overshoots and nothing is dropped.
+    const std::vector<int> uncovered =
+      isWedgeOnly ? std::vector<int>{} : dropUncoveredCorners(m, selected, node.size);
+    for (const int v : uncovered)
+      LOG(message_group::Warning, node.modinst->location(), "",
+          "%1$s: the brush covers less than the radius %2$g of the creases meeting at the corner "
+          "[%3$.4g, %4$.4g, %5$.4g]; nothing is built there. A corner cell is the full size "
+          "whatever is selected, so a corner is built only where the brush reaches the radius down "
+          "every edge of it, and a bead stopping short of one would meet nothing.",
+          node.name(), node.size, m.pos[v].x(), m.pos[v].y(), m.pos[v].z());
+
+    // Counted per edge, since that is the unit the user wrote the model in; an
+    // edge the brush takes any part of counts as taken. Counted after the drop
+    // above, so the number is what will be built and not what was proposed.
+    size_t taken = 0;
+    for (const Chain& chain : selected) {
+      const size_t segments =
+        chain.verts.size() < 2 ? 0 : (chain.closed ? chain.verts.size() : chain.verts.size() - 1);
       if (chain.keep.empty()) {
         taken += segments;
-      } else {
-        for (size_t i = 0; i < segments; ++i)
-          for (const SpineInterval& iv : chain.keep)
-            if (std::min(iv.second, static_cast<double>(i) + 1.0) -
-                  std::max(iv.first, static_cast<double>(i)) >
-                1e-12) {
-              ++taken;
-              break;
-            }
+        continue;
       }
-      selected.push_back(std::move(chain));
+      for (size_t i = 0; i < segments; ++i)
+        for (const SpineInterval& iv : chain.keep)
+          if (std::min(iv.second, static_cast<double>(i) + 1.0) -
+                std::max(iv.first, static_cast<double>(i)) >
+              1e-12) {
+            ++taken;
+            break;
+          }
     }
 
     // Only blame the brush when there was something for it to miss. A target
     // with no crease of this sign has already said so and returned, so what is
-    // left here is a brush that really did cover none of them.
-    if (selected.empty() && candidates > 0)
+    // left here is a brush that really did cover none of them — unless the
+    // corners above took the last of it, which has already been reported and in
+    // more detail than "the brush covers none".
+    if (selected.empty() && candidates > 0 && uncovered.empty())
       LOG(message_group::Warning, node.modinst->location(), "",
           "%1$s: the selection brush covers none of the %2$d candidate edge(s); nothing is built. "
           "The brush has to contain part of an edge, not merely touch the model.",
@@ -2171,19 +2266,6 @@ std::shared_ptr<const Geometry> buildFilletTool(
             "%1$s: no ball of radius %2$g is seated in the corner at [%3$.4g, %4$.4g, %5$.4g]; "
             "the blends there run out to the sharp vertex instead of closing at that size.",
             node.name(), node.size, m.pos[j.vert].x(), m.pos[j.vert].y(), m.pos[j.vert].z());
-
-  // A corner the brush arrives at without covering is not built, and the beads
-  // that meet there are, so what comes back is a corner left open. The shape is
-  // valid and it is not what the brush looks like it asked for, which is the
-  // same reason the refused-solve warning above exists.
-  if (!isWedgeOnly)
-    for (const int v : uncoveredCorners(m, usable, node.size))
-      LOG(message_group::Warning, node.modinst->location(), "",
-          "%1$s: the brush reaches the corner at [%2$.4g, %3$.4g, %4$.4g] but covers less than "
-          "the radius %5$g of the creases meeting there; the beads are built and the corner is "
-          "left open. A corner cell is the full size whatever is selected, so it is built only "
-          "where the brush reaches the radius down every edge of it.",
-          node.name(), m.pos[v].x(), m.pos[v].y(), m.pos[v].z(), node.size);
 
   // Chamfer and bevel are the wedge alone. The rounded tools are the same wedge
   // with the rolling ball's canal taken back out of it, and with the setback

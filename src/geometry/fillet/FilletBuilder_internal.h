@@ -168,15 +168,19 @@ std::vector<Chain> buildChains(const MergedMesh& m, const std::vector<EdgeKey>& 
 // a station is a parameter near 0 or 1 rather than a coin flip about whether
 // that station is in.
 //
-// Intervals shorter than `minLength` (a length along the spine) are discarded. A
-// brush face nearly tangent to the spine crosses it twice a hair apart, and the
-// stub of bead that would come of it is never what was meant.
+// Intervals the brush cut and left shorter than `debounce` (a length along the
+// spine) are discarded. A brush face nearly tangent to the spine crosses it
+// twice a hair apart, and the stub of bead that would come of it is never what
+// was meant. A stretch the brush did not cut at either end is exempt: the whole
+// crease was selected, nothing is being clipped, and how long the crease happens
+// to be is not the brush's business — a brush containing the entire model has to
+// be a no-op however short the creases in it are.
 //
 // Returns the intervals covering the whole chain when the brush contains all of
 // it, and nothing at all when it contains none — the caller distinguishes the
 // two, since an empty `Chain::keep` means the opposite of an empty return here.
 std::vector<SpineInterval> chainSelection(const MergedMesh& m, const Chain& chain,
-                                          const BrushVolume& brush, double minLength);
+                                          const BrushVolume& brush, double debounce);
 
 // The two wall normals at one chain station, averaged over the station's
 // incident chain edges. `triA`/`triB` name one triangle of each wall, which is
@@ -420,12 +424,24 @@ std::vector<Junction> chainJunctions(const MergedMesh& m,
                                      const std::map<EdgeKey, std::vector<int>>& adj,
                                      const std::vector<Chain>& chains, double r, bool concave);
 
-// The corners a brush arrives at without covering: three or more chain ends land
-// on the vertex and are selected up to it, but too few of them cover the setback
-// the corner cell occupies for one to be built. The beads are still built and
-// meet there unclosed, which is a valid shape and not the one a brush drawn
-// around a corner looks like it asked for — so the caller says so.
-std::vector<int> uncoveredCorners(const MergedMesh& m, const std::vector<Chain>& chains, double r);
+// Drop the selections that arrive at a corner without covering it. A corner is a
+// vertex three or more chain ends land on; it is covered when three of them are
+// selected for `r` of crease back from it, which is the stretch the corner cell
+// occupies. Short of that no cell is built, and a bead that stops inside the
+// stretch one would have filled is a stub meeting nothing at a sharp vertex — so
+// the stretch is dropped too, and what the brush asked for at that corner is
+// answered with nothing rather than with half of it.
+//
+// Returns only the corners where *nothing* was covered, which are the ones a
+// brush was drawn around and gets nothing at. A corner some crease through it
+// does cover is the neighbour-clipping case that makes "this edge and no other"
+// expressible, and is silent on purpose.
+//
+// A chain left with none of its selection is removed from `chains` outright,
+// since an empty `Chain::keep` reads as the whole chain. Selections that reach a
+// chain end no corner stands at are untouched: nothing is being closed there, so
+// there is no stretch a cell has a claim on.
+std::vector<int> dropUncoveredCorners(const MergedMesh& m, std::vector<Chain>& chains, double r);
 
 // Build the fillet/round tool solid: the wedge W hulled from consecutive
 // sections along every chain, plus a corner cell at each junction, minus the
