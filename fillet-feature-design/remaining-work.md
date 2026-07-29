@@ -683,6 +683,109 @@ size that fits and the size that cannot.
 
 ---
 
+## D7 — a brush that reaches a junction by less than the setback builds the
+## whole chain instead of nothing — **DONE**
+
+Fixed as written, by the second of the two routes: the caller decides. The
+mapping into section space still drops a run that collapses to a point, and the
+one caller of it now marks the chain unusable when a *non-empty* selection maps
+to an empty list — the same `chainUsable` flag a two-station chain truncated
+from both ends already sets. The empty-means-whole-chain reading survives
+untouched for the chains no brush ever cut. The comment on `toSectionSpace` that
+stated the overloaded meaning is gone with it.
+
+The junction was left alone, and that is the answer, not an omission: all three
+creases still reach the vertex, so `endAnchored` still builds the corner cell,
+and what the brush asked for is exactly the material that cell already carries.
+
+Measured on the table above, `r = 3`, same cube, after the fix:
+
+| `D` | removed |
+|---|---|
+| 2.0 | 13.399 |
+| 2.5 | 13.399 |
+| 2.9 | 13.399 |
+| 3.0 | 13.399 |
+| 3.6 | 16.984 |
+| 5.0 | 25.415 |
+
+Monotonic. Below `D = r` it is flat rather than falling, which is right: every
+such brush asks for material inside the setback, the corner cell is the whole of
+what is there, and the corner is all-or-nothing. (The absolute numbers sit a
+little above the ones measured for the report — a different brush box, not a
+different tool.)
+
+Pinned by `brush: a selection swallowed by the junction setback builds no bead`
+in `FilletBuilder_test.cc`: count, extent, less-than-the-wide-brush, and genus.
+`case_brush_halfchain` and the other brush cases are unchanged, the whole
+`fillet-tests` suite still matches expectations, and `ctest -R fillet` is green.
+
+**The note below for DOC is now spent** — the one-corner figure may use any box
+it likes.
+
+**Since D9, the cube configuration above is decided before this guard is
+reached.** A selection that maps to nothing has to lie inside the truncation, and
+a chain that does not cover the setback no longer gets a junction to be truncated
+by. The guard stays and stays live where the truncation setback exceeds the
+radius — a sharp corner, where the seated ball stands further back along each
+crease than `r` — but the test's own cube now passes on D9's rule. Read that
+test as pinning the surrounding behaviour rather than this guard alone.
+
+**A bug, measured, with a one-line cause and the opposite of the asked-for
+behaviour.** Found while writing the doc figures.
+
+Round a single corner of `cube(20)` at `r = 3` with a box reaching `D` past the
+vertex, and measure the material removed:
+
+| `D` | removed |
+|---|---|
+| 2.0 | **113.814** |
+| 2.5 | **113.814** |
+| 2.9 | **113.814** |
+| 3.0 | 13.183 |
+| 3.6 | 16.714 |
+| 5.0 | 25.003 |
+
+113.814 is all three creases rounded end to end — 3 x 20 x 1.9315 less the corner
+— on a model where the brush asked for 2 mm of each. The cliff is exactly at
+`D = r`, which is the truncation setback at a 90-degree crease.
+
+**Cause.** `toSectionSpace` drops an interval that maps to nothing:
+
+```cpp
+if (mapped.second - mapped.first > 1e-12) out.push_back(mapped);
+```
+
+and its own comment two lines above says what an empty result then means:
+*"Empty intervals stay empty, meaning the whole chain."* The sentinel is
+overloaded. "No selection was given" and "the selection maps to nothing" are the
+same value downstream, and they must mean opposite things. A kept interval lying
+entirely inside the stretch truncation removes at a junction maps to a single
+point, collapses, and the chain reverts to unbrushed.
+
+**This is junction-specific, and the rest of the brush path is correct.** The
+same measurement away from a junction is exact all the way down to `r/6` —
+a brush `L` long in the middle of an edge removes `1.9315 L` at `L` = 0.5, 1, 2,
+3, 6 and 12 mm, within 2%. So a blend shorter than its own radius is buildable,
+correct, and worth keeping; only the junction path inverts.
+
+**Do:** distinguish the two meanings. Either carry "selected nothing" as a
+separate flag from "no brush", or have the caller decide before calling — the
+brush block already knows whether a brush existed. Then a chain whose selection
+falls inside the truncated stretch builds **nothing**, which is what was asked
+for and is also what `endAnchored` above it already reasons about correctly.
+
+**Acceptance:** the table above becomes monotonic — every `D` below 3 removes
+less than `D = 3` does, not nine times more. `case_brush_halfchain` and the
+brush cases in `FilletBuilder_test.cc` are unchanged. Add a unit test at
+`D < r` on a cube corner; it is a count-and-volume test, not a render.
+
+**Note for whoever writes DOC:** the one-corner example on the doc page uses a
+box reaching well past `r` deliberately. Once this is fixed that is no longer
+load-bearing, but until then it is the only reason that figure is right.
+
+---
+
 ## BRUSH-WIDTH — pin what a narrow brush does, and say it on purpose
 
 Found while writing the doc figures, measured, and currently correct but

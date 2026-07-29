@@ -1035,9 +1035,10 @@ bool endAnchored(const Chain& chain, bool front)
 
 // The selection, rewritten from chain-parameter space into the section-index
 // space the cells are built in. `at` is where each section sits along the chain,
-// and it is increasing, so this is the piecewise-linear inverse of it. Empty
-// intervals stay empty, meaning the whole chain, and an identity `at` is left
-// alone rather than walked.
+// and it is increasing, so this is the piecewise-linear inverse of it. An
+// identity `at` is left alone rather than walked. A run that maps to a single
+// point is dropped, which can empty a non-empty selection — the caller has to
+// tell that apart from the empty list that means no brush at all.
 std::vector<SpineInterval> toSectionSpace(const std::vector<SpineInterval>& runs,
                                           const std::vector<double>& at, bool closed)
 {
@@ -1674,9 +1675,18 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   // while the intervals were cut in chain-parameter space, and truncation and
   // runout have moved the two apart at the ends of every chain that meets a
   // junction.
+  //
+  // An empty list means the whole chain downstream, so a selection that maps to
+  // nothing cannot be passed on as one: the two say opposite things. A run lying
+  // wholly inside the stretch a junction truncates away has no sections left in
+  // it, and the material it asked for is the corner cell's already — so the
+  // chain builds no bead, which is what the brush asked for. Whether the corner
+  // itself is built is a separate question, already settled by endAnchored.
   std::vector<std::vector<SpineInterval>> keepOf(chains.size());
-  for (size_t ci = 0; ci < chains.size(); ++ci)
+  for (size_t ci = 0; ci < chains.size(); ++ci) {
     keepOf[ci] = toSectionSpace(chains[ci].keep, sectionAt[ci], chains[ci].closed);
+    if (keepOf[ci].empty() && !chains[ci].keep.empty()) chainUsable[ci] = false;
+  }
 
   std::vector<manifold::Manifold> wedgeCells, canalCells;
   for (size_t ci = 0; ci < chains.size(); ++ci) {

@@ -1021,6 +1021,52 @@ TEST_CASE("brush: a corner one crease is cut short of gets no corner cell")
   CHECK(tool.BoundingBox().max[2] == Approx(7.0).margin(1e-9));
 }
 
+TEST_CASE("brush: a selection swallowed by the junction setback builds no bead")
+{
+  // A brush reaching the corner by less than the setback the junction truncates
+  // each spine by selects a stretch that no longer has any sections in it: what
+  // it asked for is already inside the corner cell. That has to build nothing
+  // along the creases, not everything — the empty selection is the map of a real
+  // one, and the whole-chain reading of an empty list is for chains no brush
+  // touched at all.
+  const double r = 3.0;
+  const auto cube = box(20.0, 20.0, 20.0);
+  const MergedMesh mm = mergeMesh(cube.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/false));
+  REQUIRE(chains.size() == 12);
+
+  // Reaching 2 mm past the origin corner, against a setback of r = 3 at a
+  // 90-degree crease.
+  const auto brush = box(5.0, 5.0, 5.0).Translate(manifold::vec3(-3.0, -3.0, -3.0));
+  const auto selected = brushed(mm, chains, brush, r);
+  REQUIRE(selected.size() == 3);
+
+  const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24);
+  REQUIRE_FALSE(tool.IsEmpty());
+  // Nothing runs the length of an edge: the tool stays inside the corner it was
+  // pointed at. The whole-chain reading would take all three creases end to end.
+  CHECK(tool.BoundingBox().max[0] < 5.0);
+  CHECK(tool.BoundingBox().max[1] < 5.0);
+  CHECK(tool.BoundingBox().max[2] < 5.0);
+
+  // And it removes less than the same corner asked for over a stretch that does
+  // survive the mapping, rather than nine times more.
+  const auto wide = box(20.0, 20.0, 20.0).Translate(manifold::vec3(-3.0, -3.0, -3.0));
+  const auto full = buildRoundSolid(mm, adj, brushed(mm, chains, wide, r), r,
+                                    /*concave=*/false, 24);
+  const double removed = (cube - (cube - tool)).Volume();
+  const double removedFull = (cube - (cube - full)).Volume();
+  CHECK(removed < removedFull);
+
+  // A brush this far inside the setback no longer gets a corner cell either —
+  // covering the vertex is not covering the stretch a corner occupies — so what
+  // is left here is three short beads meeting unclosed. Still one solid.
+  const auto rounded = cube - tool;
+  REQUIRE_FALSE(rounded.IsEmpty());
+  CHECK(rounded.Genus() == 0);
+}
+
 namespace {
 
 // One model put through the size gate: the chains a tool would walk on it, and
