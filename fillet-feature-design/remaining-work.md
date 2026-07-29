@@ -160,6 +160,40 @@ counts become.
 
 Both live in `chainContacts`. Do them in one pass.
 
+### What `chainContacts` is, before the two bugs
+
+The size gate answers "can a blend of this size be built along this crease at
+all" **without building it** — building it and testing the result is the exact
+answer and is what the design declined to pay for. It does that by reasoning
+about the *seated ball* rather than about volumes.
+
+At a point along a crease, seat a ball of the requested radius into the corner so
+it touches both walls. That gives three points — the ball's centre `C`, and the
+two tangency points `TA` and `TB` where it meets wall A and wall B. `TA` and `TB`
+are exactly where the finished blend would stop being a blend and become the flat
+wall again. `chainContacts` walks a chain and returns one such `ChainContact` per
+sample: `C`, `TA`, `TB`, which smooth surface each of the two walls belongs to,
+and how much slack that sample is allowed.
+
+`checkChainSizes` then asks two questions of those contacts, and a chain that
+fails either is dropped with a warning:
+
+1. **Does the tool still touch the model?** `TA` has to land on wall A and `TB`
+   on wall B. If a contact point falls off the end of its wall, there is no blend
+   of that size there — the arms of a 30 mm L cannot carry `r = 35`.
+2. **Is the room it needs its own?** If another crease's contact line sits inside
+   this crease's seated ball, the two are competing for the same material. That
+   is what refuses `r = 30` on a 40 mm cube.
+
+"Which wall" is a whole smooth surface, not one triangle: `smoothSurfaces` joins
+triangles across every edge that is not a crease, so a bore's facets are one wall
+and a cube's face is another. Sampling is one sample per size along a segment, at
+least three and at most 32, with junctions excluded — a crease is sampled along
+its length rather than only at its mesh vertices, because on a tapering feature
+the room runs out between two stations.
+
+Both bugs below are in how a contact point is placed and which samples get asked.
+
 ### D1 — the gate does not know about the brush
 
 The size gate runs before brush selection and on the whole chain, so a crease
@@ -248,6 +282,55 @@ Rejected alternative, for the record: growing the ball by an eps so it cuts into
 the wall instead of kissing it. That loses tangency by about 2.6 degrees at
 `r = 3, eps = 1e-3` and perturbs the blend everywhere, to fix a problem that only
 shows on the bare tool.
+
+### A second filter on face size cannot substitute for this — measured
+
+The obvious cheaper alternative is to leave the mesh alone and filter the
+*classifier* instead: reject an edge as a feature when the triangles it sits on
+are too small or too slivery to trust their normals, on top of the angle test.
+It was probed properly and **it does not work**. Recording the numbers so nobody
+spends the day rediscovering it.
+
+First, a correction to what the refillet test appears to show: on a rounded cube
+**every** feature the classifier reports is spurious, of both signs, so that mesh
+cannot answer whether a filter discriminates — there is nothing real in it to
+keep. The discriminating case is a rounded cube seated on a plate, where the seam
+between them is a genuine concave crease and everything else is noise. Measured
+there, over the concave features (52 real, 216 noise), with quality as
+`4*sqrt(3)*Area / sum(edge^2)` — 1 for equilateral, 0 for degenerate:
+
+| | real crease | noise slivers |
+|---|---|---|
+| edge length — min | 6.583e-04 | 6.583e-04 |
+| edge length — p10 | 6.583e-04 | 3.556e-03 |
+| edge length — p50 | 1.300e+00 | 5.658e-03 |
+| quality — min | 2.781e-05 | 1.249e-05 |
+| quality — p50 | **8.693e-04** | **6.143e-03** |
+| triangle area — min | 1.646e-06 | 1.337e-06 |
+| triangle area — p50 | 4.243e-04 | 3.291e-06 |
+| triangle area — max | 2.999e+02 | 4.226e-04 |
+
+The two populations do not merely overlap, they are **inverted** on the measure
+that was supposed to separate them: the real crease's triangles are seven times
+*worse* in quality at the median than the noise is. All three metrics share a
+floor to three or four significant figures, and the real crease's 10th percentile
+edge is *shorter* than the noise's. Any cut on length, area or quality removes
+part of the real crease before it removes most of the noise.
+
+The reason is structural rather than a matter of picking the metric better. The
+real crease runs right up against the bead, and near that meeting its own
+triangles are shredded by the same tangential contact that produces the noise. A
+feature inherits the worst geometry in the mesh exactly where it touches the
+thing that made it.
+
+And a partially removed crease is worse than no filter at all: it fragments a
+chain into arcs, which changes which vertices are junctions and caps beads in the
+middle of a smooth seam.
+
+**So the configurability question does not arise** — it is not that a fixed
+constant needs a `min_area=` beside `min_angle=`, it is that no value of such a
+parameter separates the two populations. Reject this line; fix the mesh at the
+source.
 
 **Timebox this.** The fallback is exactly the status quo, whose reasoning is
 already recorded in `tests/CMakeLists.txt` and `fillet-tests/expectations.txt`. If
@@ -397,6 +480,12 @@ pending.
   a work item.** It was two things: a vertex-count saving nobody asked for, and a
   possible route to D2. D2 has a cheaper route. If the phase shift fixes D2, this
   has no remaining reason to exist.
+- **A second classifier filter on face area, edge length or triangle quality**,
+  beside the angle test. **Cancelled — measured, and the two populations are
+  inverted.** The numbers are under D2. It is not a matter of tuning the constant
+  or exposing it as a parameter: a real crease sitting against a bead has worse
+  triangles than the bead's own noise, so every threshold takes the feature
+  first.
 - **A "fills" check for the test harness** — no point of the model within the
   tool's reach of a selected crease may be left unblended. **Cancelled.** There is
   no cheap version: it is an offset-surface query, which is precisely the exact
