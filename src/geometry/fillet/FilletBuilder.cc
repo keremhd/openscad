@@ -1705,6 +1705,33 @@ std::shared_ptr<const Geometry> buildFilletTool(
     return nullptr;
   }
 
+  // An empty tool is byte-for-byte what an operator that did nothing at all
+  // would return, so selecting nothing has to be said out loud rather than left
+  // for the user to infer from a model that did not change. Two ways to get
+  // here, and the message separates them: a target with no crease sharp enough
+  // at this tessellation, and — far more likely — a tool of the wrong sign,
+  // since the edges the other one takes are right there in the count.
+  if (selected == 0) {
+    const size_t others = wantConcave ? c.featureConvex : c.featureConcave;
+    const char *sibling = node.type == FilletType::FILLET    ? "round_tool"
+                          : node.type == FilletType::CHAMFER ? "bevel_tool"
+                          : node.type == FilletType::ROUND   ? "fillet_tool"
+                                                             : "chamfer_tool";
+    if (others > 0)
+      LOG(message_group::Warning, node.modinst->location(), "",
+          "%1$s: no %2$s edge of the target turns more than %3$.1f deg; nothing is built. "
+          "The target has %4$d %5$s edge(s) - %6$s takes those.",
+          node.name(), wantConcave ? "concave" : "convex", thresholdDeg, static_cast<int>(others),
+          wantConcave ? "convex" : "concave", sibling);
+    else
+      LOG(message_group::Warning, node.modinst->location(), "",
+          "%1$s: no edge of the target turns more than %2$.1f deg; nothing is built. "
+          "min_angle= lowers that threshold if the feature is shallower than the "
+          "tessellation it was built at.",
+          node.name(), thresholdDeg);
+    return nullptr;
+  }
+
   // A size the feature cannot carry is refused, one crease at a time, and never
   // quietly resized: a clamp would have to be agreed with every crease this one
   // meets, and following that through runs a minimum over the whole connected
@@ -1779,12 +1806,16 @@ std::shared_ptr<const Geometry> buildFilletTool(
       selected.push_back(std::move(chain));
     }
 
-    if (selected.empty())
+    // Only blame the brush when there was something for it to miss. Candidates
+    // are counted after the size gate, so a target whose creases were all
+    // refused arrives here with none left, and saying the brush covered zero of
+    // zero would put a second, wrong diagnosis on top of the right ones.
+    if (selected.empty() && candidates > 0)
       LOG(message_group::Warning, node.modinst->location(), "",
           "%1$s: the selection brush covers none of the %2$d candidate edge(s); nothing is built. "
           "The brush has to contain part of an edge, not merely touch the model.",
           node.name(), static_cast<int>(candidates));
-    else
+    else if (!selected.empty())
       LOG(message_group::Echo, node.modinst->location(), "",
           "%1$s: selection brush takes %2$d of %3$d candidate edge(s)", node.name(),
           static_cast<int>(taken), static_cast<int>(candidates));
