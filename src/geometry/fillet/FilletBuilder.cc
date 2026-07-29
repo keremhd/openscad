@@ -1177,6 +1177,7 @@ RoundSection makeRoundSection(const Vector3d& v, const Vector3d& nA, const Vecto
   const Vector3d TB = C - dir * r * nB;
 
   s.w = pentagonSection(v, nA, nB, bis, TA, TB, dir, eps);
+  s.v = v;
   s.C = C;
   s.u.reserve(segs + 2);
   for (int k = 0; k < segs; ++k) {
@@ -1357,33 +1358,107 @@ RoundSection lerpSection(const RoundSection& a, const RoundSection& b, double s)
   for (size_t k = 0; k < a.w.size(); ++k) out.w[k] = a.w[k] + s * (b.w[k] - a.w[k]);
   out.u.resize(std::min(a.u.size(), b.u.size()));
   for (size_t k = 0; k < out.u.size(); ++k) out.u[k] = a.u[k] + s * (b.u[k] - a.u[k]);
+  out.v = a.v + s * (b.v - a.v);
   out.C = a.C + s * (b.C - a.C);
   out.valid = true;
   return out;
 }
 
+// A solid's vertices, for handing a convex one to a hull alongside points of its
+// own.
+std::vector<Vector3d> hullPoints(const manifold::Manifold& solid)
+{
+  const manifold::MeshGL64 mesh = solid.GetMeshGL64();
+  std::vector<Vector3d> pts;
+  if (mesh.numProp < 3) return pts;
+  pts.reserve(mesh.vertProperties.size() / mesh.numProp);
+  for (size_t k = 0; k + 2 < mesh.vertProperties.size(); k += mesh.numProp)
+    pts.emplace_back(mesh.vertProperties[k], mesh.vertProperties[k + 1],
+                     mesh.vertProperties[k + 2]);
+  return pts;
+}
+
+// The distance from the origin to the nearest face plane of a convex solid
+// centred there — for a tessellated ball, the radius it actually cuts to rather
+// than the one it was asked for.
+double inradius(const manifold::Manifold& convex)
+{
+  const manifold::MeshGL64 mesh = convex.GetMeshGL64();
+  if (mesh.numProp < 3) return 0.0;
+  auto vert = [&mesh](size_t i) {
+    const size_t k = i * mesh.numProp;
+    return Vector3d(mesh.vertProperties[k], mesh.vertProperties[k + 1],
+                    mesh.vertProperties[k + 2]);
+  };
+
+  double least = std::numeric_limits<double>::infinity();
+  for (size_t t = 0; t + 2 < mesh.triVerts.size(); t += 3) {
+    const Vector3d a = vert(mesh.triVerts[t]);
+    const Vector3d nrm = (vert(mesh.triVerts[t + 1]) - a).cross(vert(mesh.triVerts[t + 2]) - a);
+    const double twiceArea = nrm.norm();
+    if (twiceArea < 1e-30) continue;
+    least = std::min(least, std::abs(nrm.dot(a)) / twiceArea);
+  }
+  return std::isfinite(least) ? least : 0.0;
+}
+
+// The profile a corner cell reaches down one chain with: the same four corners
+// of the bead's cross-section the wedge's pentagon is built on — the crease
+// point and the two tangency points — but taken `over` past their walls instead
+// of `eps`, one copy of the crease point per wall.
+//
+// Handing the wedge's own pentagon over instead, which is what this replaces,
+// put five of the corner cell's points exactly on the wedge's surface, since a
+// section of a chain is by construction where the cells hulled from it end. Two
+// solids whose boundaries touch along the five edges of a shared face and then
+// leave each other at a fraction of a degree are what a union cannot resolve:
+// on a spike, where the cell's faces and the bead's differ by less than that, it
+// left nine triangles of no area at the one height each bead was cut back at.
+// Rebuilt at `over`, every point of this profile is further past its wall than
+// anything the wedge has there, so the two surfaces are a clear 0.5 eps apart
+// along each wall and cross transversally where the profile turns the tangency
+// point — the same ladder the wedge and the arc already stand on.
+//
+// Past the walls is the only direction the profile may grow: outward is free
+// space no ball reaches, and material there would be a lump. So its fourth side
+// — the chord between the two tangency points — comes back toward the crease by
+// `over * cos(phi/2)` instead. That costs nothing, because the chord is not a
+// surface of the blend: it is the far side of a circular segment that lies
+// wholly inside the arc, `r * (1 - sin(phi/2))` deep, which the subtraction
+// removes whatever the cell does there. The two are comparable only as phi
+// approaches 180 degrees, and a crease that flat is refused a section at all.
+std::array<Vector3d, 4> cornerProfile(const RoundSection& s, double over)
+{
+  // TA = C - dir*r*nA by construction, so the two tangency points give back the
+  // wall normals with the sign the section was built at, without the section
+  // having to carry them.
+  const Vector3d dnA = (s.C - s.w[0]).normalized() * over;
+  const Vector3d dnB = (s.C - s.w[1]).normalized() * over;
+  return {s.w[0] - dnA, s.w[1] - dnB, s.v - dnA, s.v - dnB};
+}
+
 // The corner cell: what the incident wedges no longer cover once they have been
 // cut back, hulled from the junction vertex, the point at which each corner ball
-// touches each wall it is seated against, and a section of every chain that
+// touches each wall it is seated against, and a profile down every chain that
 // meets there. Convex by construction, so the hull is faithful; the corner balls
 // are taken out of it by the same global subtraction as the canals.
 //
-// The vertex and the tangency points are taken `over` past their walls rather
-// than on them, for the reason the edge cells' pentagon is: a face resting
-// exactly on a wall asks a boolean to resolve two coincident surfaces. Both go
-// out along their own wall's normal, one copy of the vertex per wall, so that
-// every point this cell has near a wall is the same distance past it and the
-// hull's face there is that wall's plane exactly. Displacing the vertex once
-// along the bisector instead put it short of that plane by the cosine, which
-// tilted the face by a hair and left a flake of the model unblended along the
-// junction, at a thickness that scaled with `over`.
+// Every point of it is taken `over` past a wall rather than on one, for the
+// reason the edge cells' pentagon is: a face resting exactly on a wall asks a
+// boolean to resolve two coincident surfaces. Each goes out along its own wall's
+// normal, one copy of the vertex per wall, so that every point this cell has
+// near a wall is the same distance past it and the hull's face there is that
+// wall's plane exactly. Displacing the vertex once along the bisector instead
+// put it short of that plane by the cosine, which tilted the face by a hair and
+// left a flake of the model unblended along the junction, at a thickness that
+// scaled with `over`.
 //
 // `over` must then be larger than the edge cells' own overshoot rather than
 // smaller. Equal, and the corner cell's wall face lands in their plane and the
 // coincidence is back, inside the tool this time; smaller, and it grazes just
 // beneath it, which is worse. Larger, and the two cross at a real angle.
 manifold::Manifold cornerCell(const Junction& j, const Vector3d& vj,
-                              const std::vector<std::array<Vector3d, 5>>& endSections, double r,
+                              const std::vector<std::array<Vector3d, 4>>& endProfiles, double r,
                               double dir, double over)
 {
   std::vector<manifold::vec3> pts;
@@ -1397,8 +1472,8 @@ manifold::Manifold cornerCell(const Junction& j, const Vector3d& vj,
       if (std::abs(dir * n.dot(P - vj) - r) > 1e-6 * r) continue;
       add(P - dir * (r + over) * n);
     }
-  for (const auto& section : endSections)
-    for (const Vector3d& p : section) add(p);
+  for (const auto& profile : endProfiles)
+    for (const Vector3d& p : profile) add(p);
 
   return manifold::Manifold::Hull(pts);
 }
@@ -1414,6 +1489,9 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
 
   const double dir = concave ? 1.0 : -1.0;
   const double eps = std::max(1e-3 * r, 1e-9);
+  // Where the corner cells stand relative to the wedges' eps and the arc's two:
+  // see cornerCell for why it is between them rather than at either.
+  const double over = 1.5 * eps;
   const int segs = std::max(arcSegments, 3);
 
   const std::vector<Junction> junctions = chainJunctions(m, adj, chains, r, concave);
@@ -1438,10 +1516,10 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   }
 
   // Cut every chain back where its ball first meets a wall of the junction it
-  // runs into, and hand the truncated end section to that junction so its corner
-  // cell can hull against it. Both ends come off the untruncated sections, so a
+  // runs into, and hand that junction a profile of the truncated end for its
+  // corner cell to reach with. Both ends come off the untruncated sections, so a
   // two-station chain does not truncate itself twice over.
-  std::map<int, std::vector<std::array<Vector3d, 5>>> endSections;
+  std::map<int, std::vector<std::array<Vector3d, 4>>> endProfiles;
   std::vector<bool> chainUsable(chains.size(), true);
   std::vector<std::array<bool, 2>> runout(chains.size(), {false, false});
   for (size_t ci = 0; ci < chains.size(); ++ci) {
@@ -1492,14 +1570,15 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
       sectionAt[ci][endIdx] = static_cast<double>(nbrIdx) +
                               s * (static_cast<double>(endIdx) - static_cast<double>(nbrIdx));
 
-      // The corner cell hulls against a section a hair further back than the one
-      // the wedge stops at, so the two overlap in a thin slab instead of meeting
-      // on one shared face. Cells that merely abut leave the union a face that is
-      // in both of them and in neither's interior, and the sub-micron triangles
-      // that come of it survive as far as the first kernel that quantises its
-      // input. The same reasoning puts the pentagon a hair past each wall.
+      // The corner cell reaches a hair further back than the section the wedge
+      // stops at, so the two overlap in a slab instead of meeting on one shared
+      // face. Cells that merely abut leave the union a face that is in both of
+      // them and in neither's interior, and the sub-micron triangles that come of
+      // it survive as far as the first kernel that quantises its input. What it
+      // reaches with is not that section's own pentagon but a profile rebuilt at
+      // the corner cell's distance past the walls; cornerProfile says why.
       const RoundSection reach = lerpSection(a, b, std::max(0.0, s - 2.0 * nudge));
-      if (reach.valid) endSections[j.vert].push_back(reach.w);
+      if (reach.valid) endProfiles[j.vert].push_back(cornerProfile(reach, over));
     }
 
     // A chain one segment long, truncated from both ends by more than its own
@@ -1546,6 +1625,7 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
       RoundSection tip;
       tip.w.fill(end.v);
       tip.u.assign(1, end.v);
+      tip.v = end.v;
       tip.C = end.v;
       tip.valid = true;
       into.push_back(std::move(tip));
@@ -1611,10 +1691,26 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
                      lerpSection, overhang(keepOf[ci], segments), canalCells);
   }
 
+  // The corner ball as a point set, so the hull below can take it together with
+  // the points that carry it past a wall. Hulling the vertices of a convex
+  // polyhedron gives that polyhedron back, so the ball is unchanged by being
+  // passed this way.
+  const manifold::Manifold ball = manifold::Manifold::Sphere(r, segs);
+  const std::vector<Vector3d> ballShell = hullPoints(ball);
+
+  // How far short of a wall a tessellated ball seated against it stops. Its
+  // vertices are on the sphere and its faces are therefore chords, so the face
+  // that meets the wall reaches only that face's own distance from the centre,
+  // and the ball is short of the wall by the rest everywhere on it but its
+  // corners. At the tessellations these tools are drawn at, that shortfall is
+  // several times the whole overshoot ladder, so it is what a point meant to
+  // stand past the wall has to clear first. Measured off the mesh rather than
+  // assumed from the segment count, because it is the mesh that does the cutting.
+  const double ballPast = (r - inradius(ball)) + 2.0 * eps;
+
   for (const Junction& j : junctions) {
     if (j.ballCentres.empty()) continue;
-    manifold::Manifold cell =
-      cornerCell(j, m.pos[j.vert], endSections[j.vert], r, dir, /*over=*/1.5 * eps);
+    manifold::Manifold cell = cornerCell(j, m.pos[j.vert], endProfiles[j.vert], r, dir, over);
     if (cell.IsEmpty()) continue;
     wedgeCells.push_back(std::move(cell));
     // One ball per reachable centre, hulled together. The hull is not an
@@ -1622,13 +1718,36 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
     // of the balls at those points, and the centres are the corners of a convex
     // region every point of which the ball may sit at — so the hull is exactly
     // the material it can sweep out there.
-    std::vector<manifold::Manifold> balls;
-    balls.reserve(j.ballCentres.size());
-    for (const Vector3d& P : j.ballCentres)
-      balls.push_back(
-        manifold::Manifold::Sphere(r, segs).Translate(manifold::vec3(P.x(), P.y(), P.z())));
-    canalCells.push_back(balls.size() == 1 ? std::move(balls.front())
-                                           : manifold::Manifold::Hull(balls));
+    //
+    // Each ball also gets one point per wall it is seated against, out past the
+    // tangency. Seated means tangent, and a cutter that arrives at a wall along
+    // it rather than across it leaves everything the cells stand past that wall
+    // — at a corner, a lens of the overshoot around the tangency point, which the
+    // canals running in sever from the rest of the tool as they cut deeper still.
+    // That is what came away from a curved junction as a detached wafer, once the
+    // tessellation was fine enough that the ball no longer blundered past the
+    // wall by its own coarseness. The two points every arc already carries past
+    // its walls are the same answer along a crease; this is it at the one place a
+    // ball rather than a canal is what cuts.
+    //
+    // The point only deepens the cut where the cone it raises is still below the
+    // wall, and above the wall the surface is the ball's own, so nothing of the
+    // blend goes with it and the corner does not step away from the canals it
+    // hands over to.
+    std::vector<manifold::vec3> pts;
+    pts.reserve(j.ballCentres.size() * (ballShell.size() + j.faceNormals.size()));
+    for (const Vector3d& P : j.ballCentres) {
+      for (const Vector3d& q : ballShell) {
+        const Vector3d p = P + q;
+        pts.emplace_back(p.x(), p.y(), p.z());
+      }
+      for (const Vector3d& n : j.faceNormals) {
+        if (std::abs(dir * n.dot(P - m.pos[j.vert]) - r) > 1e-6 * r) continue;
+        const Vector3d horn = P - dir * (r + ballPast) * n;
+        pts.emplace_back(horn.x(), horn.y(), horn.z());
+      }
+    }
+    canalCells.push_back(manifold::Manifold::Hull(pts));
   }
 
   // One subtraction over everything. The spines stop where the ball does, so the

@@ -107,16 +107,19 @@ ball at each, at every radius probed, and nothing is refused or run out. The
 tool is one connected piece of genus 1: the two arcs close into a loop through
 the two corners. All of that is pinned in `FilletBuilder_test.cc`.
 
-**What the picture found that a count could not.** At `$fn = 48` the tool comes
-back as three pieces — the right one, plus a detached wafer at each junction,
-0.076 x 0.061 x 0.005 and 5.2e-06 of volume, sitting on the plate face where the
-two ring beads' outer edges cross. It is the wedge's eps overshoot again, shed
-by the corner cell, and it is the same corner-cell geometry the pocket cases are
-permanently red for, seen for the first time on a curved junction. At `$fn = 24`
-there is no crumb and the genus is right, so the case is written at 24 — a
-24-gon still turns 15 degrees a facet against a 22.5-degree threshold, so the
-ring is a curve to the classifier either way — and the crumb is recorded rather
-than pinned as correct.
+**What the picture found that a count could not, and what it turned out to be.**
+At `$fn = 48` the tool came back as three pieces — the right one, plus a detached
+wafer at each junction, 0.076 x 0.061 x 0.005 and 5.2e-06 of volume, sitting on
+the plate face where the two ring beads' outer edges cross. That point is where
+the corner ball touches the plate, and a ball touches a wall it is seated against
+at one point only: everything the corner cell stands past that wall around it was
+reachable by no cutter, and the two canals running into the junction cut it free
+of the rest as they went past. Fixed by giving every corner ball a point out past
+each wall it is seated against — what every arc already carried, at the one place
+a ball rather than a canal is what cuts — and the tool is one piece of genus 1 at
+48 as well. The case stays at 24, where the question it asks is unchanged and a
+dilation is affordable; the 48-gon reproduction is pinned in
+`FilletCompare_test.cc`, which needs no dilation to see it.
 
 **Red on `sandwich`**, and not about this solid; see `expectations.txt` for the
 controls that separate the kernel from the geometry.

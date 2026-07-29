@@ -364,10 +364,16 @@ manifold::Manifold buildWedgeSolid(const MergedMesh& m,
 // that arc cuts back out of it, as a convex polygon in the plane spanned by the
 // two wall normals; hulling consecutive copies of each and subtracting gives the
 // rounded bead.
+//
+// `v` is the crease point the section was taken at, and `C` the arc's centre;
+// between them and `w[0]`, `w[1]` — the two tangency points — the section knows
+// its own frame, which is what lets a corner cell rebuild the profile at its own
+// distance past the walls instead of reusing this one.
 struct RoundSection
 {
   std::array<Vector3d, 5> w;
   std::vector<Vector3d> u;
+  Vector3d v = Vector3d::Zero();
   Vector3d C = Vector3d::Zero();
   bool valid = false;
 };

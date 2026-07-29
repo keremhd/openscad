@@ -44,19 +44,23 @@ selftest_wrongradius    *  *         PASS
 # What is left is not about the fillet either. Corner cells exist now and these
 # pockets close correctly — pinned exactly, against a shrink-and-grow reference,
 # in FilletCompare_test.cc. What CGAL will not dilate is the mesh, and these two
-# lines used to say why: the tangency between the tool's arcs and the walls they
-# ride. That was measured and fixed, and it was not what holds these two. The
-# tool for these pockets now has no degenerate triangle in it at all, and CGAL
-# still refuses it, over nine triangles of about 1e-13 that all sit at the one
-# height where each of the three slant beads is cut back for the apex corner.
+# lines have twice said why and twice been wrong about which tangency it was.
+# First the tool's arcs against the walls they ride; that was measured and fixed
+# and did not move these. Then nine triangles of about 1e-13 at the one height
+# each slant bead is cut back at, from the corner cell being hulled against a
+# section of the bead it closes — its faces left the bead's at a fraction of a
+# degree, which on a spike is as little as two faces can differ by. The corner
+# cell no longer reaches down a chain with that chain's own section, and those
+# are gone too: the smallest triangle in this tool is 8.1e-07 where it was
+# 2.4e-13, three million times up and pinned in FilletCompare_test.cc.
 #
-# That is a different tangency, and one these cases are the extreme of: the
-# corner cell is hulled against a section of the bead it is closing, so on a
-# spike — one segment from base to apex, walls that barely turn — its faces
-# leave the bead's at a fraction of a degree. Nothing about the arcs reaches it.
-# It is the same shape the apex lines below are red for, seen by a different
-# check, and it wants the corner cell rethought rather than nudged: probing the
-# separation the cell is hulled at moves the count around without a floor.
+# CGAL still refuses, and what it says has moved with the geometry rather than
+# staying put, which is the evidence that each fix reached what it was aimed at.
+# The Nef conversion of the tool used to throw; it now succeeds, and the refusal
+# has moved downstream into the convex decomposition, which reports two facets
+# sharing a halfedge. That is a third thing, in a kernel these tools are not
+# built for, and no measurement here has yet said it is the operator's. The two
+# apex lines below are the same shape seen by a check that cannot express it.
 case_junction3_pocket   *  sandwich  FAIL
 case_junction4_pocket   *  sandwich  FAIL
 

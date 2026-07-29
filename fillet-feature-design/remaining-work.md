@@ -27,14 +27,18 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
 2. ~~**D1 and D6**~~ — **done.** See below for what the nearest-point route did
    and did not replace.
 3. ~~**D2**~~ — **done.** The cause was not the one written down; see below, and
-   [`log-2026-07-29-d2.md`](log-2026-07-29-d2.md). Two `sandwich` lines it was
-   expected to clear turn out to be a different problem and are still red.
+   [`log-2026-07-29-d2.md`](log-2026-07-29-d2.md). What it left behind read as
+   one open item about the corner cell and was two unrelated defects; both are
+   now closed, see [`log-2026-07-29-corner-cell.md`](log-2026-07-29-corner-cell.md).
+   The two `sandwich` lines are still red, on a third thing.
 4. ~~**M12**~~ — **done.** The C++ node, as overruled; see below for the one
    thing the design did not anticipate, and for the parameter it gained.
 5. ~~**T2**~~ — **done.** Both cases built; the curved junction exists and is
    solved, and the dome's oversize refusal is not the one that was predicted.
    See below.
-6. **DOC**, then **CLEAN**.
+6. **BRUSH-WIDTH** — two cheap builder tests and a comment, pinning behaviour the
+   doc page now relies on. Independent of everything else; do it whenever.
+7. **DOC**, then **CLEAN**.
 
 ---
 
@@ -424,27 +428,55 @@ overshoot. One copy of the vertex per wall, each along its own normal, and the
 face is that wall's plane exactly. The flake had been there all along, just
 under the exact comparisons' threshold; it is gone now rather than merely small.
 
-**What it did not fix, measured.** `case_junction3_pocket` and
-`case_junction4_pocket` have no degenerate triangle left in them and CGAL still
-refuses them, over nine triangles of about 1e-13 that sit at the one height on
-each slant bead where it is cut back for the apex corner. That is a second
-tangency and a different one: the corner cell is hulled against a section of the
-bead it closes, so on a spike — one segment from base to apex, walls that barely
-turn — its faces leave the bead's at a fraction of a degree. Probing the
-separation the cell is hulled at moves the count around without finding a floor,
-which is the signature of a shape problem rather than a constant to tune. It
-wants the corner cell rethought, and it is the same geometry the apex `sandwich`
-lines are already documented as permanently red for. Not reopened here.
+**What it did not fix, and what that turned out to be — CLOSED.** D2 left two
+things behind, and they read as one item because both were "the corner cell".
+They were two, with nothing in common but the place they showed up.
 
-**T2 found it a third time, and on a shape that is nothing like a spike.** At
-`$fn = 48` the two-boss tool sheds a detached wafer of the wedge's own eps
-overshoot at each of its two curved junctions — 5.2e-06 of volume, on the plate
-face where the two ring beads' outer edges cross. So the open item is not
-confined to a corner cell hulled against a barely turning bead: an ordinary
-right-angled junction on a curved crease reaches it too, at a tessellation the
-case would otherwise have been written at. Still not reopened — the reason above
-is unchanged, and nothing measured since suggests a constant to tune — but the
-next person to open it has a second, much cheaper reproduction than a pocket.
+*The pocket's nine triangles of 1e-13*, at the one height on each slant bead
+where it is cut back for the apex corner. The corner cell reached down each chain
+with **that chain's own section**, and a section of a chain is by construction
+where the cells hulled from it end — so five of the cell's points lay exactly on
+the wedge's surface, and the two solids touched along the five edges of a shared
+face before leaving each other at a fraction of a degree. A spike is where they
+can differ by least. The cell now reaches with a profile rebuilt at its own
+distance past the walls: the same three corners of the cross-section, taken at
+`1.5 eps` instead of `eps`, one copy of the crease point per wall, so the whole
+profile is strictly further past each wall than anything the wedge has there and
+the two cross transversally instead of grazing. Its fourth side comes *back*
+toward the crease by `over * cos(phi/2)`, which costs nothing: that side is a
+chord lying `r * (1 - sin(phi/2))` inside the arc, and the subtraction takes that
+segment away whatever the cell does with it. Smallest triangle in the pocket
+tool: 8.1e-07, where it was 2.4e-13.
+
+*The two-boss wafer*, 5.2e-06 of volume on the plate face at each junction of
+`case_two_bosses` at `$fn = 48`. Not the corner cell's shape at all. It sits
+exactly where the corner ball touches the plate, and **a ball touches a wall it
+is seated against at one point** — so the overshoot the corner cell stands past
+that wall around it had no cutter, and the two canals running into the junction
+cut it free of the rest as they went past at `2 eps`. The ladder had a rung
+missing: every canal carries two points past its walls, and the corner ball,
+which is what cuts where the canals stop, carried none. It does now — one point
+per seated wall, `2 eps` past the tangency, plus whatever the *tessellation* is
+short by, which is the part that had been hiding this. A ball drawn as an
+inscribed polyhedron reaches its faces' own distance from the centre, not `r`, so
+at `$fn = 24` it blundered past the plate by its own coarseness and there was no
+wafer, and at 48 it did not. That shortfall is measured off the ball's mesh
+rather than assumed from the segment count.
+
+Neither change moves the blend. The profile only grows past walls, and past a
+wall is inside the model or outside it, never blend. The ball's point only
+deepens the cut where the cone it raises is still below the wall; above the wall
+the surface is the ball's own, so the corner does not step away from the canals
+it hands over to — which a whole translated copy of the ball did, by the
+tessellation shortfall, and that showed up as a fresh crease at every junction of
+a re-read rounded cube.
+
+**What is still red, and it is a third thing.** The two pocket cases still fail
+`sandwich`. What CGAL says has moved with the geometry each time, which is how
+each of these was known to have reached what it was aimed at: it used to throw
+out of the Nef conversion of the tool, and now that conversion succeeds and the
+refusal has moved downstream into the convex decomposition, which reports two
+facets sharing a halfedge. Nothing measured says that one is the operator's.
 
 ### A second filter on face size cannot substitute for this — measured
 
@@ -591,18 +623,18 @@ came out of it, two of which contradict what this section predicted.
   into a loop through the two corners. The rings did not survive being cut into
   arcs, and that is the right answer rather than the failure this section was
   watching for.
-- **The corner cell sheds a crumb at finer tessellation, and it is D2's
-  remainder.** At `$fn = 48` the tool comes back as three pieces: the right one,
-  plus a detached wafer at each junction, 0.076 x 0.061 x 0.005 and 5.2e-06 of
-  volume, on the plate face where the two ring beads' outer edges cross. It is
-  the wedge's eps overshoot shed by the corner cell — the same geometry the
-  pocket cases are permanently red for, seen for the first time on a curved
-  junction, and the first evidence that the open item is not confined to spikes.
-  Not reopened here, for the reason D2 gives: probing the separation the cell is
-  hulled at moves the count without finding a floor. The case is written at
-  `$fn = 24`, where the tool is clean and a 24-gon is still a curve to a
-  22.5-degree threshold, and the crumb is recorded rather than pinned as
-  correct.
+- **The junction shed a crumb at finer tessellation — FIXED, and it was not the
+  corner cell's shape.** At `$fn = 48` the tool came back as three pieces: the
+  right one, plus a detached wafer at each junction, 0.076 x 0.061 x 0.005 and
+  5.2e-06 of volume, on the plate face where the two ring beads' outer edges
+  cross — which is where the corner ball touches the plate. Written up here as
+  D2's remainder on a new shape; it was a different defect that happened to
+  surface in the same place. A seated ball touches its wall at a point, so the
+  overshoot the corner cell stands past that wall had no cutter, and the canals
+  running in cut it free. Corner balls now carry a point past each seated wall as
+  every arc already did. The case stays at `$fn = 24`, where the question is
+  unchanged and a dilation is affordable; the 48-gon reproduction is pinned in
+  `FilletCompare_test.cc`.
 - **The dome does not run out of constant-radius solutions.** This section
   expected a radius approaching the curvature it follows to have no solution. It
   has one at every size: on a wide enough plate an `R = 8` dome takes `r = 30`
@@ -648,6 +680,53 @@ variant of this one. It pins D6 against regression and it covers the other end o
 the same axis: a blend whose radius approaches the curvature it has to follow has
 no constant-radius solution, and a dome is the cheapest place to show both the
 size that fits and the size that cannot.
+
+---
+
+## BRUSH-WIDTH — pin what a narrow brush does, and say it on purpose
+
+Found while writing the doc figures, measured, and currently correct but
+unpinned and unstated.
+
+**A brush selects; it does not shape.** The blend built along a selected stretch
+is the full requested profile however narrow the brush is. Measured on a 20 mm
+cube edge at `r = 3`: a brush 0.02 mm wide across the edge and a brush 8 mm wide
+give the same **2.32670** of tool volume per millimetre of edge — identical to
+six figures. The brush clips the spine, not the section.
+
+**That makes "one whole edge, and only that edge" expressible, via a rule written
+for something else.** Any brush tall enough to contain a full vertical edge of a
+cube also contains the first few millimetres of the four horizontal edges meeting
+it, so the obvious brush selects 5 of 12, not 1. Making the brush narrow enough
+puts those four overlaps under `minLength = 0.01 * size` and they are dropped, so
+the count is 1 of 12 and the one edge is blended over its full height.
+
+The comment at that constant says the stub it drops "is never intentional" — it
+was written for a brush face nearly tangent to the spine crossing it twice a hair
+apart. The doc page now leans on it deliberately, which is a second job the
+constant was not given on purpose.
+
+**No warning or log accompanies any of this**, which is right: the echo line
+already reports `takes 1 of 12 candidate edge(s)`, and the count is after the
+drop, so the user sees the answer without a warning about a stub they never
+asked for. Do not add one — a warning would fire on the accidental case the rule
+was written for, which is exactly the case nobody needs told about.
+
+**Do:**
+
+1. A unit test in `FilletBuilder_test.cc` pinning the section against brush
+   width — two brushes of very different widths over the same stretch of one
+   crease, same tool volume per unit length. This is the property the doc page
+   states and nothing currently holds it.
+2. A second one pinning the narrow-brush selection count at 1 of 12 where a wide
+   one gives 5, so the documented recipe fails loudly if `minLength` is ever
+   retuned.
+3. Extend the comment at `minLength` to say it has a second, deliberate use: it
+   is what makes a full-length single-edge selection reachable, and it is
+   documented as such. Someone tightening that constant to chase a tangency
+   artifact would otherwise break a documented recipe with no test in the way.
+
+Note the two tests are cheap — they are builder-level, not renders.
 
 ---
 

@@ -24,6 +24,7 @@
 #include <algorithm>
 #include <cmath>
 #include <cstddef>
+#include <limits>
 #include <utility>
 #include <vector>
 
@@ -226,6 +227,28 @@ Manifold refRoundedConvex(const Manifold& solid, double r)
   return Manifold::Hull(balls);
 }
 
+// The least area any one triangle of a solid encloses. The count below asks
+// whether a triangle has collapsed exactly; this asks how close the nearest one
+// is to collapsing, which is the question when two faces of the tool leave each
+// other at a fraction of a degree rather than lying on each other. What comes of
+// that is a triangle with area and no shape, and CGAL refuses those as readily.
+double smallestTriangleArea(const Manifold& solid)
+{
+  const manifold::MeshGL64 mesh = solid.GetMeshGL64();
+  const size_t stride = mesh.numProp;
+  auto vert = [&](size_t i) {
+    const size_t base = mesh.triVerts[i] * stride;
+    return vec3(mesh.vertProperties[base], mesh.vertProperties[base + 1],
+                mesh.vertProperties[base + 2]);
+  };
+  double least = std::numeric_limits<double>::max();
+  for (size_t i = 0; i + 2 < mesh.triVerts.size(); i += 3) {
+    const vec3 a = vert(i), b = vert(i + 1), c = vert(i + 2);
+    least = std::min(least, 0.5 * manifold::la::length(manifold::la::cross(b - a, c - a)));
+  }
+  return least;
+}
+
 // How many triangles of a solid enclose no area at all: three points on one
 // line, or two of them at the same place. Where a tool's arc runs along a wall
 // rather than across it, the strip left between the two is thin enough that
@@ -410,7 +433,56 @@ TEST_CASE("the rounded tools leave no triangle without area")
 
   const auto pocket = Manifold::Cylinder(h, R, 0.0, 3, false);
   const auto block = box(2 * R, 2 * R, h + cap).Translate(vec3(-R, -R, 0));
-  CHECK(degenerateTriangles(roundToolFor(block - pocket, 6.0, /*concave=*/true, 24, 22.5)) == 0);
+  const double pr = 6.0;
+  const auto pocketTool = roundToolFor(block - pocket, pr, /*concave=*/true, 24, 22.5);
+  CHECK(degenerateTriangles(pocketTool) == 0);
+
+  // And how near the pocket comes to having one, which is the half of this the
+  // count could not reach. A spike is where two of the tool's faces can differ by
+  // least: one segment from base to apex, walls that barely turn, and a corner
+  // closing three beads at once. It used to leave nine triangles of 2.4e-13 at
+  // the height each slant bead is cut back at — enough for CGAL to refuse the
+  // whole solid, and invisible to a test asking whether a triangle had collapsed
+  // exactly. The bound is scale-relative and two orders under what is measured
+  // here, so the tessellation may move the number without moving the fact.
+  CHECK(smallestTriangleArea(pocketTool) > 1e-9 * pr * pr);
+}
+
+TEST_CASE("a corner sheds nothing of what it stands past its walls")
+{
+  // The other half of the same doctrine, and the half a triangle count cannot
+  // see. Every cell stands a measured distance past the walls it stops at; the
+  // canals cut deeper still, so along a crease that overshoot ends where the
+  // bead does. At a corner the cutter is a ball, and a ball seated against a
+  // wall touches it at one point — so the overshoot the corner cell has there is
+  // reachable by nothing, and the canals running into the junction cut it away
+  // from everything else on their way past. What is left is a wafer of the
+  // tool's own overshoot, joined to no part of the tool, and it is a wafer and
+  // not a sliver: it has volume, no triangle in it is degenerate, and the only
+  // thing that says it is there is counting the pieces.
+  //
+  // Two overlapping bosses on a plate: three walls at each of the two crossings,
+  // curved creases into them, and — at this tessellation — a ball fine enough
+  // that it no longer blunders past the plate by its own coarseness, which is
+  // what had been hiding this. At 24 it does and the tool comes back whole
+  // either way, so the segment count here is the whole reproduction.
+  const double RB = 10.0, HB = 20.0, PT = 6.0, r = 2.0;
+  const auto boss = [&](double x) {
+    return Manifold::Cylinder(HB, RB, RB, 48, false).Translate(vec3(x, 20.0, PT));
+  };
+  const auto model = box(60.0, 40.0, PT) + boss(22.0) + boss(36.0);
+
+  const auto tool = roundToolFor(model, r, /*concave=*/true, 48, 22.5);
+  REQUIRE_FALSE(tool.IsEmpty());
+
+  size_t pieces = 0;
+  for (const auto& part : tool.Decompose())
+    if (std::abs(part.Volume()) > 1e-9 * std::abs(tool.Volume())) ++pieces;
+  CHECK(pieces == 1);
+
+  // The two arcs close into a loop through the two corners, so one piece is not
+  // enough on its own: a tool that lost a corner would also be one piece.
+  CHECK(tool.Genus() == 1);
 }
 
 TEST_CASE("round_tool: a three-face and a four-face apex both close")

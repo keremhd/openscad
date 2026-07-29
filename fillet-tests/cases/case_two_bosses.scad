@@ -31,17 +31,21 @@
 // each other, and whether the ring bead runs out into it cleanly or leaves the
 // notch the tee's four runouts do.
 //
-// The bosses are 24-gons, not the 48 this case was drafted with, and that is a
-// finding rather than a cost saving. At 48 the tool comes back as THREE pieces:
-// the right one, plus a detached wafer at each junction, 0.076 x 0.061 x 0.005
-// and 5.2e-06 of volume, sitting on the plate face where the two ring beads'
-// outer edges cross. It is the wedge's own eps overshoot again, shed by the
-// corner cell — the same corner-cell geometry the pocket cases are permanently
-// red for, seen for the first time on a curved junction. At 24 there is no
-// crumb and the genus is right, so the case is written where the operator is
-// sound and the crumb is recorded here rather than pinned as correct. A 24-gon
-// still turns 15 degrees a facet against a 22.5-degree threshold, so the ring
-// is a curve to the classifier either way.
+// The bosses are 24-gons, not the 48 this case was drafted with. At 48 the tool
+// used to come back as THREE pieces: the right one, plus a detached wafer at
+// each junction, sitting on the plate face where the two ring beads' outer edges
+// cross — which is where the corner ball touches the plate. A ball seated
+// against a wall touches it at one point, so the overshoot the corner cell
+// stands past that wall was reachable by nothing, and the canals running into
+// the junction cut it free of everything else. Every corner ball now carries a
+// point out past each wall it is seated against, the same way every arc already
+// did, and the tool is one piece of the right genus at 48 as well.
+//
+// The case stays at 24 anyway, because that is not what it is asking. A 24-gon
+// still turns 15 degrees a facet against a 22.5-degree threshold, so the ring is
+// a curve to the classifier either way, and the question here is topological.
+// The 48-gon shape is the cheap reproduction of the wafer and is pinned as one
+// in FilletCompare_test.cc, where it costs no dilation.
 //
 // One size. The question is topological, and a second radius asks it again at a
 // full check's cost; r = 2 matches its two sibling curved-crease cases so the

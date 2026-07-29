@@ -545,7 +545,7 @@ TEST_CASE("refillet: a rounded solid re-read carries creases its shape does not 
   // within a fraction of a percent of its volume. What is wrong is the mesh: the
   // beads meet the flat faces and each other tangentially, and a tangential
   // meeting triangulates into slivers whose normals are numerical noise. On a
-  // 40 mm part the creases below sit on edges four orders of magnitude smaller.
+  // 40 mm part the creases below sit on edges three orders of magnitude smaller.
   //
   // Those slivers are the same ones that make a filleted pocket impossible to
   // dilate through CGAL, measured from the other end: there they stop a check
@@ -579,12 +579,19 @@ TEST_CASE("refillet: a rounded solid re-read carries creases its shape does not 
   CHECK(c.feature > 100);
   CHECK(c.featureConcave > 100);   // on a solid that is convex everywhere
 
+  // How thin the mesh gets where it does this. A bound and not a number: what it
+  // is for is to say that a crease the classifier reports here sits on an edge no
+  // real feature of a 40 mm part would, so the disagreement is the triangulation
+  // and not the shape. It has moved twice as the tangential contact was reduced —
+  // 6.6e-4, then 1.3e-3 when the arcs were taken past their walls, then 5.6e-3
+  // when the corner cells stopped being hulled against the beads they close — so
+  // it is written where the measurement is rather than where it once was.
   const MergedMesh rm = mergeMesh(rounded.GetMeshGL64());
   const auto radj = buildEdgeAdjacency(rm.tris);
   double shortest = std::numeric_limits<double>::max();
   for (const auto& key : selectedEdges(rm, radj, 18.0, /*wantConcave=*/true))
     shortest = std::min(shortest, (rm.pos[key.first] - rm.pos[key.second]).norm());
-  CHECK(shortest < 1e-3 * r);
+  CHECK(shortest < 5e-3 * r);
 }
 
 TEST_CASE("chains: two seams that cross do so where neither is still a crease")
