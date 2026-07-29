@@ -1551,6 +1551,36 @@ TEST_CASE("size: only the stretch of crease the brushes kept is asked about")
   for (const auto& v : verdicts) CHECK(v.where.z() > 90.0);
 }
 
+TEST_CASE("size: a spine that turns from one wall onto the next still meets both")
+{
+  // An L bracket, and the crease that matters is not the reflex one. Round the
+  // end face's outline and the spine turns 90 degrees at the L's reentrant
+  // corner, from the wall above it onto the wall beside it. The ball seated
+  // there is seated on the average of two walls' normals, so the point it
+  // touches on either one of them is the crease *between* them — on the
+  // boundary of each, exactly and at every radius, which is what the touching
+  // question calls a wall running out. It is the ball rolling from one wall
+  // onto the next instead, and nothing about the size is wrong: both radii fit
+  // on both proportions, and the reflex crease they meet is untouched.
+  for (const auto& wh : {std::pair{10.0, 26.0}, std::pair{6.0, 26.0}}) {
+    const auto bracket = box(30.0, wh.first, wh.second) + box(30.0, 26.0, 12.0);
+    for (const double r : {1.0, 2.0}) {
+      const SizeRun outer = sizeRun(bracket, r, /*concave=*/false, /*wedge=*/false, 18.0);
+      CHECK(countFault(outer.verdicts, SizeFault::OffFace) == 0);
+      const SizeRun inner = sizeRun(bracket, r, /*concave=*/true, /*wedge=*/false, 18.0);
+      REQUIRE(inner.chains.size() == 1);
+      CHECK(inner.verdicts[0].fault == SizeFault::Fits);
+    }
+  }
+
+  // And the exemption is for the turn and not for the chain: a spine turning at
+  // a corner of a wall that genuinely has run out is still refused, at the
+  // samples either side of the turn, which each ask about one wall.
+  const auto ledge = box(30.0, 10.0, 13.0) + box(30.0, 26.0, 12.0);
+  const SizeRun over = sizeRun(ledge, 2.0, /*concave=*/false, /*wedge=*/false, 18.0);
+  CHECK(countFault(over.verdicts, SizeFault::OffFace) > 0);
+}
+
 TEST_CASE("size: a cube's rounds are limited by the edge across the face")
 {
   // Nothing is off its face here — r = 30 reaches back only 30 of the 40 mm

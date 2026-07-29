@@ -641,11 +641,20 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
   // then the wall has ended and the ball is hanging off it. The boundary is part
   // of the wall, so its distance is never less than the wall's own; equal is
   // what says the contact sits on it.
-  auto seatOn = [&](ChainContact& c, const Vector3d& n, int surface, Vector3d& T) {
+  //
+  // `turned` says the chain changes walls on this side at this station — the
+  // spine's own corner. There the averaged normal is the average of two
+  // different walls' normals, so the point it seats lands on the crease between
+  // them: on the boundary of each, by construction and at any size. That is the
+  // ball rolling from one wall onto the next, which is what a chain that turns
+  // is, and not a wall running out. The question is left to the samples either
+  // side, which each ask about one wall.
+  auto seatOn = [&](ChainContact& c, const Vector3d& n, int surface, Vector3d& T, bool turned) {
     Vector3d onWall;
     const double d = nearestOnSurface(c.C, surface, &onWall);
     if (!std::isfinite(d)) return;  // no wall to ask; leave the constructed point
     T = onWall;
+    if (turned) return;
 
     double rim = std::numeric_limits<double>::infinity();
     for (const EdgeKey& e : surfaceRim[surface])
@@ -658,7 +667,8 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
     c.offFace = std::max(c.offFace, nearestOnSurface(c.C - dir * c.radius * n, surface, nullptr));
   };
 
-  auto contactAt = [&](const StationNormals& s, int vert) {
+  auto contactAt = [&](const StationNormals& s, int vert, bool turnedA = false,
+                       bool turnedB = false) {
     ChainContact c;
     c.v = s.v;
     c.vert = vert;
@@ -685,8 +695,8 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
       c.surfaceB = surfaceOf[s.triB];
     c.valid = std::isfinite(r) && c.C.allFinite();
     if (c.valid) {
-      seatOn(c, s.nA, c.surfaceA, c.TA);
-      seatOn(c, s.nB, c.surfaceB, c.TB);
+      seatOn(c, s.nA, c.surfaceA, c.TA, turnedA);
+      seatOn(c, s.nB, c.surfaceB, c.TB, turnedB);
     }
     return c;
   };
@@ -707,6 +717,19 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
   const size_t n = stations.size();
   const size_t segments = n < 2 ? 0 : (chain.closed ? n : n - 1);
 
+  // Which walls the chain has either side of it as it arrives at a station and
+  // as it leaves — the same sided convention the normals are averaged under, so
+  // the two can be compared side by side. A station with only one incident edge
+  // has nothing to turn between.
+  auto sideSurfaces = [&](int a, int b, int& sA, int& sB) {
+    sA = sB = -1;
+    int tA = -1, tB = -1;
+    if (!sidedTris(m, adj, a, b, tA, tB)) return false;
+    if (tA >= 0 && static_cast<size_t>(tA) < surfaceOf.size()) sA = surfaceOf[tA];
+    if (tB >= 0 && static_cast<size_t>(tB) < surfaceOf.size()) sB = surfaceOf[tB];
+    return true;
+  };
+
   std::vector<ChainContact> out;
   out.reserve(n * (1 + std::max(samplesPerSegment, 0)));
   for (size_t i = 0; i < n; ++i) {
@@ -715,7 +738,16 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
     // the chain — which is what the callers that exempt them are asking about.
     ChainContact station;
     if (isBuilt(static_cast<double>(i))) {
-      station = contactAt(stations[i], chain.verts[i]);
+      bool turnedA = false, turnedB = false;
+      const int prevV = i > 0 ? chain.verts[i - 1] : (chain.closed ? chain.verts[n - 1] : -1);
+      const int nextV = i + 1 < n ? chain.verts[i + 1] : (chain.closed ? chain.verts[0] : -1);
+      int inA = -1, inB = -1, outA = -1, outB = -1;
+      if (prevV >= 0 && nextV >= 0 && sideSurfaces(prevV, chain.verts[i], inA, inB) &&
+          sideSurfaces(chain.verts[i], nextV, outA, outB)) {
+        turnedA = inA != outA;
+        turnedB = inB != outB;
+      }
+      station = contactAt(stations[i], chain.verts[i], turnedA, turnedB);
     } else {
       station.v = stations[i].v;
       station.vert = chain.verts[i];
