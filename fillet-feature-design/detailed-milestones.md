@@ -1,5 +1,12 @@
 # Fillet Operator — Detailed Milestone Split
 
+> **Read [`remaining-work.md`](remaining-work.md) first.** M0–M10 and the size
+> gate are landed, and this document is now a **record of what shipped and why**,
+> not a to-do list. Everything still outstanding lives in `remaining-work.md`,
+> which supersedes this file wherever the two disagree. Several items still
+> described as future work below — M11 above all — have been **cancelled**, with
+> the reasons recorded there. Do not pick one up from this file.
+
 Companion to `fillet-operator-plan.md`. That document is the design; this one is
 the delivery plan: small, individually mergeable milestones, plus the
 visual-inspection harness used to steer and verify the work.

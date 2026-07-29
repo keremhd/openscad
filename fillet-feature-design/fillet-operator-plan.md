@@ -9,6 +9,13 @@ with reasons. Read [§9 Do Not Do This](#9-do-not-do-this) before writing code.
 Several items there are traps that look correct and produce plausible-but-wrong
 geometry.
 
+> **Status.** This is the design and it still holds. It is **not** the to-do
+> list: most of it is built. For what is left, read
+> [`remaining-work.md`](remaining-work.md), which supersedes this document
+> wherever the two disagree — notably §8 (re-fillet tagging) and §11 (analytic
+> fast paths), both cancelled, and §2.1 (the wrapper as bundled SCAD), overruled
+> in favour of a C++ node.
+
 ---
 
 ## 1. Core concept
