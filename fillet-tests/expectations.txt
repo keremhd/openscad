@@ -43,11 +43,20 @@ selftest_wrongradius    *  *         PASS
 #
 # What is left is not about the fillet either. Corner cells exist now and these
 # pockets close correctly — pinned exactly, against a shrink-and-grow reference,
-# in FilletCompare_test.cc. But at every corner a sphere sits tangent to three
-# walls, and the surfaces meeting along those tangencies leave triangles too
-# small to survive CGAL quantising its input, so the applied result is still not
-# a solid the Nef kernel will dilate. Reducing that tangential contact is what
-# turns these green; nothing about the corner geometry will.
+# in FilletCompare_test.cc. What CGAL will not dilate is the mesh, and these two
+# lines used to say why: the tangency between the tool's arcs and the walls they
+# ride. That was measured and fixed, and it was not what holds these two. The
+# tool for these pockets now has no degenerate triangle in it at all, and CGAL
+# still refuses it, over nine triangles of about 1e-13 that all sit at the one
+# height where each of the three slant beads is cut back for the apex corner.
+#
+# That is a different tangency, and one these cases are the extreme of: the
+# corner cell is hulled against a section of the bead it is closing, so on a
+# spike — one segment from base to apex, walls that barely turn — its faces
+# leave the bead's at a fraction of a degree. Nothing about the arcs reaches it.
+# It is the same shape the apex lines below are red for, seen by a different
+# check, and it wants the corner cell rethought rather than nudged: probing the
+# separation the cell is hulled at moves the count around without a floor.
 case_junction3_pocket   *  sandwich  FAIL
 case_junction4_pocket   *  sandwich  FAIL
 

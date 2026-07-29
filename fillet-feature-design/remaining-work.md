@@ -26,9 +26,9 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
    it changed.
 2. ~~**D1 and D6**~~ — **done.** See below for what the nearest-point route did
    and did not replace.
-3. **D2** — no longer merely cosmetic. T1 showed the same slivers make the
-   operator's own output unreadable by the operator, so this is worth more than
-   the timebox it was given.
+3. ~~**D2**~~ — **done.** The cause was not the one written down; see below, and
+   [`log-2026-07-29-d2.md`](log-2026-07-29-d2.md). Two `sandwich` lines it was
+   expected to clear turn out to be a different problem and are still red.
 4. **M12** — the wrapper.
 5. **T2** — the last case worth building.
 6. **DOC**, then **CLEAN**.
@@ -149,11 +149,16 @@ orders of magnitude smaller.
 
 **Those are the same slivers as D2**, measured from the other end. There they
 stop CGAL dilating a filleted pocket; here they make the operator's own
-classifier disagree with the shape it just built. So reducing the tangential
-contact is not a test-only fix worth a timebox and no more — it is the one change
-that makes the operator's output re-readable by the operator. Weigh D2
-accordingly, and if the phase shift lands, re-run this test and record what the
-counts become.
+classifier disagree with the shape it just built.
+
+**Re-run after D2 landed, as that section asked.** The counts move and do not
+collapse: 650 features and 383 spurious concave ones become 480 and 288, and the
+shortest edge a spurious crease sits on doubles, from 6.6e-4 to 1.3e-3 on a
+40 mm part. A quarter of the noise was the tool's own sliver strip and is gone
+with it. The rest is not the tool's to remove: the bead really does meet the
+flat face tangentially in the *applied* result, which is what a fillet is, so
+any tessellation of it triangulates into something whose normals are noise. This
+is a re-read problem, and `min_angle=` is the answer that ships for it.
 
 ---
 
@@ -360,23 +365,73 @@ nearest neighbour of a false acceptance.
 
 ---
 
-## D2 — the bare rounded tool will not convert to Nef
+## D2 — the bare rounded tool will not convert to Nef — **DONE, and it was not
+the corners**
 
-At every corner a sphere sits tangent to three walls, and the surfaces meeting
-along those tangencies leave triangles too small to survive CGAL quantising its
-input. *Applying* the tool is fine on both backends; the bare tool is not, so
-`round_tool(r=2) cube();` under `--backend=cgal` renders with facets dropped.
-`render-cgal_round-tool-tests` and `render-csg-cgal_round-tool-tests` are
-disabled for it, and seven `sandwich` checks in `fillet-tests/` are red for it.
+The two disabled CTests are re-enabled and pass. The `sandwich` lines in
+`fillet-tests/` are all still there, and the measurement below says why: they
+were never this bug. Their ledger entry has been rewritten rather than deleted.
 
-**The approach to try: phase the arc tessellation so a vertex lands past the
-wall, rather than a facet grazing it.** It is local to the section construction,
-changes no radius, and removes the sliver at its source.
+**The diagnosis in the paragraph this section used to open with was wrong.** It
+was not the corner spheres, and it was not "too small to survive quantising"
+either — CGAL's kernel is exact and never quantises anything. What it does is
+refuse a mesh whose triangles enclose no area, and the tool had those by the
+dozen along every crease it rounded. A cube's tool had 25 of them; a cylinder's,
+which has closed chains and therefore no junctions at all, had none, and
+converted cleanly all along. The corners were where they were *counted*, not
+where they came from.
 
-Rejected alternative, for the record: growing the ball by an eps so it cuts into
-the wall instead of kissing it. That loses tangency by about 2.6 degrees at
-`r = 3, eps = 1e-3` and perturbs the blend everywhere, to fix a problem that only
-shows on the bare tool.
+Where they came from: the arc and the wedge stop at different distances from the
+wall. The wedge stands `eps` past it so the caller's boolean has something to
+cut; the arc is tangent, so it reaches the wall exactly and no further. Between
+the two, all along the crease, is a strip of the wedge's own overshoot — `eps`
+thick, running out to nothing at either end where the arc curves away. That
+strip is the sliver, and refining the arc only makes it thinner: it is the gap
+between a tangent and its tangent plane. Junctions are where it acquires extra
+vertices along its length, from the corner cells cutting the crease short, and
+three collinear points on the edge of a strip that thin is a triangle with no
+area in it.
+
+**What landed** is a ladder of overshoots, each piece of the tool standing
+further past a wall than the piece it has to cut through, so that a cut always
+crosses a face and never arrives along it:
+
+| | past each wall |
+|---|---|
+| wedge cells | `eps` |
+| corner cells | `1.5 eps` |
+| what is subtracted — the arc | `2 eps` |
+
+The arc's is two extra hull points per section, in the two tangency directions.
+The arc itself is untouched: it is not a larger ball, and the blend still meets
+each wall where a ball of exactly `r` touches it, to within the overshoot the
+tool already carries there. That is the difference from the alternative this
+section rejected — growing the ball by an eps loses tangency everywhere and
+moves the blend; two hull points at the ends of the arc move nothing the caller
+can see.
+
+The corner cell needed two changes to sit in that ladder. Its overshoot had been
+deliberately *smaller* than the wedge's, on the argument that matching it would
+put two faces in one plane; smaller turns out to be the worse of the two, since
+the face then grazes just beneath rather than crossing. And its vertex point was
+displaced once along the bisector, which is short of the wall plane by the
+cosine — enough to tilt the cell's whole wall face and leave a flake of the
+model unblended along the junction, at a thickness that scaled with the
+overshoot. One copy of the vertex per wall, each along its own normal, and the
+face is that wall's plane exactly. The flake had been there all along, just
+under the exact comparisons' threshold; it is gone now rather than merely small.
+
+**What it did not fix, measured.** `case_junction3_pocket` and
+`case_junction4_pocket` have no degenerate triangle left in them and CGAL still
+refuses them, over nine triangles of about 1e-13 that sit at the one height on
+each slant bead where it is cut back for the apex corner. That is a second
+tangency and a different one: the corner cell is hulled against a section of the
+bead it closes, so on a spike — one segment from base to apex, walls that barely
+turn — its faces leave the bead's at a fraction of a degree. Probing the
+separation the cell is hulled at moves the count around without finding a floor,
+which is the signature of a shape problem rather than a constant to tune. It
+wants the corner cell rethought, and it is the same geometry the apex `sandwich`
+lines are already documented as permanently red for. Not reopened here.
 
 ### A second filter on face size cannot substitute for this — measured
 
@@ -427,15 +482,16 @@ constant needs a `min_area=` beside `min_angle=`, it is that no value of such a
 parameter separates the two populations. Reject this line; fix the mesh at the
 source.
 
-**Timebox this.** The fallback is exactly the status quo, whose reasoning is
-already recorded in `tests/CMakeLists.txt` and `fillet-tests/expectations.txt`. If
-the phase shift does not take, leave it and move on — do not escalate into the
-circular-segment rewrite (see Cancelled, below).
+**Acceptance, and what of it was met.** The two disabled CTests are re-enabled
+and pass, and their `render-cgal` baseline is regenerated. The exact comparisons
+in `FilletCompare_test.cc` are green and untouched, and one test is added there:
+the tools' meshes must contain no triangle without area, on both signs, which
+fails on the code before this and is the whole defect in one number. The pocket
+and apex `sandwich` lines did **not** go green and are still listed, for the
+reason above — measured, not assumed.
 
-**Acceptance:** the two disabled CTests are re-enabled and pass; the pocket and
-apex `sandwich` lines in `expectations.txt` go green and are deleted. The applied
-results do not change beyond tessellation phase — the exact comparisons in
-`FilletCompare_test.cc` must stay green untouched.
+The circular-segment rewrite stays cancelled (see Cancelled, below). It was
+listed as the fallback route to this, and this did not need it.
 
 ---
 
@@ -573,8 +629,7 @@ pending.
   rejected node-tree pattern-matching in section 10. Nothing has demanded it.
 - **The circular-segment section** (written at M7 and backed out). **Cancelled as
   a work item.** It was two things: a vertex-count saving nobody asked for, and a
-  possible route to D2. D2 has a cheaper route. If the phase shift fixes D2, this
-  has no remaining reason to exist.
+  possible route to D2. D2 landed without it, so neither reason survives.
 - **A second classifier filter on face area, edge length or triangle quality**,
   beside the angle test. **Cancelled — measured, and the two populations are
   inverted.** The numbers are under D2. It is not a matter of tuning the constant

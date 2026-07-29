@@ -226,6 +226,30 @@ Manifold refRoundedConvex(const Manifold& solid, double r)
   return Manifold::Hull(balls);
 }
 
+// How many triangles of a solid enclose no area at all: three points on one
+// line, or two of them at the same place. Where a tool's arc runs along a wall
+// rather than across it, the strip left between the two is thin enough that
+// triangulating it produces these, and CGAL reads one as a self-intersection and
+// refuses the whole solid — so a tool with any is a tool no Nef boolean will
+// take. Manifold is content either way, which is why nothing else notices.
+size_t degenerateTriangles(const Manifold& solid)
+{
+  const manifold::MeshGL64 mesh = solid.GetMeshGL64();
+  const size_t stride = mesh.numProp;
+  auto vert = [&](size_t i) {
+    const size_t base = mesh.triVerts[i] * stride;
+    return vec3(mesh.vertProperties[base], mesh.vertProperties[base + 1],
+                mesh.vertProperties[base + 2]);
+  };
+
+  size_t count = 0;
+  for (size_t i = 0; i + 2 < mesh.triVerts.size(); i += 3) {
+    const vec3 a = vert(i), b = vert(i + 1), c = vert(i + 2);
+    if (manifold::la::length(manifold::la::cross(b - a, c - a)) == 0.0) ++count;
+  }
+  return count;
+}
+
 }  // namespace
 
 TEST_CASE("comparison: tessellation differences pass, size differences do not")
@@ -367,6 +391,26 @@ TEST_CASE("round_tool: the cube corner closes onto the true rounded solid")
   REQUIRE_FALSE(tool.IsEmpty());
 
   CHECK(agreesWithin(model - tool, refRoundedConvex(model, r), 0.02 * r));
+}
+
+TEST_CASE("the rounded tools leave no triangle without area")
+{
+  // What a rounded tool is made of meets itself tangentially everywhere: the arc
+  // runs along both its walls rather than across them, and at a corner the ball
+  // does the same to three at once. Every piece of the tool is therefore built a
+  // measured distance past the wall it stops at, so that a cut crosses a face
+  // instead of arriving along it — and this is the check that says so, since
+  // Manifold is perfectly happy either way and only the kernels downstream are
+  // not. Both signs and both shapes of corner, because the tangency does not
+  // care which way the material lies.
+  const double s = 16.0, r = 2.0, R = 30.0, h = 60.0, cap = 5.0;
+
+  const auto cube = box(s, s, s);
+  CHECK(degenerateTriangles(roundToolFor(cube, r, /*concave=*/false, 32)) == 0);
+
+  const auto pocket = Manifold::Cylinder(h, R, 0.0, 3, false);
+  const auto block = box(2 * R, 2 * R, h + cap).Translate(vec3(-R, -R, 0));
+  CHECK(degenerateTriangles(roundToolFor(block - pocket, 6.0, /*concave=*/true, 24, 22.5)) == 0);
 }
 
 TEST_CASE("round_tool: a three-face and a four-face apex both close")

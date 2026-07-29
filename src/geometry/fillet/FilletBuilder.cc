@@ -1178,11 +1178,32 @@ RoundSection makeRoundSection(const Vector3d& v, const Vector3d& nA, const Vecto
 
   s.w = pentagonSection(v, nA, nB, bis, TA, TB, dir, eps);
   s.C = C;
-  s.u.reserve(segs);
+  s.u.reserve(segs + 2);
   for (int k = 0; k < segs; ++k) {
     const double a = 2.0 * M_PI * k / segs;
     s.u.push_back(C + r * (std::cos(a) * e1 + std::sin(a) * e2));
   }
+  // Two more, one per wall, in the tangency directions and further out than
+  // anything the subtraction has to cut through. Without them the arc only
+  // kisses each wall while the wedge reaches eps past it, so what the
+  // subtraction leaves is a strip of the wedge's own overshoot — eps thick, as
+  // long as the crease, and running out to nothing where the arc curves away
+  // from the wall at either end of it. That strip is the sliver, and no amount
+  // of arc segments removes it: it is the gap between a tangent and its tangent
+  // plane, so refining the tangent only makes it thinner. Taking the arc past
+  // the wall instead has it cross the wedge's wall face at a real angle and the
+  // strip never exists.
+  //
+  // The arc itself is untouched — these are two extra points for the hull to
+  // reach, not a larger ball — so the blend still meets each wall where a ball
+  // of exactly r touches it, to within the overshoot the tool already carries
+  // there. The distance is the top of the ladder every piece of the tool sits
+  // on: the wedges stand eps past each wall, the corner cells further, and what
+  // is subtracted further still, so that a cut always crosses a face and never
+  // arrives along it.
+  const double past = 2.0 * eps;
+  s.u.push_back(TA - dir * past * nA);
+  s.u.push_back(TB - dir * past * nB);
   s.valid = true;
   return s;
 }
@@ -1349,26 +1370,26 @@ RoundSection lerpSection(const RoundSection& a, const RoundSection& b, double s)
 //
 // The vertex and the tangency points are taken `over` past their walls rather
 // than on them, for the reason the edge cells' pentagon is: a face resting
-// exactly on a wall asks a boolean to resolve two coincident surfaces. Two
-// things bound how far. It must not be the edge cells' own overshoot, or the
-// corner cell's wall face lands in their plane and the coincidence is back,
-// inside the tool this time, as a scatter of triangles too small to survive a
-// kernel that quantises its input. And it must not exceed it either, or the tool
-// presents two overshoot depths past one wall and the caller's boolean has two
-// slivers to resolve instead of one. Half the edge cells' is inside both.
+// exactly on a wall asks a boolean to resolve two coincident surfaces. Both go
+// out along their own wall's normal, one copy of the vertex per wall, so that
+// every point this cell has near a wall is the same distance past it and the
+// hull's face there is that wall's plane exactly. Displacing the vertex once
+// along the bisector instead put it short of that plane by the cosine, which
+// tilted the face by a hair and left a flake of the model unblended along the
+// junction, at a thickness that scaled with `over`.
+//
+// `over` must then be larger than the edge cells' own overshoot rather than
+// smaller. Equal, and the corner cell's wall face lands in their plane and the
+// coincidence is back, inside the tool this time; smaller, and it grazes just
+// beneath it, which is worse. Larger, and the two cross at a real angle.
 manifold::Manifold cornerCell(const Junction& j, const Vector3d& vj,
                               const std::vector<std::array<Vector3d, 5>>& endSections, double r,
                               double dir, double over)
 {
-  Vector3d bis = Vector3d::Zero();
-  for (const Vector3d& n : j.faceNormals) bis += n;
-  if (bis.norm() < 1e-9) return {};
-  bis.normalize();
-
   std::vector<manifold::vec3> pts;
   auto add = [&pts](const Vector3d& p) { pts.emplace_back(p.x(), p.y(), p.z()); };
 
-  add(vj - dir * over * bis);
+  for (const Vector3d& n : j.faceNormals) add(vj - dir * over * n);
   for (const Vector3d& P : j.ballCentres)
     for (const Vector3d& n : j.faceNormals) {
       // Only the walls this ball is actually seated against; the others it
@@ -1593,7 +1614,7 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   for (const Junction& j : junctions) {
     if (j.ballCentres.empty()) continue;
     manifold::Manifold cell =
-      cornerCell(j, m.pos[j.vert], endSections[j.vert], r, dir, /*over=*/0.5 * eps);
+      cornerCell(j, m.pos[j.vert], endSections[j.vert], r, dir, /*over=*/1.5 * eps);
     if (cell.IsEmpty()) continue;
     wedgeCells.push_back(std::move(cell));
     // One ball per reachable centre, hulled together. The hull is not an
