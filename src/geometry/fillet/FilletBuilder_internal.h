@@ -297,7 +297,7 @@ enum class SizeFault
 {
   Fits,
   OffFace,  // the contact line runs off the end of the wall it should meet
-  Crowded,  // a neighbouring crease sits inside the space this one needs
+  Crowded,  // a neighbouring crease sits inside the material this one needs
 };
 
 // One chain's verdict, carrying where it was decided and by how much, so the
@@ -314,10 +314,12 @@ struct SizeVerdict
 // The tool has to *touch* the model: a seated ball whose nearest point on a wall
 // has run onto that wall's boundary is hanging off the end of it, and no
 // size-preserving blend exists there at all (the arms of an L shorter than the
-// radius). And it has to have the room it needs: a crease that
-// is not this one, sitting closer to the seated ball than the ball's own radius,
-// is a crease whose bead this one would eat — the two features are competing for
-// the same material, and neither can be built as asked.
+// radius). And it has to have the room it needs: another crease's contact point
+// inside the corner this blend occupies — between the two tangency lines, which
+// is the material the bead is made of and not the whole of the seated ball — is
+// a crease whose bead this one would eat, and neither can be built as asked.
+// Two beads sharing a face therefore fit until their tangency lines meet, which
+// on a cube is a radius of half the side.
 //
 // Creases that meet at a junction are exempt from the second test; that is what
 // junction cells are for. Both tests are answered per chain, and a chain that

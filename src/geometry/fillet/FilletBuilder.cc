@@ -780,12 +780,15 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
     contacts.push_back(chainContacts(m, adj, chain, size, concave, wedge, surfaceOf,
                                      /*samplesPerSegment=*/3));
 
-  // The crowding question is asked of a distance between two contact points, and
-  // those sit on a tessellated wall: each is within about half a seam angle of
-  // where the smooth surface would put it. The crease threshold is the largest
-  // seam the tessellation can produce, which makes it the bound on that, and it
-  // also swallows the float noise the plan asks be clamped silently rather than
-  // dropped.
+  // The crowding question is asked of where contact points sit against each
+  // other, and those sit on a tessellated wall: each is within about half a seam
+  // angle of where the smooth surface would put it. The crease threshold is the
+  // largest seam the tessellation can produce, which makes it the bound on that,
+  // and it also swallows the float noise the plan asks be clamped silently
+  // rather than dropped. It widens the region asked about rather than narrowing
+  // it, so the doubtful case is refused: the alternative is accepting a size at
+  // which two beads just touch, which is the tangential contact that leaves
+  // slivers behind.
   const double faceTol =
     std::max(size * (1.0 - std::cos(thresholdDeg * M_PI / 180.0)), 1e-9 * size);
 
@@ -869,17 +872,44 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
     }
     if (verdict.fault != SizeFault::Fits) continue;
 
-    // Is the room it needs its own? Another crease's contact line inside this
-    // ball is that crease's bead being eaten. Creases that meet at a junction
-    // are exempt: sharing the material there is what a corner cell is.
+    // Is the room it needs its own? Another crease's contact line inside the
+    // material this blend uses is that crease's bead being eaten. Creases that
+    // meet at a junction are exempt: sharing the material there is what a corner
+    // cell is.
+    //
+    // The material the blend uses is *not* the seated ball. The ball is tangent
+    // to each wall and goes on reaching along that wall for another radius past
+    // where it touches, into material the finished blend never comes near — the
+    // blend is only the corner between the two tangency lines. Asking the ball
+    // refuses two beads that share a face whenever the face is narrower than
+    // three radii, where they in fact fit until it is narrower than two: on a
+    // cube every radius past a third of the side is refused and every one up to
+    // half of it is buildable. So ask whether the other crease's contact point
+    // lands in the corner region itself.
     for (const ChainContact& c : contacts[ci]) {
       if (!c.valid) continue;
+
+      // The corner region, bounded the way the tool is: between each wall and
+      // the tangency line on it, and no further from the ball centre than the
+      // crease itself. `iA` and `iB` are the unit directions from the centre to
+      // where it touches each wall, reversed — so they point the way the tool
+      // lies, into the material for a round and into the air for a fillet, and
+      // a contact point's component along one is its depth under that wall.
+      const Vector3d iA = (c.C - c.TA).normalized();
+      const Vector3d iB = (c.C - c.TB).normalized();
+      if (!iA.allFinite() || !iB.allFinite()) continue;
+      // How deep under a wall the corner reaches. At a right angle that is the
+      // radius, at a sharper crease more — the tool runs out along the *other*
+      // wall to a point this far under this one — and at a shallow one less.
+      const double deep = c.radius * (1.0 - std::clamp(iA.dot(iB), -1.0, 1.0));
+      const double apex = (c.C - c.v).norm();
+
       for (size_t cj = 0; cj < chains.size() && verdict.fault == SizeFault::Fits; ++cj) {
         if (cj == ci) continue;
-        // Everything this ball can reach is inside that chain's own box or not
+        // Everything this corner can reach is inside that chain's own box or not
         // at issue; without the test the question is asked of every pair of
         // contact points on the model.
-        if (!reach[cj].contains(c.C, c.radius)) continue;
+        if (!reach[cj].contains(c.C, apex)) continue;
         bool meets = false;
         for (const int v : chains[cj].verts)
           if (chainVerts[ci].count(v)) { meets = true; break; }
@@ -887,11 +917,19 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
 
         for (const ChainContact& o : contacts[cj]) {
           if (!o.valid) continue;
-          const double d = std::min((c.C - o.TA).norm(), (c.C - o.TB).norm());
-          if (d < c.radius - faceTol) {
-            verdict = {SizeFault::Crowded, c.v, d};
+          for (const Vector3d& T : {o.TA, o.TB}) {
+            if ((c.C - T).norm() > apex + faceTol) continue;
+            const double underA = (T - c.TA).dot(iA);
+            const double underB = (T - c.TB).dot(iB);
+            if (underA < -faceTol || underA > deep + faceTol) continue;
+            if (underB < -faceTol || underB > deep + faceTol) continue;
+            // What the user can act on is how far off this crease the feature
+            // competing with it sits, not where the ball's centre happened to
+            // land.
+            verdict = {SizeFault::Crowded, c.v, (c.v - T).norm()};
             break;
           }
+          if (verdict.fault != SizeFault::Fits) break;
         }
       }
       if (verdict.fault != SizeFault::Fits) break;

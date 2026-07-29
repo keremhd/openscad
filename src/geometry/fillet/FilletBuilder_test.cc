@@ -1134,6 +1134,51 @@ TEST_CASE("zzdebug rib", "[.]")
   }
 }
 
+TEST_CASE("size: two beads sharing a face fit until their tangency lines meet")
+{
+  // The crowding question is about the material the blend uses, and that is the
+  // corner between the two tangency lines — not the seated ball, which goes on
+  // reaching a whole radius along each wall past where it touches it. Asked of
+  // the ball, a cube refuses every radius past a third of its side; asked of the
+  // corner, it takes every radius up to half of it, which is where the two beads
+  // on a shared face actually meet. The ratio is the answer, not the size: the
+  // same fraction on three cubes.
+  for (const double side : {5.0, 10.0, 20.0}) {
+    const auto cube = box(side, side, side);
+    const SizeRun fits = sizeRun(cube, 0.4 * side, /*concave=*/false);
+    REQUIRE(fits.chains.size() == 12);
+    CHECK(countFault(fits.verdicts, SizeFault::Fits) == 12);
+
+    // And past the meeting point every one of them is refused, as crowded and
+    // not as running off a face: there is face left, it is spoken for.
+    const SizeRun over = sizeRun(cube, 0.55 * side, /*concave=*/false);
+    CHECK(countFault(over.verdicts, SizeFault::Crowded) == 12);
+    // What is reported is how far off the crease the feature competing with it
+    // sits — the neighbouring bead's root on the face they share.
+    CHECK(over.verdicts[0].amount == Approx(0.45 * side).margin(1e-6));
+  }
+
+  // The shape the gate now allows is an ordinary one. r/L = 0.4 on a 5 mm cube
+  // is a rounded cube with 1 mm of flat left on each face, and the tool builds
+  // the hull of eight spheres to within a thousandth of its volume.
+  const double side = 5.0, r = 2.0;
+  const SizeRun run = sizeRun(box(side, side, side), r, /*concave=*/false);
+  const auto rounded = box(side, side, side) -
+                       buildRoundSolid(run.mm, run.adj, run.chains, r, /*concave=*/false, 64);
+  REQUIRE_FALSE(rounded.IsEmpty());
+  CHECK(rounded.Genus() == 0);
+
+  std::vector<manifold::Manifold> balls;
+  for (const double x : {r, side - r})
+    for (const double y : {r, side - r})
+      for (const double z : {r, side - r})
+        balls.push_back(manifold::Manifold::Sphere(r, 64).Translate(manifold::vec3(x, y, z)));
+  const auto ref = manifold::Manifold::Hull(balls);
+  CHECK(rounded.Volume() == Approx(ref.Volume()).epsilon(1e-3));
+  // Volume alone would pass on a shape of the right size in the wrong place.
+  CHECK(((rounded - ref) + (ref - rounded)).Volume() < 0.01 * ref.Volume());
+}
+
 TEST_CASE("size: a blend wider than the face it must meet is refused")
 {
   // The tangency points of a radius-6 bead land 6 along each 30 mm face; at 35
