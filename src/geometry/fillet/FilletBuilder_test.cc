@@ -462,25 +462,23 @@ TEST_CASE("threshold: a real crease shallower than the caller's facets is droppe
   CHECK(isSelected(roof, 20.0, apexA, apexB));
 }
 
-TEST_CASE("threshold: a facet angle equal to the threshold breaks arbitrarily")
+TEST_CASE("threshold: a facet angle equal to the threshold is rejected, all of it")
 {
   // A model tessellated at one setting and filleted at another, which is what a
   // $fn inside a module and a $fn at the call site give you. The caller is at
   // $fn = 24 throughout, so the threshold is 22.5 and only the model moves.
   //
-  // Either side of it the answer is clean: at $fn = 12 the facets turn 30 and
-  // every vertical seam is taken along with the rims, at $fn = 32 they turn
-  // 11.25 and none is. At $fn = 16 the facets turn 22.5 — the threshold exactly
-  // — and the comparison is `dihedral < threshold`, so all sixteen should be
-  // taken. Twelve are.
+  // The tie is reachable rather than hypothetical: the threshold is half again
+  // the caller's facet angle, so a model at two thirds the caller's $fn turns by
+  // exactly it. Either side of that the answer was always clean — at $fn = 12
+  // the facets turn 30 and every vertical seam is a crease, at $fn = 32 they
+  // turn 11.25 and none is. At $fn = 16 they turn 22.5, and a bare comparison
+  // took twelve of the sixteen: the dihedral of a tessellated cylinder does not
+  // come out equal at every seam in double precision, so four landed a few ulp
+  // low. Nothing in the model distinguishes those four.
   //
-  // The four that are not are not distinguishable from the other twelve by
-  // anything in the model; the dihedral of a tessellated cylinder simply does
-  // not come out equal at every seam in double precision. The count below is
-  // that noise, pinned. It is not a contract — a strict inequality would only
-  // move which side of the tie is arbitrary — but until the tie is decided by
-  // something other than rounding, a change in this number means the tie
-  // handling changed, and that is worth being told about.
+  // isFeatureAngle settles it by rejecting the tie, so a prism stays a prism
+  // rather than having three quarters of its facets rounded.
   const double threshold = derivedThreshold(discretizer(24));
   CHECK(threshold == Approx(22.5));
 
@@ -490,7 +488,27 @@ TEST_CASE("threshold: a facet angle equal to the threshold breaks arbitrarily")
   CHECK(classify(manifold::Manifold::Cylinder(20.0, 10.0, 10.0, 32, false), threshold).feature ==
         rims(32));        // facets at 11.25: none of them is
   CHECK(classify(manifold::Manifold::Cylinder(20.0, 10.0, 10.0, 16, false), threshold).feature ==
-        rims(16) + 12);   // facets at 22.5 exactly: twelve of sixteen, arbitrarily
+        rims(16));        // facets at 22.5 exactly: the rims only, all sixteen alike
+}
+
+TEST_CASE("threshold: the tie margin is far below any angle a caller would choose")
+{
+  // The margin exists to absorb the last few ulp of an exact tie and must not
+  // reach anything else. A hair under the threshold was already rejected and
+  // still is; a hair over it is now rejected too, and that hair is 2e-8 degrees
+  // at this threshold — six orders below the smallest angle anyone writes.
+  const double t = 22.5;
+  CHECK_FALSE(isFeatureAngle(std::nextafter(t, 0.0), t));
+  CHECK_FALSE(isFeatureAngle(t, t));
+  CHECK_FALSE(isFeatureAngle(std::nextafter(t, 90.0), t));
+  CHECK(isFeatureAngle(t + 1e-6, t));
+  CHECK(isFeatureAngle(22.500001, t));
+
+  // And it is relative, so it behaves the same wherever the threshold sits.
+  CHECK_FALSE(isFeatureAngle(67.5, 67.5));
+  CHECK(isFeatureAngle(67.5 + 1e-6, 67.5));
+  CHECK_FALSE(isFeatureAngle(1e-3, 1e-3));
+  CHECK(isFeatureAngle(1e-3 + 1e-9, 1e-3));
 }
 
 TEST_CASE("threshold: a solid with no crease in it selects nothing and builds nothing")

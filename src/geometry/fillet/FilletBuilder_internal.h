@@ -101,6 +101,24 @@ struct ClassCounts
   std::size_t featureSameSurface = 0;
 };
 
+// Whether an edge turning dihedralDeg counts as a feature rather than as a seam
+// the tessellation itself produced. Every caller must go through this: the
+// classification, the selection, the smooth-surface grouping and the debug
+// colouring all ask the same question, and at a value where they disagreed an
+// edge would be a crease to one and a flat seam to another.
+//
+// Ties are rejected, not accepted. An exact tie is reachable — the threshold is
+// 1.5x the caller's facet angle, so a model tessellated at two thirds the
+// caller's $fn turns by exactly it — and there the dihedrals land a few ulp
+// either side of the threshold, splitting edges that are identical by symmetry.
+// Rejecting keeps a prism a prism; accepting would round every facet of one.
+// The margin is four orders above that ulp noise and far below any angle a
+// caller chose on purpose.
+inline bool isFeatureAngle(double dihedralDeg, double thresholdDeg)
+{
+  return dihedralDeg >= thresholdDeg * (1 + 1e-9);
+}
+
 // Walk the adjacency, classify every two-face edge, and tally the counts. Edges
 // with a dihedral below thresholdDeg are treated as seams and skipped. Same-
 // source-id ("same-surface") edges are only tallied when useProvenance is set

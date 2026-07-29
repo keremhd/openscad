@@ -142,7 +142,7 @@ ClassCounts classifyEdges(const MergedMesh& m,
     // any seam the tessellation can produce. Provenance is reported alongside
     // rather than used to override — same-id yet sharp edges are real on hard-
     // edged primitives (a cube's own corners), so it must not silently drop them.
-    if (ec.dihedralDeg < thresholdDeg) continue;
+    if (!isFeatureAngle(ec.dihedralDeg, thresholdDeg)) continue;
 
     ++c.feature;
     if (ec.concave) ++c.featureConcave; else ++c.featureConvex;
@@ -238,7 +238,7 @@ std::vector<EdgeKey> selectedEdges(const MergedMesh& m,
   for (const auto& [key, ts] : adj) {
     if (ts.size() != 2) continue;
     const EdgeClass ec = classifyEdge(m, key, m.tris[ts[0]], m.tris[ts[1]]);
-    if (ec.dihedralDeg < thresholdDeg) continue;
+    if (!isFeatureAngle(ec.dihedralDeg, thresholdDeg)) continue;
     if (ec.concave != wantConcave) continue;
     out.push_back(key);
   }
@@ -508,7 +508,8 @@ std::vector<int> smoothSurfaces(const MergedMesh& m,
 
   for (const auto& [key, ts] : adj) {
     if (ts.size() != 2) continue;
-    if (classifyEdge(m, key, m.tris[ts[0]], m.tris[ts[1]]).dihedralDeg >= thresholdDeg) continue;
+    if (isFeatureAngle(classifyEdge(m, key, m.tris[ts[0]], m.tris[ts[1]]).dihedralDeg, thresholdDeg))
+      continue;
     const int a = find(ts[0]), b = find(ts[1]);
     if (a != b) parent[a] = b;
   }
@@ -1582,9 +1583,9 @@ std::unique_ptr<PolySet> debugEdgeMarkers(
     if (ts.size() != 2) continue;
     const EdgeClass ec = classifyEdge(m, key, m.tris[ts[0]], m.tris[ts[1]]);
     if (ec.dihedralDeg < kCoplanarDeg) continue;  // flat-face diagonal
-    const Color4f color = ec.dihedralDeg < thresholdDeg ? seamColor
-                          : ec.concave                  ? concaveColor
-                                                        : convexColor;
+    const Color4f color = !isFeatureAngle(ec.dihedralDeg, thresholdDeg) ? seamColor
+                          : ec.concave                                  ? concaveColor
+                                                                        : convexColor;
     addBoxMarker(builder, m.pos[key.first], m.pos[key.second], half, color);
     any = true;
   }
