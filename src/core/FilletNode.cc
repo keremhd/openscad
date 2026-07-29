@@ -99,13 +99,13 @@ static std::shared_ptr<AbstractNode> builtin_bevel_tool(const ModuleInstantiatio
 // ones. Written out, because the tool nodes are the composable surface and
 // anyone wanting a different composition should be able to start from this one:
 //
-//   module fillet(r = 2, inner = true, outer = true) {
+//   module fillet(r = 2, inner = true, outer = true, min_angle = undef) {
 //       difference() {
 //           union() {
 //               children(0);
-//               if (inner) fillet_tool(r = r) children();
+//               if (inner) fillet_tool(r = r, min_angle = min_angle) children();
 //           }
-//           if (outer) round_tool(r = r) children();
+//           if (outer) round_tool(r = r, min_angle = min_angle) children();
 //       }
 //   }
 //
@@ -118,8 +118,9 @@ static std::shared_ptr<AbstractNode> builtin_bevel_tool(const ModuleInstantiatio
 static std::shared_ptr<AbstractNode> builtin_fillet(const ModuleInstantiation *inst,
                                                     Arguments arguments, const Children& children)
 {
-  Parameters parameters = Parameters::parse(std::move(arguments), inst->location(),
-                                            {"r", "inner", "outer", "disable_preview"});
+  Parameters parameters =
+    Parameters::parse(std::move(arguments), inst->location(),
+                      {"r", "inner", "outer", "min_angle", "disable_preview"});
 
   const bool disable_preview = parameters["disable_preview"].type() == Value::Type::BOOL
                                  ? parameters["disable_preview"].toBool()
@@ -139,6 +140,11 @@ static std::shared_ptr<AbstractNode> builtin_fillet(const ModuleInstantiation *i
   if (parameters["r"].type() == Value::Type::NUMBER) node->size = parameters["r"].toDouble();
   if (parameters["inner"].type() == Value::Type::BOOL) node->inner = parameters["inner"].toBool();
   if (parameters["outer"].type() == Value::Type::BOOL) node->outer = parameters["outer"].toBool();
+  // Both halves get it. The threshold is a statement about which edges of the
+  // target are features, and that cannot depend on which sign is being built.
+  if (parameters["min_angle"].type() == Value::Type::NUMBER) {
+    node->min_angle = parameters["min_angle"].toDouble();
+  }
 
   return children.instantiate(node);
 }
@@ -165,6 +171,7 @@ std::string FilletNode::toString() const
     stream << this->name() << "(" << this->discretizer << ", r = " << this->size;
     if (!this->inner) stream << ", inner = false";
     if (!this->outer) stream << ", outer = false";
+    if (this->min_angle >= 0) stream << ", min_angle = " << this->min_angle;
     if (!this->disable_preview) stream << ", disable_preview = false";
     stream << ")";
     return stream.str();
@@ -200,6 +207,7 @@ void register_builtin_fillet()
   Builtins::init("fillet", new BuiltinModule(builtin_fillet),
                  {
                    "fillet(r = number)",
-                   "fillet(r = number, inner = bool, outer = bool, disable_preview = bool)",
+                   "fillet(r = number, inner = bool, outer = bool, min_angle = number, "
+                   "disable_preview = bool)",
                  });
 }

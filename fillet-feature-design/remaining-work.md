@@ -508,12 +508,12 @@ somebody would do next:
   regression file therefore carries a fourth model at `disable_preview = false`,
   which is the only invocation that survives into the dump — and is also the
   acceptance criterion for the opt-out, so one model does both.
-- **No `min_angle=` on `fillet()`.** The four parameters named below are what
-  landed. The DOC section calls `min_angle=` *the* escape hatch when the
-  threshold picks the wrong edges, so as it stands the remedy is reachable only
-  by dropping to the tool nodes. Adding it is one line; it was left off because
-  this section is explicit about the parameter list and widening the headline
-  entry point is a decision worth making on purpose rather than in passing.
+- **`min_angle=` is on `fillet()` too**, beyond the four parameters named below.
+  The DOC section calls it *the* escape hatch when the threshold picks the wrong
+  edges, and an escape hatch reachable only by abandoning the entry point and
+  rewriting the composition by hand is not one. It goes to both halves: the
+  threshold says which edges of the target are features, and that cannot depend
+  on which sign is being built.
 
 The rest of this section is what was reasoned out beforehand, kept because it is
 the argument for the shape that was built.

@@ -31,4 +31,9 @@ module boss() {
 fillet(r = 2) boss();
 translate([30, 0, 0]) fillet(r = 2, inner = false) boss();
 translate([60, 0, 0]) fillet(r = 2, outer = false) boss();
-translate([90, 0, 0]) fillet(r = 2, disable_preview = false) boss();
+// min_angle = 30 selects exactly what the derived 18 does on this model — every
+// real crease here turns 90, and the cylinder's seams turn 11.25 — so it is here
+// for the dump line rather than the picture, to catch the parameter being
+// dropped on the floor. What it does to a selection is pinned in the unit tests,
+// where a threshold is milliseconds and exact instead of a render and an eye.
+translate([90, 0, 0]) fillet(r = 2, min_angle = 30, disable_preview = false) boss();

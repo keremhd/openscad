@@ -21,7 +21,7 @@ multmatrix([[1, 0, 0, 60], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]) {
 	}
 }
 multmatrix([[1, 0, 0, 90], [0, 1, 0, 0], [0, 0, 1, 0], [0, 0, 0, 1]]) {
-	fillet($fn = 32, $fa = 12, $fs = 2, r = 2, disable_preview = false) {
+	fillet($fn = 32, $fa = 12, $fs = 2, r = 2, min_angle = 30, disable_preview = false) {
 		group() {
 			cube(size = [24, 24, 4], center = true);
 			cylinder($fn = 32, $fa = 12, $fs = 2, h = 10, r1 = 5, r2 = 5, center = false);
