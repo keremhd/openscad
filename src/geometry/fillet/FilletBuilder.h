@@ -20,9 +20,10 @@
 
 #include <memory>
 
+#include "core/FilletNode.h"
+
 class Geometry;
 class ManifoldGeometry;
-class FilletNode;
 
 // The fillet operator's geometry core: extract the target mesh, rebuild
 // edge -> two-face adjacency from the triangle soup, classify each edge
@@ -33,7 +34,10 @@ class FilletNode;
 // none. It narrows the tool to the stretches of crease it covers; the whole of
 // every crease is taken when it is absent.
 //
+// `type` is which tool to build, and is passed rather than read off the node
+// because the fillet() node asks for one of each sign from a single node.
+//
 // Returns the tool solid, or nullptr where there is nothing to build.
 std::shared_ptr<const Geometry> buildFilletTool(
-  const FilletNode& node, const std::shared_ptr<const ManifoldGeometry>& target,
+  const FilletNode& node, FilletType type, const std::shared_ptr<const ManifoldGeometry>& target,
   const std::shared_ptr<const ManifoldGeometry>& brush = nullptr);

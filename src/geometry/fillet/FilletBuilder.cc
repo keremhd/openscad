@@ -1709,7 +1709,7 @@ std::unique_ptr<PolySet> debugSpineMarkers(const MergedMesh& m,
 // out on every invocation (a plain cube yields 12 feature edges, all convex; an
 // inside corner yields a single concave edge).
 std::shared_ptr<const Geometry> buildFilletTool(
-  const FilletNode& node, const std::shared_ptr<const ManifoldGeometry>& target,
+  const FilletNode& node, FilletType type, const std::shared_ptr<const ManifoldGeometry>& target,
   const std::shared_ptr<const ManifoldGeometry>& brush)
 {
   using namespace fillet::detail;
@@ -1732,8 +1732,7 @@ std::shared_ptr<const Geometry> buildFilletTool(
   // is only meaningful when the mesh carries more than one source id; a single-
   // id mesh (imported STL, polyhedron) can't rely on it.
   const bool useProvenance = m.distinctIDs.size() > 1;
-  const bool wantConcave =
-    node.type == FilletType::FILLET || node.type == FilletType::CHAMFER;
+  const bool wantConcave = type == FilletType::FILLET || type == FilletType::CHAMFER;
 
   const ClassCounts c = classifyEdges(m, adj, thresholdDeg, useProvenance);
 
@@ -1776,8 +1775,7 @@ std::shared_ptr<const Geometry> buildFilletTool(
     return debug.build();
   }
 
-  const bool isWedgeOnly =
-    node.type == FilletType::CHAMFER || node.type == FilletType::BEVEL;
+  const bool isWedgeOnly = type == FilletType::CHAMFER || type == FilletType::BEVEL;
 
   if (!(node.size > 0)) {
     LOG(message_group::Warning, node.modinst->location(), "", "%1$s: %2$s must be positive",
@@ -1793,11 +1791,34 @@ std::shared_ptr<const Geometry> buildFilletTool(
   // since the edges the other one takes are right there in the count.
   if (selected == 0) {
     const size_t others = wantConcave ? c.featureConvex : c.featureConcave;
-    const char *sibling = node.type == FilletType::FILLET    ? "round_tool"
-                          : node.type == FilletType::CHAMFER ? "bevel_tool"
-                          : node.type == FilletType::ROUND   ? "fillet_tool"
-                                                             : "chamfer_tool";
-    if (others > 0)
+    const char *sibling = type == FilletType::FILLET    ? "round_tool"
+                          : type == FilletType::CHAMFER ? "bevel_tool"
+                          : type == FilletType::ROUND   ? "fillet_tool"
+                                                        : "chamfer_tool";
+    // fillet() builds both signs from the one target, so "no concave edge" on a
+    // convex model is its ordinary case and says nothing worth hearing — the
+    // other half is doing the work. Two things are still worth hearing, and the
+    // second is the reason this is not simply silence: a half left to work alone
+    // is the whole operator, so when the creases all turn the other way that
+    // node does nothing at all, and the switch that would fix it is named.
+    if (node.type == FilletType::APPLY) {
+      // Exactly one half enabled; only that half reaches here, so this cannot
+      // fire twice.
+      const bool alone = node.inner != node.outer;
+      const bool speaker = node.inner ? wantConcave : !wantConcave;
+      if (alone && others > 0)
+        LOG(message_group::Warning, node.modinst->location(), "",
+            "%1$s: no %2$s edge of the target turns more than %3$.1f deg; nothing is built. "
+            "The target has %4$d %5$s edge(s) - %6$s = true takes those.",
+            node.name(), wantConcave ? "concave" : "convex", thresholdDeg, static_cast<int>(others),
+            wantConcave ? "convex" : "concave", wantConcave ? "outer" : "inner");
+      else if (c.feature == 0 && speaker)
+        LOG(message_group::Warning, node.modinst->location(), "",
+            "%1$s: no edge of the target turns more than %2$.1f deg; nothing is built. "
+            "min_angle= on a tool node lowers that threshold if the feature is shallower "
+            "than the tessellation it was built at.",
+            node.name(), thresholdDeg);
+    } else if (others > 0)
       LOG(message_group::Warning, node.modinst->location(), "",
           "%1$s: no %2$s edge of the target turns more than %3$.1f deg; nothing is built. "
           "The target has %4$d %5$s edge(s) - %6$s takes those.",

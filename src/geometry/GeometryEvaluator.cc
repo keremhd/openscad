@@ -993,12 +993,15 @@ Response GeometryEvaluator::visit(State& state, const CgalAdvNode& node)
 
 /*!
    input: List of 3D objects (child 0 = target, children 1+ = brushes)
-   output: a tool solid, to be unioned (concave tools) or subtracted (convex)
+   output: a tool solid, to be unioned (concave tools) or subtracted (convex);
+           or, for the fillet() wrapper, the composed result
    operation:
     o Extract child 0's mesh, rebuild edge adjacency, classify its edges and walk
       the selected ones into chains, then build the tool along them. Children 1+
       are unioned into one selection brush; where it is present, only the
       stretches of crease inside it are built.
+    o fillet() is the same work twice over, once per sign, composed with the
+      target rather than handed back for the caller to compose.
  */
 Response GeometryEvaluator::visit(State& state, const FilletNode& node)
 {
@@ -1030,7 +1033,29 @@ Response GeometryEvaluator::visit(State& state, const FilletNode& node)
             manifold::Manifold::BatchBoolean(brushParts, manifold::OpType::Add));
         }
 
-        geom = buildFilletTool(node, target, brush);
+        if (node.type == FilletType::APPLY) {
+          // difference(union(child, fillet_tool), round_tool). Both tools are
+          // built from the original target rather than from the running result,
+          // so each is measured against the shape the user wrote.
+          ManifoldGeometry result = *target;
+          if (node.inner) {
+            if (auto tool = ManifoldUtils::createManifoldFromGeometry(
+                  buildFilletTool(node, FilletType::FILLET, target, brush));
+                tool && !tool->isEmpty()) {
+              result = result + *tool;
+            }
+          }
+          if (node.outer) {
+            if (auto tool = ManifoldUtils::createManifoldFromGeometry(
+                  buildFilletTool(node, FilletType::ROUND, target, brush));
+                tool && !tool->isEmpty()) {
+              result = result - *tool;
+            }
+          }
+          geom = std::make_shared<ManifoldGeometry>(std::move(result));
+        } else {
+          geom = buildFilletTool(node, node.type, target, brush);
+        }
       }
 #else
       LOG(message_group::Warning, node.modinst->location(), this->tree.getDocumentPath(),

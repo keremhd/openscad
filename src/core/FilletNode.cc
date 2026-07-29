@@ -31,6 +31,7 @@
 #include "core/ModuleInstantiation.h"
 #include "core/Parameters.h"
 #include "core/module.h"
+#include "core/node.h"
 
 // Child 0 is the target whose edges are analysed; children 1+ are selection
 // brushes. The node parses its parameters here; the edge analysis and tool
@@ -94,6 +95,54 @@ static std::shared_ptr<AbstractNode> builtin_bevel_tool(const ModuleInstantiatio
   return builtin_fillet_impl(inst, std::move(arguments), children, FilletType::BEVEL);
 }
 
+// The composition every fillet is: grow the inner creases, cut back the outer
+// ones. Written out, because the tool nodes are the composable surface and
+// anyone wanting a different composition should be able to start from this one:
+//
+//   module fillet(r = 2, inner = true, outer = true) {
+//       difference() {
+//           union() {
+//               children(0);
+//               if (inner) fillet_tool(r = r) children();
+//           }
+//           if (outer) round_tool(r = r) children();
+//       }
+//   }
+//
+// Under $preview the node hands back its child untouched, because the tools cost
+// a mesh analysis and two booleans on every keystroke and the fillets are
+// usually the last thing being iterated on. disable_preview = false asks for
+// them anyway. The four *_tool nodes deliberately do not do this: a tool is a
+// solid the user is composing with by hand, and one that vanished under a render
+// mode would break every composition built out of it.
+static std::shared_ptr<AbstractNode> builtin_fillet(const ModuleInstantiation *inst,
+                                                    Arguments arguments, const Children& children)
+{
+  Parameters parameters = Parameters::parse(std::move(arguments), inst->location(),
+                                            {"r", "inner", "outer", "disable_preview"});
+
+  const bool disable_preview = parameters["disable_preview"].type() == Value::Type::BOOL
+                                 ? parameters["disable_preview"].toBool()
+                                 : true;
+  const bool preview =
+    parameters["$preview"].type() == Value::Type::BOOL && parameters["$preview"].toBool();
+  if (preview && disable_preview) {
+    // Child 0 only. Children 1+ are selection brushes for the tools rather than
+    // geometry, and passing them through would put the brush in the model.
+    return children.instantiate(std::make_shared<GroupNode>(inst, "fillet"), {0});
+  }
+
+  auto node = std::make_shared<FilletNode>(inst, FilletType::APPLY,
+                                           CurveDiscretizer(parameters, inst->location()));
+  node->disable_preview = disable_preview;
+
+  if (parameters["r"].type() == Value::Type::NUMBER) node->size = parameters["r"].toDouble();
+  if (parameters["inner"].type() == Value::Type::BOOL) node->inner = parameters["inner"].toBool();
+  if (parameters["outer"].type() == Value::Type::BOOL) node->outer = parameters["outer"].toBool();
+
+  return children.instantiate(node);
+}
+
 std::string FilletNode::name() const
 {
   switch (this->type) {
@@ -101,6 +150,7 @@ std::string FilletNode::name() const
   case FilletType::ROUND:   return "round_tool"; break;
   case FilletType::CHAMFER: return "chamfer_tool"; break;
   case FilletType::BEVEL:   return "bevel_tool"; break;
+  case FilletType::APPLY:   return "fillet"; break;
   default:                  assert(false);
   }
   return "internal_error";
@@ -109,6 +159,17 @@ std::string FilletNode::name() const
 std::string FilletNode::toString() const
 {
   std::ostringstream stream;
+  // The wrapper has no setback spelling and no debug overlay, and carries two
+  // switches the tools do not, so it prints its own line.
+  if (this->type == FilletType::APPLY) {
+    stream << this->name() << "(" << this->discretizer << ", r = " << this->size;
+    if (!this->inner) stream << ", inner = false";
+    if (!this->outer) stream << ", outer = false";
+    if (!this->disable_preview) stream << ", disable_preview = false";
+    stream << ")";
+    return stream.str();
+  }
+
   const bool isChamfer = (type == FilletType::CHAMFER || type == FilletType::BEVEL);
   stream << this->name() << "(" << this->discretizer << ", " << (isChamfer ? "t = " : "r = ")
          << this->size;
@@ -135,5 +196,10 @@ void register_builtin_fillet()
   Builtins::init("bevel_tool", new BuiltinModule(builtin_bevel_tool),
                  {
                    "bevel_tool(t = number)",
+                 });
+  Builtins::init("fillet", new BuiltinModule(builtin_fillet),
+                 {
+                   "fillet(r = number)",
+                   "fillet(r = number, inner = bool, outer = bool, disable_preview = bool)",
                  });
 }

@@ -29,7 +29,8 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
 3. ~~**D2**~~ — **done.** The cause was not the one written down; see below, and
    [`log-2026-07-29-d2.md`](log-2026-07-29-d2.md). Two `sandwich` lines it was
    expected to clear turn out to be a different problem and are still red.
-4. **M12** — the wrapper.
+4. ~~**M12**~~ — **done.** The C++ node, as overruled; see below for the one
+   thing the design did not anticipate and the one parameter left off.
 5. **T2** — the last case worth building.
 6. **DOC**, then **CLEAN**.
 
@@ -495,7 +496,27 @@ listed as the fallback route to this, and this did not need it.
 
 ---
 
-## M12 — the `fillet()` wrapper
+## M12 — the `fillet()` wrapper — **DONE**
+
+Built as described, with one correction the acceptance criteria forced and one
+parameter deliberately left off. Details in
+[`log-2026-07-29-m12.md`](log-2026-07-29-m12.md); the two that change what
+somebody would do next:
+
+- **The dump runs the preview renderer**, so the `.csg` line this section asks
+  for cannot exist for a node that passes through under `$preview`. The
+  regression file therefore carries a fourth model at `disable_preview = false`,
+  which is the only invocation that survives into the dump — and is also the
+  acceptance criterion for the opt-out, so one model does both.
+- **No `min_angle=` on `fillet()`.** The four parameters named below are what
+  landed. The DOC section calls `min_angle=` *the* escape hatch when the
+  threshold picks the wrong edges, so as it stands the remedy is reachable only
+  by dropping to the tool nodes. Adding it is one line; it was left off because
+  this section is explicit about the parameter list and widening the headline
+  entry point is a decision worth making on purpose rather than in passing.
+
+The rest of this section is what was reasoned out beforehand, kept because it is
+the argument for the shape that was built.
 
 The plan (section 2.1) says ship this as a bundled `.scad`. **Overruled: build it
 in C++ as a node.** There is no auto-include precedent in the repo — MCAD needs

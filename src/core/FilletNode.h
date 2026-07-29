@@ -26,10 +26,12 @@
 #include "core/node.h"
 #include "geometry/linalg.h"
 
-// The four fillet/round/chamfer/bevel tool nodes. Convexity sign is baked into
-// the node name: FILLET/CHAMFER are concave tools the caller unions; ROUND/BEVEL
-// are convex tools the caller subtracts.
-enum class FilletType { FILLET, ROUND, CHAMFER, BEVEL };
+// The four fillet/round/chamfer/bevel tool nodes, plus the fillet() wrapper.
+// Convexity sign is baked into the tool names: FILLET/CHAMFER are concave tools
+// the caller unions; ROUND/BEVEL are convex tools the caller subtracts. APPLY is
+// not a tool at all — it is the node that builds a concave and a convex tool
+// from one target and composes both with it.
+enum class FilletType { FILLET, ROUND, CHAMFER, BEVEL, APPLY };
 
 class FilletNode : public AbstractNode
 {
@@ -48,6 +50,13 @@ public:
   // default: the overlay is a cloud of disjoint marker cubes rather than a
   // solid, so it is for looking at, not for building with.
   bool debug{false};
+  // APPLY only: which half to compose. Each switches off its own tool.
+  bool inner{true};
+  bool outer{true};
+  // APPLY only, and recorded rather than acted on: the passthrough this selects
+  // happens at instantiation, so a node that exists at all is one that builds.
+  // Kept so a dump says which way it was asked.
+  bool disable_preview{true};
   FilletType type;
   CurveDiscretizer discretizer;
 };
