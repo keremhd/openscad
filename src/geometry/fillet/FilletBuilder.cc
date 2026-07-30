@@ -910,7 +910,14 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
       for (const Vector3d& p : junctionPos)
         if ((c.v - p).norm() < junctionReach) { nearJunction = true; break; }
       if (nearJunction) continue;
-      if (c.offFace > 0.0) {
+      // A miss of zero is not a miss. Where the contact lands exactly on the
+      // wall's boundary the blend stops precisely at the edge of the wall it is
+      // meant to meet, which is a fit — and the two are told apart by a double's
+      // last bits, since the nearest point and the boundary are then the same
+      // point computed two ways. The margin is far below anything a mesh could
+      // mean and six orders above that noise; a size that really does not fit
+      // misses by a fraction of itself, never by a nanometre.
+      if (c.offFace > 1e-9 * std::max(1.0, size)) {
         verdict = {SizeFault::OffFace, c.v, c.offFace};
         break;
       }

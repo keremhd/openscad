@@ -1450,6 +1450,31 @@ inner and outer; the reflex crease reads `Fits`. `FilletBuilder_test.cc` pins th
 four combinations and the thin-wall refusal beside them. Whole unit suite and all
 82 case checks unchanged.
 
+### The same 4.4e-16 again, on two bosses, and the exemption could not reach it
+
+**Also landed, and it was costing a whole rim.** Two overlapping bosses warned
+once at `r = 2` — `the blend would leave the surface it is meant to meet, by
+4.44089e-16` — and dropped the convex chain running the merged top face's
+outline, so one boss's top rim came back sharp: 42 vertices of it left on the
+un-rounded rim, and the warning blamed a radius that fits with 8 mm to spare.
+
+It is the same pass/fail line met exactly, in a place no exemption reaches. The
+outline the round tool takes there *is* the boundary of the top face it is asked
+about, so the ball's nearest point on that face and the nearest point on its rim
+are the same point computed two ways, and which comes out larger is the last bits
+of a double. The turn exemption does not apply — nothing turns — and neither does
+the end-of-chain one, since the chain is closed.
+
+So the off-face test now reports a miss only above `1e-9` of the size, which the
+crowding half of the gate has always had in `faceTol` and this half never did.
+Six orders above the noise and far below anything a mesh could mean: a size that
+genuinely does not fit misses by a fraction of itself, and the L bracket's
+`35 mm` bead on a `30 mm` face still misses by exactly 5. Two bosses now build
+with no warning and no sharp rim, 31913.7817 against 31988.3324 — the 74.55 mm3
+is the rim that was never being rounded. Every other model in the set is
+unchanged to the digit, and the whole unit suite, the 21 baselines and the 82
+case checks are unchanged.
+
 ---
 
 ## D12 — a bead that ends on an outer face leaves a sharp lip over the round
@@ -1651,17 +1676,32 @@ meaningful if the cell stands further past a wall than the beads it closes. And
 `RoundSection` carries the overshoot it was built at, which is what a truncated
 end hands its corner.
 
-**What this does not fix is the composition.** With the noise gone the naive
-composition — the round pass on the blended solid — no longer tears curved work
-apart: the tee goes from genus 41 in 17 pieces with 33 spurious chains to genus 0
-in one piece, 20354.7465 mm3 against 20354.7878 for the composition as it ships.
-But 20 short convex chains survive on the blend, 8 of which the size gate refuses
-and warns about. They are not ledges: they are the bead's own cells meeting at
-17-59 degrees where the tee's dihedral runs away toward the crown, which is a
-coarse blend and not an artefact. So route A is survivable now rather than clean,
-and the case for route E in
-[`log-2026-07-30-d12-alternatives.md`](log-2026-07-30-d12-alternatives.md) — which
-needs no builder change at all — is unaffected by any of this.
+**What this does not fix is the composition, and the composition is now refused
+for a different reason than it was.** With the noise gone, route A — the round
+pass on the blended solid — no longer tears curved work apart. Measured through
+the node itself at `r = 2`, `$fn = 32`, against the composition as it ships:
+
+| model | as it ships | round pass on the blend |
+|---|---|---|
+| cube, boss, blind bore, dome | genus 0, no warnings | identical, to the digit |
+| L bracket | 13292.8286 | **13286.2607 — the lip, 6.568, gone** |
+| pipe tee | 20354.7878, no warnings | same volume, genus 0, one piece — **8 warnings** |
+| two bosses | 31988.3324, 1 warning | same volume — **32 warnings** |
+| rib on plate | 17557.3154, no warnings | **17674.7152, 6 warnings** |
+
+**The rib is what kills it, and it is not the warnings.** That +117 mm3 is the
+rib's four vertical rounds and its top rim not being built at all: the refusals
+are at `[15, 17, 26]` and `[15, 23, 26]`, which are the rib's own corners, and the
+solid comes back with a vertex sitting on the sharp corner line and four vertices
+on the top face where the unblended build has twenty-eight. The gate reads
+"another feature 4.33 away needs the same material" because on the blended solid
+the competitor it finds is the base bead's own flank.
+
+So route A needs the size gate to be right about a solid a bead is already in,
+which is the second half of what the provenance commit had to do and is exactly
+the coupling that commit was reverted for. Nothing here is a warning-tuning
+problem: suppressing those six lines would leave the rib silently unrounded.
+The lip is still open.
 
 ### What the rib says, whichever route is taken
 

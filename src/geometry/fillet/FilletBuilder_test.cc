@@ -1514,6 +1514,51 @@ TEST_CASE("size: a blend wider than the face it must meet is refused")
   CHECK(over.verdicts[0].where.y() == Approx(10.0));
 }
 
+TEST_CASE("size: a contact landing on the edge of its wall is a fit, not a miss")
+{
+  // Two bosses overlapping on a plate. Their top faces merge into one, and its
+  // outline — the convex crease the round tool takes — runs round both discs and
+  // through the two points where they cross. At the stations near a crossing the
+  // ball's nearest point on the top face lands exactly on that outline, because
+  // the outline is the boundary of the very wall being asked about, so the
+  // off-face test's pass/fail line is met exactly and the last bits of a double
+  // decide it.
+  //
+  // What that cost is a whole rim: the chain was dropped for a miss of
+  // 4.4e-16 mm, one boss's top rim came back sharp, and the warning blamed a
+  // radius that fits with 8 mm to spare.
+  const double RB = 10.0, HB = 20.0, PT = 6.0, r = 2.0;
+  const auto boss = [&](double x) {
+    return manifold::Manifold::Cylinder(HB, RB, RB, 32, false)
+      .Translate(manifold::vec3(x, 0.0, PT));
+  };
+  const auto model = box(60.0, 60.0, PT).Translate(manifold::vec3(-30.0, -30.0, 0.0)) +
+                     boss(-6.0) + boss(6.0);
+  const double threshold = derivedThreshold(discretizer(32));
+  const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, threshold, /*wantConcave=*/false));
+  REQUIRE_FALSE(chains.empty());
+
+  const auto verdicts =
+    checkChainSizes(mm, adj, chains, r, /*concave=*/false, /*wedge=*/false, threshold);
+  for (size_t ci = 0; ci < chains.size(); ++ci) {
+    CAPTURE(ci, verdicts[ci].amount);
+    CHECK(verdicts[ci].fault == SizeFault::Fits);
+  }
+
+  // And the misses that are there really are at float noise, not at a size the
+  // margin has swallowed: the largest of them over the whole model is nanometres
+  // of a 20 mm boss.
+  const auto surfaceOf = smoothSurfaces(mm, adj, threshold);
+  double worst = 0.0;
+  for (const auto& chain : chains)
+    for (const auto& c :
+         chainContacts(mm, adj, chain, r, /*concave=*/false, /*wedge=*/false, surfaceOf, 3))
+      if (c.valid) worst = std::max(worst, c.offFace);
+  CHECK(worst < 1e-9);
+}
+
 TEST_CASE("size: a chamfer setback is measured against the same face")
 {
   // The wedge tools take the setback directly, so the same 30 mm face is what
