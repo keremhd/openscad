@@ -269,7 +269,7 @@ TEST_CASE("floor/wall: the chamfer section sets back t along each wall")
   const auto chains = buildChains(mm, edges);
   REQUIRE(chains.size() == 1);
 
-  const auto sections = wedgeSections(mm, adj, chains[0], t, /*concave=*/true);
+  const auto sections = wedgeSections(mm, adj, chains[0], t, /*concave=*/true, 45.0);
   REQUIRE(sections.size() >= 2);
 
   int validCount = 0;
@@ -315,7 +315,7 @@ TEST_CASE("floor/wall: the chamfer wedge is the expected prism")
   const auto adj = buildEdgeAdjacency(mm.tris);
   const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/true));
 
-  const auto wedge = buildWedgeSolid(mm, adj, chains, t, /*concave=*/true);
+  const auto wedge = buildWedgeSolid(mm, adj, chains, t, /*concave=*/true, 45.0);
   REQUIRE_FALSE(wedge.IsEmpty());
 
   const double nominal = 0.5 * t * t * 10.0;
@@ -346,7 +346,7 @@ TEST_CASE("cube: the bevel wedge cuts all twelve edges and only those")
   const auto chains = buildChains(mm, edges);
   REQUIRE(chains.size() == 12);
 
-  const auto wedge = buildWedgeSolid(mm, adj, chains, t, /*concave=*/false);
+  const auto wedge = buildWedgeSolid(mm, adj, chains, t, /*concave=*/false, 45.0);
   REQUIRE_FALSE(wedge.IsEmpty());
 
   // Twelve prisms overlap in pairs at each of the eight corners, so the union is
@@ -384,7 +384,7 @@ TEST_CASE("cylinder rim: a closed chain wraps into a ring of wedge cells")
   const auto chains = buildChains(mm, selectedEdges(mm, adj, 60.0, /*wantConcave=*/false));
   REQUIRE(chains.size() == 2);
 
-  const auto wedge = buildWedgeSolid(mm, adj, chains, t, /*concave=*/false);
+  const auto wedge = buildWedgeSolid(mm, adj, chains, t, /*concave=*/false, 60.0);
   REQUIRE_FALSE(wedge.IsEmpty());
   // Two separate rims, and each rim closed rather than split at the seam: two
   // components, each a torus-like ring (genus 1) rather than an open arc.
@@ -396,6 +396,83 @@ TEST_CASE("cylinder rim: a closed chain wraps into a ring of wedge cells")
   // the polygonal approximation makes this a few percent light.
   const double nominal = 2.0 * 0.5 * t * t * 2.0 * M_PI * r;
   CHECK(wedge.Volume() == Approx(nominal).epsilon(0.05));
+}
+
+// A branch pipe standing on a run pipe: the crease is a closed space curve, and
+// the wall on the run's side curves *across* it, which is the shape a fixed
+// overshoot cannot stand past. The two cases below both use it.
+manifold::Manifold pipeTee(int fn = 32)
+{
+  return manifold::Manifold::Cylinder(60.0, 10.0, 10.0, fn, false) +
+         manifold::Manifold::Cylinder(25.0, 6.0, 6.0, fn, false)
+           .Rotate(-90, 0, 0)
+           .Translate(manifold::vec3(0.0, 0.0, 30.0));
+}
+
+TEST_CASE("curved wall: the overshoot is measured against the wall, not fixed")
+{
+  // Every point of the pentagon that stands past a wall is stepped off the
+  // crease along that wall's normal, which is a plane tangent to the wall at the
+  // station. A flat wall stays in that plane and the fixed hair — 1e-3 of the
+  // size, pinned by the floor/wall case above — clears it. The run pipe here
+  // falls away from it by r_setback^2 / 2R, which at a 2 mm setback on a radius
+  // 10 pipe is 0.2: a hundred times the hair, and what the wall face has to
+  // stand past to be inside the material at all.
+  const double t = 2.0;
+  const double threshold = derivedThreshold(discretizer(32));
+  const MergedMesh mm = mergeMesh(pipeTee().GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, threshold, /*wantConcave=*/true));
+  REQUIRE(chains.size() == 1);
+
+  const auto sections = wedgeSections(mm, adj, chains[0], t, /*concave=*/true, threshold);
+  double most = 0.0, least = std::numeric_limits<double>::max();
+  for (const auto& w : sections) {
+    if (!w.valid) continue;
+    for (const auto& [face, primed] : {std::pair{w.p[0], w.p[4]}, std::pair{w.p[1], w.p[2]}}) {
+      most = std::max(most, (face - primed).norm());
+      least = std::min(least, (face - primed).norm());
+    }
+  }
+  // Never less than the hair, and on this shape several times the sagitta of the
+  // run's own facets — the wall the setback lands on is a chord of the pipe, not
+  // of one facet of it.
+  CHECK(least >= Approx(1e-3 * t));
+  CHECK(most > 0.15);
+}
+
+TEST_CASE("curved wall: the blend leaves no crease the model does not have")
+{
+  // What the overshoot standing short of a curved wall leaves behind: a ledge
+  // one overshoot deep along the whole tangency line, with the tool's own faces
+  // either side of it, which reads as a crease of the shape. Measured on this
+  // tee before the overshoot followed the wall, the union carried 204 convex
+  // feature edges turning more than 150 degrees — folds, faces turned back on
+  // each other — against the model's own 96, all of them square rims.
+  const double r = 2.0;
+  const double threshold = derivedThreshold(discretizer(32));
+  const manifold::Manifold model = pipeTee();
+  const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, threshold, /*wantConcave=*/true));
+  const auto tool = buildRoundSolid(mm, adj, chains, r, /*concave=*/true, 32, threshold);
+  REQUIRE_FALSE(tool.IsEmpty());
+
+  const manifold::Manifold blended = model + tool;
+  CHECK(blended.Genus() == 0);
+
+  const MergedMesh bm = mergeMesh(blended.GetMeshGL64());
+  const auto badj = buildEdgeAdjacency(bm.tris);
+  double sharpest = 0.0;
+  for (const auto& [key, tris] : badj) {
+    if (tris.size() != 2) continue;
+    const EdgeClass ec = classifyEdge(bm, key, bm.tris[tris[0]], bm.tris[tris[1]]);
+    if (!isFeatureAngle(ec.dihedralDeg, threshold) || ec.concave) continue;
+    sharpest = std::max(sharpest, ec.dihedralDeg);
+  }
+  // The model's rims are square and there is nothing else: the bead meets both
+  // pipes tangentially, so every convex edge left is one the user wrote.
+  CHECK(sharpest == Approx(90.0).margin(0.5));
 }
 
 TEST_CASE("threshold: derived from the tessellation parameters, not hardcoded")
@@ -529,7 +606,9 @@ TEST_CASE("threshold: a solid with no crease in it selects nothing and builds no
   const auto chains = buildChains(mm, selectedEdges(mm, adj, derivedThreshold(discretizer(32)),
                                                     /*wantConcave=*/false));
   CHECK(chains.empty());
-  CHECK(buildRoundSolid(mm, adj, chains, 1.0, /*concave=*/false, 24).IsEmpty());
+  CHECK(buildRoundSolid(mm, adj, chains, 1.0, /*concave=*/false, 24,
+                        derivedThreshold(discretizer(32)))
+          .IsEmpty());
 }
 
 TEST_CASE("refillet: a rounded solid re-read carries creases its shape does not have")
@@ -556,7 +635,7 @@ TEST_CASE("refillet: a rounded solid re-read carries creases its shape does not 
   const MergedMesh mm = mergeMesh(model.GetMeshGL64());
   const auto adj = buildEdgeAdjacency(mm.tris);
   const auto chains = buildChains(mm, selectedEdges(mm, adj, 18.0, /*wantConcave=*/false));
-  const auto rounded = model - buildRoundSolid(mm, adj, chains, r, /*concave=*/false, 24);
+  const auto rounded = model - buildRoundSolid(mm, adj, chains, r, /*concave=*/false, 24, 18.0);
   REQUIRE_FALSE(rounded.IsEmpty());
   CHECK(rounded.Genus() == 0);
 
@@ -745,7 +824,7 @@ TEST_CASE("non-manifold input: shared edges are counted and nothing crashes")
     const MergedMesh mm = mergeMesh(model.GetMeshGL64());
     const auto adj = buildEdgeAdjacency(mm.tris);
     const auto chains = buildChains(mm, selectedEdges(mm, adj, 18.0, /*wantConcave=*/false));
-    CHECK_FALSE(buildRoundSolid(mm, adj, chains, 1.0, /*concave=*/false, 24).IsEmpty());
+    CHECK_FALSE(buildRoundSolid(mm, adj, chains, 1.0, /*concave=*/false, 24, 18.0).IsEmpty());
   }
 }
 
@@ -760,8 +839,8 @@ TEST_CASE("wedge: a non-positive setback builds nothing")
   const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/true));
   REQUIRE(chains.size() == 1);
 
-  CHECK(buildWedgeSolid(mm, adj, chains, 0.0, /*concave=*/true).IsEmpty());
-  CHECK(buildWedgeSolid(mm, adj, chains, -1.0, /*concave=*/true).IsEmpty());
+  CHECK(buildWedgeSolid(mm, adj, chains, 0.0, /*concave=*/true, 45.0).IsEmpty());
+  CHECK(buildWedgeSolid(mm, adj, chains, -1.0, /*concave=*/true, 45.0).IsEmpty());
 }
 
 TEST_CASE("wedge: an empty chain list builds nothing")
@@ -777,7 +856,7 @@ TEST_CASE("wedge: an empty chain list builds nothing")
   CHECK(edges.empty());
   const auto chains = buildChains(mm, edges);
   CHECK(chains.empty());
-  CHECK(buildWedgeSolid(mm, adj, chains, 1.0, /*concave=*/true).IsEmpty());
+  CHECK(buildWedgeSolid(mm, adj, chains, 1.0, /*concave=*/true, 45.0).IsEmpty());
 }
 
 namespace {
@@ -1030,8 +1109,8 @@ TEST_CASE("brush: a crease selected end to end is kept however short it is")
   // the unbrushed path is in, and the reason the two build the same thing.
   CHECK(selected[0].keep.empty());
 
-  const auto bare = buildRoundSolid(mm, adj, chains, r, /*concave=*/true, 24);
-  const auto brushedTool = buildRoundSolid(mm, adj, selected, r, /*concave=*/true, 24);
+  const auto bare = buildRoundSolid(mm, adj, chains, r, /*concave=*/true, 24, 45.0);
+  const auto brushedTool = buildRoundSolid(mm, adj, selected, r, /*concave=*/true, 24, 45.0);
   REQUIRE_FALSE(bare.IsEmpty());
   CHECK(brushedTool.Volume() == Approx(bare.Volume()));
 }
@@ -1052,8 +1131,8 @@ TEST_CASE("brush: the clipped bead is the whole bead cut by the brush")
 
   const auto brush = box(20.0, 5.0, 20.0).Translate(manifold::vec3(-5.0, -1.0, -5.0));
   const auto clipped =
-    buildRoundSolid(mm, adj, brushed(mm, chains, brush, r), r, /*concave=*/true, 24);
-  const auto expected = buildRoundSolid(mm, adj, chains, r, /*concave=*/true, 24) ^ brush;
+    buildRoundSolid(mm, adj, brushed(mm, chains, brush, r), r, /*concave=*/true, 24, 45.0);
+  const auto expected = buildRoundSolid(mm, adj, chains, r, /*concave=*/true, 24, 45.0) ^ brush;
   REQUIRE_FALSE(clipped.IsEmpty());
   REQUIRE_FALSE(expected.IsEmpty());
 
@@ -1091,9 +1170,9 @@ TEST_CASE("brush: a slanted brush face still caps square to the crease")
                        .Rotate(20.0, 0.0, 35.0)
                        .Translate(manifold::vec3(1.0, 4.0, 1.0));
 
-  const auto unclipped = buildRoundSolid(mm, adj, chains, r, /*concave=*/true, 24);
+  const auto unclipped = buildRoundSolid(mm, adj, chains, r, /*concave=*/true, 24, 45.0);
   const auto clipped =
-    buildRoundSolid(mm, adj, brushed(mm, chains, brush, r), r, /*concave=*/true, 24);
+    buildRoundSolid(mm, adj, brushed(mm, chains, brush, r), r, /*concave=*/true, 24, 45.0);
   REQUIRE_FALSE(clipped.IsEmpty());
 
   // What it must equal: the bead cut by the plane PERPENDICULAR to the crease
@@ -1140,7 +1219,7 @@ TEST_CASE("brush: a corner every crease still reaches keeps its corner cell")
   CHECK(mm.pos[junctions[0].vert].isApprox(Vector3d::Zero()));
   CHECK(junctions[0].ballCentres.size() == 1);
 
-  const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24);
+  const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24, 45.0);
   REQUIRE_FALSE(tool.IsEmpty());
   // The three beads stop at the brush, a little past it where the corner cell
   // reaches; nothing runs on to the far corners ten away.
@@ -1174,7 +1253,7 @@ TEST_CASE("brush: a corner one crease is cut short of gets no corner cell")
   REQUIRE(selected.size() == 1);
   CHECK(chainJunctions(mm, adj, selected, r, /*concave=*/false).empty());
 
-  const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24);
+  const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24, 45.0);
   REQUIRE_FALSE(tool.IsEmpty());
   CHECK(tool.BoundingBox().min[2] == Approx(2.0).margin(1e-9));
   CHECK(tool.BoundingBox().max[2] == Approx(7.0).margin(1e-9));
@@ -1207,7 +1286,7 @@ TEST_CASE("brush: a corner the brush reaches but does not cover is not built")
 
     const auto uncovered = dropUncoveredCorners(mm, selected, r);
     const auto junctions = chainJunctions(mm, adj, selected, r, /*concave=*/false);
-    const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24);
+    const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24, 45.0);
 
     if (D < r) {
       REQUIRE(uncovered.size() == 1);
@@ -1255,7 +1334,7 @@ TEST_CASE("brush: width selects the crease and does not shape the blend")
     const auto brush = manifold::Manifold(column(w, 5.0, 15.0));
     const auto selected = brushed(mm, chains, brush, r);
     REQUIRE(selected.size() == 1);
-    const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24);
+    const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24, 45.0);
     REQUIRE_FALSE(tool.IsEmpty());
     // Square-capped at the brush at both ends, so the volume is the section area
     // times the 10 mm selected, whichever brush cut it.
@@ -1298,7 +1377,7 @@ TEST_CASE("brush: one whole edge and only that edge is a brush a model can draw"
       // And the one edge is blended over the whole of its height, since the brush
       // never cut it: no corner cell at either end, so the blend runs out to both
       // sharp vertices.
-      const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24);
+      const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24, 45.0);
       REQUIRE_FALSE(tool.IsEmpty());
       CHECK(tool.BoundingBox().min[2] == Approx(0.0).margin(1e-6));
       CHECK(tool.BoundingBox().max[2] == Approx(20.0).margin(1e-6));
@@ -1401,7 +1480,7 @@ TEST_CASE("size: two beads sharing a face fit until their tangency lines meet")
   const double side = 5.0, r = 2.0;
   const SizeRun run = sizeRun(box(side, side, side), r, /*concave=*/false);
   const auto rounded = box(side, side, side) -
-                       buildRoundSolid(run.mm, run.adj, run.chains, r, /*concave=*/false, 64);
+                       buildRoundSolid(run.mm, run.adj, run.chains, r, /*concave=*/false, 64, 20.0);
   REQUIRE_FALSE(rounded.IsEmpty());
   CHECK(rounded.Genus() == 0);
 
@@ -1618,7 +1697,7 @@ TEST_CASE("runout: a corner with no seated ball fades the blend out to the verte
   REQUIRE(apex != nullptr);
   CHECK(apex->ballCentres.empty());
 
-  const auto tool = buildRoundSolid(mm, adj, chains, r, /*concave=*/false, 24);
+  const auto tool = buildRoundSolid(mm, adj, chains, r, /*concave=*/false, 24, 20.0);
   REQUIRE_FALSE(tool.IsEmpty());
   CHECK(tool.BoundingBox().max[2] == Approx(120.0).margin(1e-6));
 

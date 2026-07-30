@@ -212,6 +212,7 @@ struct SpineFrame
   Vector3d nA, nB;
   Vector3d C, TA, TB;
   double phiDeg = 0.0;
+  int triA = -1, triB = -1;  // one triangle of each wall, as StationNormals gives them
   bool valid = false;
 };
 
@@ -352,7 +353,8 @@ struct WedgeSection
 // into the reentrant quadrant, a convex one into the solid.
 std::vector<WedgeSection> wedgeSections(const MergedMesh& m,
                                         const std::map<EdgeKey, std::vector<int>>& adj,
-                                        const Chain& chain, double t, bool concave);
+                                        const Chain& chain, double t, bool concave,
+                                        double thresholdDeg);
 
 // Build the chamfer/bevel tool solid: hull each consecutive pair of wedge
 // sections into one cell, then union the cells. Chains meeting at a vertex
@@ -361,7 +363,8 @@ std::vector<WedgeSection> wedgeSections(const MergedMesh& m,
 // empty manifold when nothing could be built.
 manifold::Manifold buildWedgeSolid(const MergedMesh& m,
                                    const std::map<EdgeKey, std::vector<int>>& adj,
-                                   const std::vector<Chain>& chains, double t, bool concave);
+                                   const std::vector<Chain>& chains, double t, bool concave,
+                                   double thresholdDeg);
 
 // The two cross-sections of a rounded tool at one chain station. `w` is the same
 // pentagon the chamfer uses, but with its setback taken at the tangency points
@@ -381,6 +384,7 @@ struct RoundSection
   std::vector<Vector3d> u;
   Vector3d v = Vector3d::Zero();
   Vector3d C = Vector3d::Zero();
+  double eps = 0.0;  // how far past its walls this section stands
   bool valid = false;
 };
 
@@ -392,7 +396,7 @@ struct RoundSection
 std::vector<RoundSection> roundSections(const MergedMesh& m,
                                         const std::map<EdgeKey, std::vector<int>>& adj,
                                         const Chain& chain, double r, bool concave,
-                                        int arcSegments);
+                                        int arcSegments, double thresholdDeg);
 
 // A vertex where three or more creases meet. `faceNormals` are the distinct
 // outward normals of every wall that touches the vertex — not just the walls of
@@ -453,7 +457,7 @@ std::vector<int> dropUncoveredCorners(const MergedMesh& m, std::vector<Chain>& c
 manifold::Manifold buildRoundSolid(const MergedMesh& m,
                                    const std::map<EdgeKey, std::vector<int>>& adj,
                                    const std::vector<Chain>& chains, double r, bool concave,
-                                   int arcSegments);
+                                   int arcSegments, double thresholdDeg);
 
 // Build a colored debug solid: a thin box marker straddling each real edge,
 // colored by class — concave feature (red), convex feature (green), rejected

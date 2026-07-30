@@ -525,6 +525,8 @@ std::vector<SpineFrame> spineFrames(const MergedMesh& m,
     }
     f.nA = stations[i].nA;
     f.nB = stations[i].nB;
+    f.triA = stations[i].triA;
+    f.triB = stations[i].triB;
 
     const double phi = std::acos(std::clamp(f.nA.dot(f.nB), -1.0, 1.0));
     f.phiDeg = phi * 180.0 / M_PI;
@@ -985,16 +987,88 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
 namespace {
 
 // The wedge cross-section shared by every tool: the two setback points, then the
-// same corner pushed a hair past each wall so the tool crosses it transversally
-// rather than lying coplanar with it. Each primed point is displaced along its
-// *own* wall normal, which is what gives eps its slack — at a crease the
-// material is the union of two half-spaces, so a point only has to be behind one
-// of them. `dir` is +1 for a concave tool and -1 for a convex one.
+// same corner pushed past each wall so the tool crosses it transversally rather
+// than lying coplanar with it. Each primed point is displaced along its *own*
+// wall normal, and by that wall's own overshoot — a station standing clear of a
+// flat wall and a curved one at once has two distances to keep, and wallOvershoot
+// says where each comes from. The point on the bisector takes the larger: at a
+// crease the material is the union of two half-spaces, so a point only has to be
+// behind one of them, and behind the deeper wall it is behind both.
+// `dir` is +1 for a concave tool and -1 for a convex one.
 std::array<Vector3d, 5> pentagonSection(const Vector3d& v, const Vector3d& nA, const Vector3d& nB,
                                         const Vector3d& bis, const Vector3d& TA,
-                                        const Vector3d& TB, double dir, double eps)
+                                        const Vector3d& TB, double dir, double epsA, double epsB)
 {
-  return {TA, TB, TB - dir * eps * nB, v - dir * eps * bis, TA - dir * eps * nA};
+  return {TA, TB, TB - dir * epsB * nB, v - dir * std::max(epsA, epsB) * bis,
+          TA - dir * epsA * nA};
+}
+
+// How far past a wall the tool has to stand at one station: the fixed hair, plus
+// however far that wall has fallen away from the plane the hair is measured in.
+//
+// The overshoot is stepped off the crease point along the station's own averaged
+// wall normal, which puts the tool's wall face in a plane tangent to the wall
+// there. A flat wall stays in that plane and a hair is enough, which is why a
+// fixed one ever worked. A curved wall falls away from it — by the sagitta over
+// the setback, which on a coarsely tessellated pipe is twenty times the hair —
+// so the face clears the wall at the station it was measured at and stands proud
+// of it in between. What that leaves in the finished solid is a ledge one
+// overshoot deep along the whole tangency line, with the tool's own faces on
+// both sides of it, and nothing downstream can tell it from a crease of the
+// shape: it is read as a wall wanting rounding.
+//
+// The distance is asked at the tangency point, which is the far edge of the
+// tool's footprint and so the deepest the wall gets under it. The wall itself is
+// walked from the triangle the station named, out to the tangency point and no
+// further, and it stops at the first crease: where one wall ends is the question
+// `isFeatureAngle` already answers, and a tangency point that has run off the
+// end of its wall is the size gate's business, not this one's — measured here it
+// would read the next wall along as a dip and bury the tool in it.
+double wallOvershoot(const MergedMesh& m, const std::map<EdgeKey, std::vector<int>>& adj,
+                     const Vector3d& v, const Vector3d& n, int tri, const Vector3d& T, double eps,
+                     double thresholdDeg)
+{
+  const double reach = (T - v).norm();
+  if (tri < 0 || static_cast<size_t>(tri) >= m.tris.size() || !(reach > 0)) return eps;
+
+  double best = std::numeric_limits<double>::infinity();
+  Vector3d onWall = T;
+  std::set<int> seen{tri};
+  std::vector<int> stack{tri};
+  while (!stack.empty()) {
+    const Tri& t = m.tris[stack.back()];
+    stack.pop_back();
+    const Vector3d& a = m.pos[t.v[0]];
+    const Vector3d& b = m.pos[t.v[1]];
+    const Vector3d& c = m.pos[t.v[2]];
+
+    const Vector3d q = closestPointOnTriangle(T, a, b, c);
+    if ((T - q).norm() < best) {
+      best = (T - q).norm();
+      onWall = q;
+    }
+
+    // A triangle the tool does not stand on is measured — it may still be the
+    // nearest thing to the tangency point — but not walked through, so the walk
+    // stays the size of the footprint however large the surface is.
+    if ((closestPointOnTriangle(v, a, b, c) - v).norm() > reach) continue;
+
+    for (int k = 0; k < 3; ++k) {
+      const EdgeKey key = std::minmax(t.v[k], t.v[(k + 1) % 3]);
+      const auto it = adj.find(key);
+      if (it == adj.end() || it->second.size() != 2) continue;
+      if (isFeatureAngle(classifyEdge(m, key, m.tris[it->second[0]], m.tris[it->second[1]])
+                           .dihedralDeg,
+                         thresholdDeg))
+        continue;
+      for (const int nb : it->second)
+        if (seen.insert(nb).second) stack.push_back(nb);
+    }
+  }
+  // Under the tangency plane, never over it: a wall that curves toward the tool
+  // is already crossed by the fixed hair, and shortening it would leave the tool
+  // resting on the wall instead of crossing it.
+  return eps + std::max(0.0, (v - onWall).dot(n));
 }
 
 // Consecutive cells meet along a shared section face, so a union of them has
@@ -1203,13 +1277,15 @@ std::vector<SpineInterval> toSectionSpace(const std::vector<SpineInterval>& runs
 
 std::vector<WedgeSection> wedgeSections(const MergedMesh& m,
                                         const std::map<EdgeKey, std::vector<int>>& adj,
-                                        const Chain& chain, double t, bool concave)
+                                        const Chain& chain, double t, bool concave,
+                                        double thresholdDeg)
 {
   const std::vector<StationNormals> stations = chainNormals(m, adj, chain);
 
-  // How far past each wall the tool reaches. Relative to the setback so it
-  // scales with the feature, with a floor so a degenerate t still separates the
-  // faces by more than the boolean kernel's own tolerance.
+  // The fixed part of how far past each wall the tool reaches — the whole of it
+  // on a flat wall. Relative to the setback so it scales with the feature, with a
+  // floor so a degenerate t still separates the faces by more than the boolean
+  // kernel's own tolerance.
   const double eps = std::max(1e-3 * std::abs(t), 1e-9);
 
   // A concave tool is unioned into the material, so its overshoot points inward,
@@ -1242,7 +1318,9 @@ std::vector<WedgeSection> wedgeSections(const MergedMesh& m,
     const Vector3d TB = s.v + dir * t * uB;
 
     WedgeSection w;
-    w.p = pentagonSection(s.v, s.nA, s.nB, bis, TA, TB, dir, eps);
+    w.p = pentagonSection(s.v, s.nA, s.nB, bis, TA, TB, dir,
+                          wallOvershoot(m, adj, s.v, s.nA, s.triA, TA, eps, thresholdDeg),
+                          wallOvershoot(m, adj, s.v, s.nB, s.triB, TB, eps, thresholdDeg));
     w.valid = true;
     out[i] = w;
   }
@@ -1251,7 +1329,8 @@ std::vector<WedgeSection> wedgeSections(const MergedMesh& m,
 
 manifold::Manifold buildWedgeSolid(const MergedMesh& m,
                                    const std::map<EdgeKey, std::vector<int>>& adj,
-                                   const std::vector<Chain>& chains, double t, bool concave)
+                                   const std::vector<Chain>& chains, double t, bool concave,
+                                   double thresholdDeg)
 {
   if (!(t > 0)) return {};
 
@@ -1267,7 +1346,7 @@ manifold::Manifold buildWedgeSolid(const MergedMesh& m,
 
   std::vector<manifold::Manifold> cells;
   for (const Chain& chain : chains)
-    appendChainCells(chain, wedgeSections(m, adj, chain, t, concave),
+    appendChainCells(chain, wedgeSections(m, adj, chain, t, concave, thresholdDeg),
                      [](const WedgeSection& s) -> const std::array<Vector3d, 5>& { return s.p; },
                      lerpWedge, chain.keep, cells);
 
@@ -1280,9 +1359,13 @@ namespace {
 // radius to use at that point. Taking the radius as an argument rather than
 // reading one for the whole chain is what lets a spine ramp its bead down to
 // nothing where a corner cannot be built.
-RoundSection makeRoundSection(const Vector3d& v, const Vector3d& nA, const Vector3d& nB, double r,
-                              bool concave, int segs, double eps)
+RoundSection makeRoundSection(const MergedMesh& m,
+                              const std::map<EdgeKey, std::vector<int>>& adj, const SpineFrame& f,
+                              double r, bool concave, int segs, double eps, double thresholdDeg)
 {
+  const Vector3d& v = f.v;
+  const Vector3d& nA = f.nA;
+  const Vector3d& nB = f.nB;
   RoundSection s;
   if (!(r > 0)) return s;
 
@@ -1309,7 +1392,11 @@ RoundSection makeRoundSection(const Vector3d& v, const Vector3d& nA, const Vecto
   const Vector3d TA = C - dir * r * nA;
   const Vector3d TB = C - dir * r * nB;
 
-  s.w = pentagonSection(v, nA, nB, bis, TA, TB, dir, eps);
+  const double epsA = wallOvershoot(m, adj, v, nA, f.triA, TA, eps, thresholdDeg);
+  const double epsB = wallOvershoot(m, adj, v, nB, f.triB, TB, eps, thresholdDeg);
+
+  s.w = pentagonSection(v, nA, nB, bis, TA, TB, dir, epsA, epsB);
+  s.eps = std::max(epsA, epsB);
   s.v = v;
   s.C = C;
   s.u.reserve(segs + 2);
@@ -1335,9 +1422,8 @@ RoundSection makeRoundSection(const Vector3d& v, const Vector3d& nA, const Vecto
   // on: the wedges stand eps past each wall, the corner cells further, and what
   // is subtracted further still, so that a cut always crosses a face and never
   // arrives along it.
-  const double past = 2.0 * eps;
-  s.u.push_back(TA - dir * past * nA);
-  s.u.push_back(TB - dir * past * nB);
+  s.u.push_back(TA - dir * 2.0 * epsA * nA);
+  s.u.push_back(TB - dir * 2.0 * epsB * nB);
   s.valid = true;
   return s;
 }
@@ -1347,7 +1433,7 @@ RoundSection makeRoundSection(const Vector3d& v, const Vector3d& nA, const Vecto
 std::vector<RoundSection> roundSections(const MergedMesh& m,
                                         const std::map<EdgeKey, std::vector<int>>& adj,
                                         const Chain& chain, double r, bool concave,
-                                        int arcSegments)
+                                        int arcSegments, double thresholdDeg)
 {
   const std::vector<SpineFrame> frames = spineFrames(m, adj, chain, r, concave);
 
@@ -1360,7 +1446,7 @@ std::vector<RoundSection> roundSections(const MergedMesh& m,
   for (size_t i = 0; i < frames.size(); ++i) {
     const SpineFrame& f = frames[i];
     if (!f.valid) continue;
-    out[i] = makeRoundSection(f.v, f.nA, f.nB, r, concave, segs, eps);
+    out[i] = makeRoundSection(m, adj, f, r, concave, segs, eps, thresholdDeg);
   }
   return out;
 }
@@ -1559,6 +1645,9 @@ RoundSection lerpSection(const RoundSection& a, const RoundSection& b, double s)
   for (size_t k = 0; k < out.u.size(); ++k) out.u[k] = a.u[k] + s * (b.u[k] - a.u[k]);
   out.v = a.v + s * (b.v - a.v);
   out.C = a.C + s * (b.C - a.C);
+  // The larger of the two, not the interpolation: what stands past a wall
+  // between two stations is whichever of them reaches further.
+  out.eps = std::max(a.eps, b.eps);
   out.valid = true;
   return out;
 }
@@ -1682,15 +1771,12 @@ manifold::Manifold cornerCell(const Junction& j, const Vector3d& vj,
 manifold::Manifold buildRoundSolid(const MergedMesh& m,
                                    const std::map<EdgeKey, std::vector<int>>& adj,
                                    const std::vector<Chain>& chains, double r, bool concave,
-                                   int arcSegments)
+                                   int arcSegments, double thresholdDeg)
 {
   if (!(r > 0)) return {};
 
   const double dir = concave ? 1.0 : -1.0;
   const double eps = std::max(1e-3 * r, 1e-9);
-  // Where the corner cells stand relative to the wedges' eps and the arc's two:
-  // see cornerCell for why it is between them rather than at either.
-  const double over = 1.5 * eps;
   const int segs = std::max(arcSegments, 3);
 
   const std::vector<Junction> junctions = chainJunctions(m, adj, chains, r, concave);
@@ -1700,7 +1786,7 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   std::vector<std::vector<RoundSection>> sections;
   sections.reserve(chains.size());
   for (const Chain& chain : chains)
-    sections.push_back(roundSections(m, adj, chain, r, concave, segs));
+    sections.push_back(roundSections(m, adj, chain, r, concave, segs, thresholdDeg));
 
   // Where each section sits along its chain, as the chain parameter the brushes'
   // selection is written in. It starts as the identity — one section per station
@@ -1715,10 +1801,13 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   }
 
   // Cut every chain back where its ball first meets a wall of the junction it
-  // runs into, and hand that junction a profile of the truncated end for its
-  // corner cell to reach with. Both ends come off the untruncated sections, so a
-  // two-station chain does not truncate itself twice over.
-  std::map<int, std::vector<std::array<Vector3d, 4>>> endProfiles;
+  // runs into, and hand that junction the truncated end for its corner cell to
+  // reach with. Both ends come off the untruncated sections, so a two-station
+  // chain does not truncate itself twice over. What is handed over is the section
+  // rather than the profile built from it, because how far past the walls that
+  // profile has to stand is not known until every chain arriving there has said
+  // how far it stands itself.
+  std::map<int, std::vector<RoundSection>> endSections;
   std::vector<bool> chainUsable(chains.size(), true);
   std::vector<std::array<bool, 2>> runout(chains.size(), {false, false});
   for (size_t ci = 0; ci < chains.size(); ++ci) {
@@ -1777,7 +1866,7 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
       // reaches with is not that section's own pentagon but a profile rebuilt at
       // the corner cell's distance past the walls; cornerProfile says why.
       const RoundSection reach = lerpSection(a, b, std::max(0.0, s - 2.0 * nudge));
-      if (reach.valid) endProfiles[j.vert].push_back(cornerProfile(reach, over));
+      if (reach.valid) endSections[j.vert].push_back(reach);
     }
 
     // A chain one segment long, truncated from both ends by more than its own
@@ -1841,8 +1930,17 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
         Vector3d nB = (1.0 - s) * end.nB + s * nbr.nB;
         if (nA.norm() < 1e-9 || nB.norm() < 1e-9) return;
         const double radius = r * d / length;
-        into.push_back(makeRoundSection(v, nA.normalized(), nB.normalized(), radius, concave,
-                                        segs, std::max(1e-3 * radius, 1e-9)));
+        SpineFrame f;
+        f.v = v;
+        f.nA = nA.normalized();
+        f.nB = nB.normalized();
+        // The walls are the end station's, walked from its triangles; the sample
+        // is at most a couple of radii away along the same two of them.
+        f.triA = end.triA;
+        f.triB = end.triB;
+        into.push_back(
+          makeRoundSection(m, adj, f, radius, concave, segs, std::max(1e-3 * radius, 1e-9),
+                           thresholdDeg));
         atInto.push_back(static_cast<double>(endIdx) + s * toward);
       }
     };
@@ -1906,6 +2004,16 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   const manifold::Manifold ball = manifold::Manifold::Sphere(r, segs);
   const std::vector<Vector3d> ballShell = hullPoints(ball);
 
+  // How far past its walls one corner stands: further than any bead arriving
+  // there, since a corner cell resting inside one of them is the coincident-face
+  // problem the overshoot exists to avoid, and the beads no longer all stand the
+  // same distance past a wall.
+  auto epsAt = [&](const Junction& j) {
+    double most = eps;
+    for (const RoundSection& s : endSections[j.vert]) most = std::max(most, s.eps);
+    return most;
+  };
+
   // How far short of a wall a tessellated ball seated against it stops. Its
   // vertices are on the sphere and its faces are therefore chords, so the face
   // that meets the wall reaches only that face's own distance from the centre,
@@ -1914,11 +2022,18 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   // several times the whole overshoot ladder, so it is what a point meant to
   // stand past the wall has to clear first. Measured off the mesh rather than
   // assumed from the segment count, because it is the mesh that does the cutting.
-  const double ballPast = (r - inradius(ball)) + 2.0 * eps;
+  const double ballShort = r - inradius(ball);
 
   for (const Junction& j : junctions) {
     if (j.ballCentres.empty()) continue;
-    manifold::Manifold cell = cornerCell(j, m.pos[j.vert], endProfiles[j.vert], r, dir, over);
+    const double here = epsAt(j);
+    // Where the corner cell stands relative to the beads' overshoot and the
+    // arc's two: see cornerCell for why it is between them rather than at either.
+    const double over = 1.5 * here;
+    const double ballPast = ballShort + 2.0 * here;
+    std::vector<std::array<Vector3d, 4>> profiles;
+    for (const RoundSection& s : endSections[j.vert]) profiles.push_back(cornerProfile(s, over));
+    manifold::Manifold cell = cornerCell(j, m.pos[j.vert], profiles, r, dir, over);
     if (cell.IsEmpty()) continue;
     wedgeCells.push_back(std::move(cell));
     // One ball per reachable centre, hulled together. The hull is not an
@@ -2304,10 +2419,10 @@ std::shared_ptr<const Geometry> buildFilletTool(
   // fixed at the ball's tangency points rather than given by the caller.
   manifold::Manifold tool;
   if (isWedgeOnly) {
-    tool = buildWedgeSolid(m, adj, usable, node.size, wantConcave);
+    tool = buildWedgeSolid(m, adj, usable, node.size, wantConcave, thresholdDeg);
   } else {
     const int arcSegments = node.discretizer.getCircularSegmentCount(node.size).value_or(0);
-    tool = buildRoundSolid(m, adj, usable, node.size, wantConcave, arcSegments);
+    tool = buildRoundSolid(m, adj, usable, node.size, wantConcave, arcSegments, thresholdDeg);
   }
 
   if (tool.IsEmpty()) return nullptr;

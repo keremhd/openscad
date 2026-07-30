@@ -61,8 +61,11 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
    because both tools are built from the same original child. The obvious
    composition fix — run the round tool on the already-filleted solid — is
    strictly better on polyhedral models and destroys every curved one, and
-   `min_angle` does not separate the two cases. See below, including what it
-   costs the quoted SCAD equivalent.
+   `min_angle` does not separate the two cases. What made it destroy them is
+   fixed — the overshoot is measured against the wall it stands past instead of
+   being a fixed hair — but the lip itself is still there, and the composition
+   that closes it is still to be chosen. See below, including what it costs the
+   quoted SCAD equivalent.
 13. **DOC**, then **CLEAN**.
 
 ---
@@ -1590,7 +1593,7 @@ between, and the ledge survives into the finished solid with nothing but the
 tool's own faces on either side of it. Nothing downstream can tell that from a
 crease of the shape.
 
-### The fix this points at, and how far it got
+### The fix this points at — landed
 
 Floor the overshoot at the wall's own sagitta, measured off the target's mesh
 rather than derived from the caller's facet angle — the same argument `ballPast`
@@ -1608,31 +1611,57 @@ That is the whole of the noise, gone at the source, with no provenance, no new
 parameter and no change to the classifier. It should improve re-filleting for the
 same reason, which is the caveat under DOC.
 
-**What is not settled is how to measure the sagitta locally**, and a global
-maximum is not shippable — it would inflate the overshoot at a fine feature
-because of a coarse one elsewhere on the part. Two local estimators were tried
-and neither converged:
+**How to measure it locally was the open question, and it is now closed.** Two
+earlier estimators did not converge, and both were measuring the wrong thing:
 
 - `0.5 * L * tan(turn / 4)` over the seams of the walls the crease runs between,
   which reads a long nearly-flat triangulation diagonal as a chord of an enormous
   circle: 0.737 on an L bracket, 37 % of `r`, where the true answer is zero.
-- The station's height above its own neighbouring facet planes, which is the
-  right quantity and was under-reaching: the tee came back worse than the naive
-  composition.
+- The station's height above its own neighbouring facet planes, which was under-
+  reaching badly: on a pipe the facets carrying the crease are chords 60 mm long
+  with no vertex anywhere near it, so there is nothing at the station to measure.
 
-The next thing to try is the quantity stated properly: the tool's rim is a chord
-from one station's overshoot point to the next, and what it must clear is the
-wall between them, so the measurement wants to be per *segment* of the crease and
-against the facets under that segment — not per station, and not across the wall.
+**Landed:** the overshoot at one station of one wall is the fixed hair plus how
+far that wall has fallen behind the tangency plane *at the tangency point*, which
+is the far edge of the footprint and so the deepest the wall gets under the tool.
+The wall is walked from the triangle the station names, out to the tangency point
+and no further, stopping at the first crease — `isFeatureAngle`, which is why the
+four builders now take the threshold. The quantity is the curvature of the wall
+across the setback, `t^2 / 2R`, not the tessellation sagitta: 0.2 on a radius-10
+pipe at a 2 mm setback, a hundred times the hair, and the tessellation figure
+`0.048` that the crude floor suggested is four times too small.
 
-Two things to expect when it lands. The tool solid grows by a tessellation-scale
-amount on its buried side, which is invisible in any composition but is exactly
-what `FilletCompare_test.cc` measures against its hand references at `0.02 * r`;
-on a radius-10 pipe at `$fn = 32` the sagitta is 0.048 against a tolerance of
-0.04, so that tolerance has to become a statement about the target's tessellation
-or those comparisons have to move to the composed result. And the four builders
-need the crease threshold passed in, because "where does one wall stop" is the
-same question `isFeatureAngle` already answers and must not be answered twice.
+| at `r = 2`, `$fn = 32` | convex feature edges on model + tool | of those, folds |
+|---|---|---|
+| tee, `eps` as it was | 338 | 204 |
+| tee, overshoot measured | **132 — all square, the model's own rims** | **0** |
+| boss, `eps` as it was | 46 | 2 |
+| boss, measured | 44 — the model's own | 0 |
+
+Flat walls are untouched, since nothing dips on one: the whole unit suite, all 21
+regression baselines and all 82 case checks are unchanged, `FilletCompare_test.cc`
+included — the deeper burial is on curved walls, where those comparisons have no
+hand reference. Cost is nil: a boss at `$fn = 128` renders in 633 ms against 628,
+the tee in 95 against 99.
+
+Two things that came with it. The corner cells' `over` and the corner ball's
+`ballPast` are no longer `1.5 x` and `2 x` one number for the whole tool but that
+much past the deepest bead arriving at each junction, because the ladder is only
+meaningful if the cell stands further past a wall than the beads it closes. And
+`RoundSection` carries the overshoot it was built at, which is what a truncated
+end hands its corner.
+
+**What this does not fix is the composition.** With the noise gone the naive
+composition — the round pass on the blended solid — no longer tears curved work
+apart: the tee goes from genus 41 in 17 pieces with 33 spurious chains to genus 0
+in one piece, 20354.7465 mm3 against 20354.7878 for the composition as it ships.
+But 20 short convex chains survive on the blend, 8 of which the size gate refuses
+and warns about. They are not ledges: they are the bead's own cells meeting at
+17-59 degrees where the tee's dihedral runs away toward the crown, which is a
+coarse blend and not an artefact. So route A is survivable now rather than clean,
+and the case for route E in
+[`log-2026-07-30-d12-alternatives.md`](log-2026-07-30-d12-alternatives.md) — which
+needs no builder change at all — is unaffected by any of this.
 
 ### What the rib says, whichever route is taken
 

@@ -173,7 +173,7 @@ Manifold toolFor(const Manifold& target, double t, bool concave, double threshol
   const MergedMesh mm = mergeMesh(target.GetMeshGL64());
   const auto adj = buildEdgeAdjacency(mm.tris);
   const auto chains = buildChains(mm, selectedEdges(mm, adj, thresholdDeg, concave));
-  return buildWedgeSolid(mm, adj, chains, t, concave);
+  return buildWedgeSolid(mm, adj, chains, t, concave, thresholdDeg);
 }
 
 Manifold roundToolFor(const Manifold& target, double r, bool concave, int arcSegments,
@@ -182,7 +182,7 @@ Manifold roundToolFor(const Manifold& target, double r, bool concave, int arcSeg
   const MergedMesh mm = mergeMesh(target.GetMeshGL64());
   const auto adj = buildEdgeAdjacency(mm.tris);
   const auto chains = buildChains(mm, selectedEdges(mm, adj, thresholdDeg, concave));
-  return buildRoundSolid(mm, adj, chains, r, concave, arcSegments);
+  return buildRoundSolid(mm, adj, chains, r, concave, arcSegments, thresholdDeg);
 }
 
 Manifold box(double sx, double sy, double sz) { return Manifold::Cube(vec3(sx, sy, sz), false); }
