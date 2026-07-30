@@ -1559,6 +1559,70 @@ TEST_CASE("size: a contact landing on the edge of its wall is a fit, not a miss"
   CHECK(worst < 1e-9);
 }
 
+TEST_CASE("size: a bead the target already carries is not a wall in the way")
+{
+  // A rib on a plate, blended, and then asked about by the round pass — the
+  // composition D12 wants. The blend is what makes this hard: a bead is tangent
+  // to both walls it touches, so the smooth grouping cannot separate them, and
+  // the whole part comes back as one surface. Asked for the nearest point of
+  // "the wall" to a ball seated on the rib's top corner, an unbounded search
+  // answers with the rib's other side, six millimetres away, and the crowding
+  // test then refuses every one of the rib's own corners — the rounds vanish and
+  // six warnings fire naming creases that have nothing wrong with them.
+  const double r = 2.0;
+  const double threshold = derivedThreshold(discretizer(32));
+  const auto model = box(60.0, 40.0, 6.0) +
+                     box(30.0, 6.0, 20.0).Translate(manifold::vec3(15.0, 17.0, 6.0));
+
+  const MergedMesh pm = mergeMesh(model.GetMeshGL64());
+  const auto padj = buildEdgeAdjacency(pm.tris);
+  const auto beads = buildChains(pm, selectedEdges(pm, padj, threshold, /*wantConcave=*/true));
+  const auto blend = model + buildRoundSolid(pm, padj, beads, r, /*concave=*/true, 32, threshold);
+
+  const MergedMesh mm = mergeMesh(blend.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto surfaceOf = smoothSurfaces(mm, adj, threshold);
+
+  // The grouping really does merge them; this is the condition being defended
+  // against, not an incidental detail of the model.
+  auto surfaceAt = [&](const Vector3d& p) {
+    int best = -1;
+    double nearest = std::numeric_limits<double>::max();
+    for (size_t t = 0; t < mm.tris.size(); ++t) {
+      const auto& tri = mm.tris[t];
+      const double d = pointTriangleDistance(p, mm.pos[tri.v[0]], mm.pos[tri.v[1]],
+                                             mm.pos[tri.v[2]]);
+      if (d < nearest) { nearest = d; best = surfaceOf[t]; }
+    }
+    return best;
+  };
+  CHECK(surfaceAt({30.0, 17.0, 20.0}) == surfaceAt({30.0, 23.0, 20.0}));
+
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, threshold, /*wantConcave=*/false));
+  REQUIRE_FALSE(chains.empty());
+  const auto verdicts =
+    checkChainSizes(mm, adj, chains, r, /*concave=*/false, /*wedge=*/false, threshold);
+  for (size_t ci = 0; ci < chains.size(); ++ci) {
+    CAPTURE(ci, verdicts[ci].where.x(), verdicts[ci].where.y(), verdicts[ci].where.z(),
+            verdicts[ci].amount);
+    CHECK(verdicts[ci].fault == SizeFault::Fits);
+  }
+
+  // And no contact of a crease on one side of the rib is seated on the other
+  // side of it, which is the defect stated directly. (Both points landing on the
+  // same spot is not: at a turn the ball touches the crease between two walls,
+  // on the boundary of each, which is what a chain that turns is.)
+  for (const auto& chain : chains)
+    for (const auto& c :
+         chainContacts(mm, adj, chain, r, /*concave=*/false, /*wedge=*/false, surfaceOf, 3)) {
+      if (!c.valid || c.v.z() < 6.0 || c.v.x() < 15.0 || c.v.x() > 45.0) continue;
+      const bool near = c.v.y() < 20.0;
+      CAPTURE(c.v.x(), c.v.y(), c.v.z(), c.TA.y(), c.TB.y());
+      CHECK(near == (c.TA.y() < 20.0));
+      CHECK(near == (c.TB.y() < 20.0));
+    }
+}
+
 TEST_CASE("size: a chamfer setback is measured against the same face")
 {
   // The wedge tools take the setback directly, so the same 30 mm face is what

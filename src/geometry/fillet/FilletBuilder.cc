@@ -612,17 +612,69 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
       if (static_cast<size_t>(s) < surfaceRim.size()) surfaceRim[s].push_back(key);
   }
 
-  auto nearestOnSurface = [&](const Vector3d& p, int surface, Vector3d *onWall) {
+  // How far a wall may turn away from the triangle the question was asked at
+  // before it stops being that wall. A wall curved enough to matter still turns
+  // only by its sagitta over the tool's own footprint — a radius-2 blend on a
+  // radius-10 boss covers 27 degrees of it — while a bead turns by the whole
+  // crease angle within a couple of millimetres, which is what separates the two
+  // without anything having to be told which pass built what.
+  //
+  // A right angle is exactly the wrong value, and measurably so: at 90 the walk
+  // steps from a rib's side onto the plate its bead lands on, which is at
+  // precisely 90, and four creases are lost again. Anything from 30 to 85 gives
+  // the same answer on every model in the set.
+  constexpr double kWallTurnDeg = 60.0;
+  const double turnCap = std::cos(kWallTurnDeg * M_PI / 180.0);
+
+  // The nearest point of the wall to `p`, where the wall is the part of the
+  // surface this crease can actually reach: walked from the triangle the station
+  // named, never leaving the surface, never turning further than the cap above,
+  // and never stepping further from the crease than `budget` — which is as far
+  // as a point the seated ball touches can possibly be.
+  //
+  // Asking the whole surface instead is right until something has been blended
+  // into the target, and wrong the moment one has been. A bead is tangent to
+  // both walls it touches, which is what a fillet is, so the smooth grouping
+  // runs straight through it: a rib with a bead at its foot comes back as ONE
+  // surface — near side, both beads, the plate and the far side. The nearest
+  // point of that to a ball seated on the rib's top corner is on the face
+  // opposite, and every question asked of the contact afterwards is then asked
+  // about the wrong wall.
+
+  auto nearestOnWall = [&](const Vector3d& p, const Vector3d& from, int startTri, int surface,
+                           double budget, Vector3d *onWall) {
     double best = std::numeric_limits<double>::infinity();
     if (surface < 0 || static_cast<size_t>(surface) >= surfaceTris.size()) return best;
-    for (const int t : surfaceTris[surface]) {
+    if (startTri < 0 || static_cast<size_t>(startTri) >= m.tris.size()) return best;
+
+    std::set<int> seen{startTri};
+    std::vector<int> stack{startTri};
+    while (!stack.empty()) {
+      const int t = stack.back();
+      stack.pop_back();
       const Tri& tri = m.tris[t];
-      const Vector3d q =
-        closestPointOnTriangle(p, m.pos[tri.v[0]], m.pos[tri.v[1]], m.pos[tri.v[2]]);
-      const double d = (p - q).norm();
-      if (d < best) {
-        best = d;
+      const Vector3d& a = m.pos[tri.v[0]];
+      const Vector3d& b = m.pos[tri.v[1]];
+      const Vector3d& c = m.pos[tri.v[2]];
+
+      const Vector3d q = closestPointOnTriangle(p, a, b, c);
+      if ((p - q).norm() < best) {
+        best = (p - q).norm();
         if (onWall) *onWall = q;
+      }
+
+      // Measured, and walked, from the crease: a triangle out of the tool's
+      // reach is still the nearest thing to `p` if nothing closer exists, but
+      // nothing past it is reachable through it.
+      if ((closestPointOnTriangle(from, a, b, c) - from).norm() > budget) continue;
+
+      for (int k = 0; k < 3; ++k) {
+        const auto it = adj.find(std::minmax(tri.v[k], tri.v[(k + 1) % 3]));
+        if (it == adj.end()) continue;
+        for (const int nb : it->second)
+          if (static_cast<size_t>(nb) < surfaceOf.size() && surfaceOf[nb] == surface &&
+              m.tris[nb].normal.dot(m.tris[startTri].normal) > turnCap && seen.insert(nb).second)
+            stack.push_back(nb);
       }
     }
     return best;
@@ -651,9 +703,14 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
   // ball rolling from one wall onto the next, which is what a chain that turns
   // is, and not a wall running out. The question is left to the samples either
   // side, which each ask about one wall.
-  auto seatOn = [&](ChainContact& c, const Vector3d& n, int surface, Vector3d& T, bool turned) {
+  auto seatOn = [&](ChainContact& c, const Vector3d& n, int surface, int tri, Vector3d& T,
+                    bool turned) {
+    // How far from the crease a point this ball touches can be: out to the
+    // centre, and a radius further. Past that is another feature's wall, however
+    // smoothly the mesh gets there.
+    const double budget = (c.C - c.v).norm() + c.radius;
     Vector3d onWall;
-    const double d = nearestOnSurface(c.C, surface, &onWall);
+    const double d = nearestOnWall(c.C, c.v, tri, surface, budget, &onWall);
     if (!std::isfinite(d)) return;  // no wall to ask; leave the constructed point
     T = onWall;
     if (turned) return;
@@ -666,7 +723,8 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
     // Hanging off the end of this wall. What the user can act on is how far past
     // it the blend would stop, so report the miss of the point the bead would
     // actually be built to.
-    c.offFace = std::max(c.offFace, nearestOnSurface(c.C - dir * c.radius * n, surface, nullptr));
+    c.offFace = std::max(
+      c.offFace, nearestOnWall(c.C - dir * c.radius * n, c.v, tri, surface, budget, nullptr));
   };
 
   auto contactAt = [&](const StationNormals& s, int vert, bool turnedA = false,
@@ -697,8 +755,8 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
       c.surfaceB = surfaceOf[s.triB];
     c.valid = std::isfinite(r) && c.C.allFinite();
     if (c.valid) {
-      seatOn(c, s.nA, c.surfaceA, c.TA, turnedA);
-      seatOn(c, s.nB, c.surfaceB, c.TB, turnedB);
+      seatOn(c, s.nA, c.surfaceA, s.triA, c.TA, turnedA);
+      seatOn(c, s.nB, c.surfaceB, s.triB, c.TB, turnedB);
     }
     return c;
   };
