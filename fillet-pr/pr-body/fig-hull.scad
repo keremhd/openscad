@@ -34,11 +34,14 @@ module ring(n, radius, z) for (i = [0 : n - 1]) rotate([0, 0, i * 360 / n])
 module footBalls() translate([PLATE / 2, PLATE / 2, 0]) ring(NF, CR + R, PH + R);
 module rimBalls()  translate([PLATE / 2, PLATE / 2, 0]) ring(NR, CR - R, PH + CH - R);
 
-// The near half taken off, so what sits inside the material can be seen.
-module cut() intersection() {
+// The near half taken off, so what sits inside the material can be seen. The
+// model is cut a hair behind the tool, so the two cut faces do not land in the
+// same plane and the tool's cross-section reads as its own colour.
+module cutAt(off) intersection() {
     children();
-    translate([-PLATE, PLATE / 2, -PLATE]) cube([3 * PLATE, 3 * PLATE, 3 * PLATE]);
+    translate([-PLATE, PLATE / 2 + off, -PLATE]) cube([3 * PLATE, 3 * PLATE, 3 * PLATE]);
 }
+module cut() cutAt(0.05) children();
 
 // 1: where the balls sit, concave crease.
 translate([0, 0, 0]) {
@@ -58,8 +61,14 @@ translate([76, 0, 0]) {
     color("tomato") rimBalls();
 }
 
-// 4: the tool they define, on the same cut.
+// 4: the tool they define. The model is drawn with the whole tool already taken
+// out of it, so the gold sits in the void it removes rather than inside the grey,
+// and its cut face stands a hair in front of the model's so the cross-section
+// reads as its own colour.
 translate([114, 0, 0]) {
-    color("silver") cut() model();
-    color("gold") cut() round_tool(r = R) model();
+    color("silver") difference() {
+        cut() model();
+        round_tool(r = R) model();
+    }
+    color("gold") cutAt(0) round_tool(r = R) model();
 }

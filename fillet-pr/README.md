@@ -57,7 +57,7 @@ panel is a marker cloud:
 |---|---|---|---|
 | `pr-body/fig-wedge` | 1200,460 | 3 panels | `chamfer_tool`, the cylinder that comes out of it, `fillet_tool`. Copied unchanged into `wiki-page/` and `doc-page/` |
 | `pr-body/fig-corner` | 1300,480 | 4 panels | inside corner: ball then tool; outside corner: ball in section, then the whole cube tool with one corner solid and the rest at alpha 0.18 |
-| `pr-body/fig-hull` | 1400,520 | 4 panels | a boss on a plate — the foot ring's balls then its tool, the rim's balls then its tool, both halves cut so the seated balls show |
+| `pr-body/fig-hull` | 1400,520 | 4 panels | a boss on a plate — the foot ring's balls then its tool, the rim's balls then its tool. The right two are cut in half; in panel 4 the model is cut 0.05 behind the tool and has the whole tool differenced out of it, so the tool's cross-section stands proud in its own colour instead of fighting the model's cut face |
 | `pr-body/fig-classify` | 1100,620 | 225 | disjoint marker cubes, so a cloud is correct |
 | `pr-body/fig-hard-cases` | 1200,520 | 3 | one per panel; the pocket's cutting box is deliberately oversize, see the note in the script |
 | `doc-page/fig-brush` | 1100,600 | 2 | the two brush variants |
