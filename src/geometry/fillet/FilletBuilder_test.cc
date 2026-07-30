@@ -1882,4 +1882,177 @@ TEST_CASE("debug markers: the spine overlay draws every part of the frame")
   CHECK(ps->colors.size() == 4);
 }
 
+namespace {
+
+// What one pass of the operator leaves behind: the model with a bead grown along
+// every concave crease, and the source id marking what that pass added — which
+// is what the second pass needs to tell the blend from the shape.
+struct Blend
+{
+  manifold::Manifold solid;
+  uint32_t addedID = 0;
+};
+
+Blend blendInner(const manifold::Manifold& model, double r, double thresholdDeg,
+                 int arcSegments = 24)
+{
+  const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, thresholdDeg, /*wantConcave=*/true));
+  const auto tool =
+    buildRoundSolid(mm, adj, chains, r, /*concave=*/true, arcSegments).AsOriginal();
+  return {model + tool, static_cast<uint32_t>(tool.OriginalID())};
+}
+
+// The first triangle whose centroid answers to `where`, or -1.
+int triAt(const MergedMesh& m, const std::function<bool(const Vector3d&)>& where)
+{
+  for (size_t t = 0; t < m.tris.size(); ++t) {
+    const Vector3d c =
+      (m.pos[m.tris[t].v[0]] + m.pos[m.tris[t].v[1]] + m.pos[m.tris[t].v[2]]) / 3.0;
+    if (where(c)) return static_cast<int>(t);
+  }
+  return -1;
+}
+
+// The L both blend tests are built on: two bars 20 x 10 x 10 and 10 x 20 x 10,
+// so the reflex crease runs up (10, 10) and the air is the quadrant beyond it.
+// A bead of radius r there is a quarter-round centred on (10 + r, 10 + r), and
+// it ends on the z = 0 and z = 10 faces — which is the whole of D12 in one
+// shape, and the shape most people write first.
+manifold::Manifold blendEll() { return box(20, 10, 10) + box(10, 20, 10); }
+
+}  // namespace
+
+TEST_CASE("blend: the bead's flank is a surface of its own, its cap belongs to the face")
+{
+  const double r = 3.0, th = 45.0;
+  const Blend b = blendInner(blendEll(), r, th);
+  REQUIRE(b.addedID != 0);
+
+  const MergedMesh bm = mergeMesh(b.solid.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(bm.tris);
+  const auto added = addedTriangles(bm, b.addedID);
+  CHECK(std::count(added.begin(), added.end(), true) > 0);
+
+  // A triangle well inside each of the two walls the bead blends, and one on the
+  // bead's own flank between them.
+  const int wallX = triAt(bm, [](const Vector3d& c) {
+    return std::abs(c.x() - 10) < 1e-9 && c.y() > 14 && c.z() > 2 && c.z() < 8;
+  });
+  const int wallY = triAt(bm, [](const Vector3d& c) {
+    return std::abs(c.y() - 10) < 1e-9 && c.x() > 14 && c.z() > 2 && c.z() < 8;
+  });
+  REQUIRE(wallX >= 0);
+  REQUIRE(wallY >= 0);
+  CHECK_FALSE(added[wallX]);
+  CHECK_FALSE(added[wallY]);
+
+  // Left to itself the grouping walks from one wall, across the bead it is
+  // tangent to, and onto the other: every seam along the way is smooth, so all
+  // three come out as one surface. That is what puts "the nearest point of the
+  // wall this ball must touch" on the wall opposite.
+  const auto ungrouped = smoothSurfaces(bm, adj, th);
+  CHECK(ungrouped[wallX] == ungrouped[wallY]);
+
+  // Told which triangles the first pass added, the same grouping keeps the three
+  // apart.
+  const auto grouped = smoothSurfaces(bm, adj, th, added);
+  CHECK(grouped[wallX] != grouped[wallY]);
+
+  const int flank = triAt(bm, [](const Vector3d& c) {
+    return c.x() > 10 && c.y() > 10 && c.z() > 2 && c.z() < 8;
+  });
+  REQUIRE(flank >= 0);
+  CHECK(added[flank]);
+  CHECK(grouped[flank] != grouped[wallX]);
+  CHECK(grouped[flank] != grouped[wallY]);
+
+  // The cap is the exception the surface test exists for. It carries the tool's
+  // id, but it was cut flush in the model's top face and continues it, so it
+  // joins that face's surface and is not counted as added.
+  const int cap = triAt(bm, [](const Vector3d& c) {
+    return std::abs(c.z() - 10) < 1e-9 && c.x() > 10 && c.y() > 10;
+  });
+  const int top = triAt(bm, [](const Vector3d& c) {
+    return std::abs(c.z() - 10) < 1e-9 && c.x() < 8 && c.y() < 8;
+  });
+  REQUIRE(cap >= 0);
+  REQUIRE(top >= 0);
+  CHECK(added[cap]);
+  CHECK(grouped[cap] == grouped[top]);
+
+  const auto wholly = addedSurfaces(bm, grouped, added);
+  CHECK(wholly[flank]);
+  CHECK_FALSE(wholly[cap]);
+  CHECK_FALSE(wholly[wallX]);
+}
+
+TEST_CASE("blend: the outline of a bead's end cap is a crease the round pass takes")
+{
+  const double r = 3.0, th = 45.0;
+  const Blend b = blendInner(blendEll(), r, th);
+
+  const MergedMesh bm = mergeMesh(b.solid.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(bm.tris);
+  const auto added = addedTriangles(bm, b.addedID);
+  const auto wholly = addedSurfaces(bm, smoothSurfaces(bm, adj, th, added), added);
+
+  // The cap's outline: the arc of radius r about (10 + r, 10 + r) lying in the
+  // top face. Every one of its segments has to be selected, or the crescent
+  // stands there as a sharp lip over the outline rounded beside it.
+  auto onCapArc = [&](const Vector3d& p) {
+    return std::abs(p.z() - 10) < 1e-9 &&
+           std::abs(std::hypot(p.x() - (10 + r), p.y() - (10 + r)) - r) < 1e-6;
+  };
+
+  size_t arcEdges = 0;
+  for (const auto& key : selectedEdges(bm, adj, th, /*wantConcave=*/false, wholly))
+    if (onCapArc(bm.pos[key.first]) && onCapArc(bm.pos[key.second])) ++arcEdges;
+  CHECK(arcEdges > 0);
+
+  // And the round it gets is real material: rounding the blended solid takes the
+  // crescent off, where rounding the original child never reaches it.
+  const auto convex = buildChains(bm, selectedEdges(bm, adj, th, /*wantConcave=*/false, wholly));
+  const auto tool = buildRoundSolid(bm, adj, convex, r, /*concave=*/false, 24);
+  REQUIRE_FALSE(tool.IsEmpty());
+
+  const MergedMesh om = mergeMesh(blendEll().GetMeshGL64());
+  const auto oadj = buildEdgeAdjacency(om.tris);
+  const auto oconvex = buildChains(om, selectedEdges(om, oadj, th, /*wantConcave=*/false));
+  const auto otool = buildRoundSolid(om, oadj, oconvex, r, /*concave=*/false, 24);
+
+  CHECK((b.solid - tool).Volume() < (b.solid - otool).Volume() - 1e-6);
+}
+
+TEST_CASE("blend: a wall the bead is tangent to is not the wall opposite")
+{
+  // A rib on a plate. The bead runs the closed ring round the rib's base, and
+  // the rib's four vertical creases now stop where it takes over. Asking those
+  // creases whether radius r fits means asking where the walls beside them are,
+  // and a grouping that ran from one rib face over the bead and onto the other
+  // answers with the face opposite: the two creases at one end of the rib then
+  // read as crowding each other out, and both are dropped, on a rib that has
+  // room for them.
+  const double r = 2.0, th = 45.0;
+  const auto rib = box(50, 50, 6) + box(5, 40, 14).Translate(manifold::vec3(22.5, 5, 6));
+  const Blend b = blendInner(rib, r, th);
+
+  const MergedMesh bm = mergeMesh(b.solid.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(bm.tris);
+  const auto added = addedTriangles(bm, b.addedID);
+  const auto wholly = addedSurfaces(bm, smoothSurfaces(bm, adj, th, added), added);
+
+  const auto convex = buildChains(bm, selectedEdges(bm, adj, th, /*wantConcave=*/false, wholly));
+  REQUIRE(convex.size() > 4);
+
+  const auto told =
+    checkChainSizes(bm, adj, convex, r, /*concave=*/false, /*wedge=*/false, th, added);
+  for (const SizeVerdict& v : told) CHECK(v.fault == SizeFault::Fits);
+
+  const auto untold = checkChainSizes(bm, adj, convex, r, /*concave=*/false, /*wedge=*/false, th);
+  CHECK(std::count_if(untold.begin(), untold.end(),
+                      [](const SizeVerdict& v) { return v.fault == SizeFault::Crowded; }) > 0);
+}
+
 #endif  // ENABLE_MANIFOLD

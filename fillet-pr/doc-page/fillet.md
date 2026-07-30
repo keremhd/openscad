@@ -8,7 +8,8 @@ told where those edges are. The operators find the edges themselves by reading
 the mesh, so they work on anything — a CSG tree, an imported STL, the output of
 `hull()` or `minkowski()`.
 
-There are five modules. One is sugar over the other four.
+There are five modules. Four build tools you compose yourself; the fifth runs
+two of them for you, in the order that gets the corners between them right.
 
 | Module | Shape of the blend | Sign of the edge | How it is used |
 |---|---|---|---|
@@ -34,20 +35,46 @@ pipeline you cannot get inside of.
 fillet(r = 2) my_model();
 ```
 
-`fillet()` is the whole thing in one call. It is exactly this composition, and
-nothing more:
+`fillet()` is the whole thing in one call: it grows a bead along every inner
+crease, then rounds every outer one of what that left. Written out, as far as it
+goes:
 
 ```openscad
-module fillet(r = 2, inner = true, outer = true) {
-    difference() {
+module my_fillet(r = 2, inner = true, outer = true) {
+    module blended() {
         union() {
-            children(0);
+            children();
             if (inner) fillet_tool(r = r) children();
         }
-        if (outer) round_tool(r = r) children();
+    }
+    difference() {
+        blended() children();
+        if (outer) round_tool(r = r) blended() children();
     }
 }
 ```
+
+The order matters. An inner bead that runs out onto a face of the model — every
+extruded L, T or rib profile — ends in a cross-section standing in that face,
+and a round pass that never saw the bead leaves that crescent as a sharp lip
+over the outline it rounded beside it. Running the second pass on the result of
+the first is what rounds the bead's end over instead.
+
+**`fillet()` is not sugar over that module**, and this is the one place the tool
+nodes do not reach. The node also tells its round pass which surfaces the fillet
+pass created, so a bead's own flank is not read as a wall wanting rounding.
+Nothing in `.scad` can ask which pass a surface came from, so the module above
+rounds the beads it has just built. On a polyhedral part that costs nothing —
+it gives the same solid to the last digit on an L bracket, a boss and a plate —
+and on curved work it is destructive: a pipe tee at `r = 2, $fn = 32` comes back
+at genus 5 with 5633 mm³ gone and 25 warnings against it, and a dome on a plate
+loses a bead. Write it when you want a polyhedral part composed
+differently; reach for `fillet()` otherwise.
+
+It also takes one child. The node forwards selection brushes to both of its
+passes; a nested module cannot, because `blended() children()` hands the whole
+group down as one child and `children(0)` inside it can no longer pick the
+target back out.
 
 ![fillet() and its halves](fig-fillet.png)
 

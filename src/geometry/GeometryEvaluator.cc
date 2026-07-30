@@ -1034,20 +1034,32 @@ Response GeometryEvaluator::visit(State& state, const FilletNode& node)
         }
 
         if (node.type == FilletType::APPLY) {
-          // difference(union(child, fillet_tool), round_tool). Both tools are
-          // built from the original target rather than from the running result,
-          // so each is measured against the shape the user wrote.
-          ManifoldGeometry result = *target;
+          // difference(union(child, fillet_tool), round_tool), with the round
+          // tool measured against the *blended* solid rather than against the
+          // original child. Where an inner bead runs out onto a face of the
+          // model it leaves its end cross-section standing in that face, and a
+          // round pass that never saw the bead leaves that crescent as a sharp
+          // lip over the outline it rounded beside it.
+          //
+          // The blend is stamped with an id of its own on the way in, so the
+          // round pass can tell the surfaces the first pass created from the
+          // ones the user wrote. Without that it reads the bead's own facets as
+          // walls wanting rounding, which on curved work tears the model apart.
+          auto blended = target;
+          uint32_t addedID = 0;
           if (node.inner) {
             if (auto tool = ManifoldUtils::createManifoldFromGeometry(
                   buildFilletTool(node, FilletType::FILLET, target, brush));
                 tool && !tool->isEmpty()) {
-              result = result + *tool;
+              const manifold::Manifold stamped = tool->getManifold().AsOriginal();
+              addedID = static_cast<uint32_t>(stamped.OriginalID());
+              blended = std::make_shared<ManifoldGeometry>(blended->getManifold() + stamped);
             }
           }
+          ManifoldGeometry result = *blended;
           if (node.outer) {
             if (auto tool = ManifoldUtils::createManifoldFromGeometry(
-                  buildFilletTool(node, FilletType::ROUND, target, brush));
+                  buildFilletTool(node, FilletType::ROUND, blended, brush, addedID));
                 tool && !tool->isEmpty()) {
               result = result - *tool;
             }

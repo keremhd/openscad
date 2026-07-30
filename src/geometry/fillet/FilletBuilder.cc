@@ -28,6 +28,7 @@
 #include <map>
 #include <memory>
 #include <set>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -230,9 +231,36 @@ void addCubeMarker(PolySetBuilder& builder, const Vector3d& p, double half, cons
 
 }  // namespace
 
+std::vector<bool> addedTriangles(const MergedMesh& m, uint32_t addedID)
+{
+  std::vector<bool> out(m.tris.size(), false);
+  if (!addedID) return out;
+  for (size_t t = 0; t < m.tris.size(); ++t) out[t] = m.tris[t].originalID == addedID;
+  return out;
+}
+
+std::vector<bool> addedSurfaces(const MergedMesh& m, const std::vector<int>& surfaceOf,
+                                const std::vector<bool>& added)
+{
+  std::vector<bool> out(m.tris.size(), false);
+  if (added.empty()) return out;
+
+  int surfaces = 0;
+  for (const int s : surfaceOf) surfaces = std::max(surfaces, s + 1);
+
+  std::vector<bool> wholly(surfaces, true);
+  for (size_t t = 0; t < m.tris.size() && t < surfaceOf.size(); ++t)
+    if (!added[t]) wholly[surfaceOf[t]] = false;
+
+  for (size_t t = 0; t < m.tris.size() && t < surfaceOf.size(); ++t)
+    out[t] = wholly[surfaceOf[t]];
+  return out;
+}
+
 std::vector<EdgeKey> selectedEdges(const MergedMesh& m,
                                    const std::map<EdgeKey, std::vector<int>>& adj,
-                                   double thresholdDeg, bool wantConcave)
+                                   double thresholdDeg, bool wantConcave,
+                                   const std::vector<bool>& addedSurface)
 {
   std::vector<EdgeKey> out;
   for (const auto& [key, ts] : adj) {
@@ -240,6 +268,7 @@ std::vector<EdgeKey> selectedEdges(const MergedMesh& m,
     const EdgeClass ec = classifyEdge(m, key, m.tris[ts[0]], m.tris[ts[1]]);
     if (!isFeatureAngle(ec.dihedralDeg, thresholdDeg)) continue;
     if (ec.concave != wantConcave) continue;
+    if (!addedSurface.empty() && addedSurface[ts[0]] && addedSurface[ts[1]]) continue;
     out.push_back(key);
   }
   return out;
@@ -549,7 +578,7 @@ std::vector<SpineFrame> spineFrames(const MergedMesh& m,
 
 std::vector<int> smoothSurfaces(const MergedMesh& m,
                                 const std::map<EdgeKey, std::vector<int>>& adj,
-                                double thresholdDeg)
+                                double thresholdDeg, const std::vector<bool>& added)
 {
   // Union-find over triangles, joined across every edge that is not a crease.
   std::vector<int> parent(m.tris.size());
@@ -561,8 +590,18 @@ std::vector<int> smoothSurfaces(const MergedMesh& m,
 
   for (const auto& [key, ts] : adj) {
     if (ts.size() != 2) continue;
-    if (isFeatureAngle(classifyEdge(m, key, m.tris[ts[0]], m.tris[ts[1]]).dihedralDeg, thresholdDeg))
-      continue;
+    const double dihedralDeg = classifyEdge(m, key, m.tris[ts[0]], m.tris[ts[1]]).dihedralDeg;
+    if (isFeatureAngle(dihedralDeg, thresholdDeg)) continue;
+    // A blend put there by an earlier pass meets the walls it blends
+    // tangentially, so every seam along its edge is smooth and joining across
+    // them would run one surface from a wall, over the bead, and onto the wall
+    // opposite. A surface is what "the nearest point of the wall this blend is
+    // meant to touch" is asked of, and that answer has to be a point on that
+    // wall. So the blend's own surfaces are kept apart from the model's - except
+    // where the two are flush, which is a bead ending in a face of the model,
+    // and there the cap continues that face rather than being a surface of its
+    // own.
+    if (!added.empty() && added[ts[0]] != added[ts[1]] && dihedralDeg > kFlushDeg) continue;
     const int a = find(ts[0]), b = find(ts[1]);
     if (a != b) parent[a] = b;
   }
@@ -810,12 +849,13 @@ double pointTriangleDistance(const Vector3d& p, const Vector3d& a, const Vector3
 std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
                                          const std::map<EdgeKey, std::vector<int>>& adj,
                                          const std::vector<Chain>& chains, double size,
-                                         bool concave, bool wedge, double thresholdDeg)
+                                         bool concave, bool wedge, double thresholdDeg,
+                                         const std::vector<bool>& added)
 {
   std::vector<SizeVerdict> verdicts(chains.size());
   if (!(size > 0) || chains.empty()) return verdicts;
 
-  const std::vector<int> surfaceOf = smoothSurfaces(m, adj, thresholdDeg);
+  const std::vector<int> surfaceOf = smoothSurfaces(m, adj, thresholdDeg, added);
 
   std::vector<std::vector<ChainContact>> contacts;
   contacts.reserve(chains.size());
@@ -2037,7 +2077,7 @@ std::unique_ptr<PolySet> debugSpineMarkers(const MergedMesh& m,
 // inside corner yields a single concave edge).
 std::shared_ptr<const Geometry> buildFilletTool(
   const FilletNode& node, FilletType type, const std::shared_ptr<const ManifoldGeometry>& target,
-  const std::shared_ptr<const ManifoldGeometry>& brush)
+  const std::shared_ptr<const ManifoldGeometry>& brush, uint32_t addedID)
 {
   using namespace fillet::detail;
 
@@ -2063,21 +2103,34 @@ std::shared_ptr<const Geometry> buildFilletTool(
 
   const ClassCounts c = classifyEdges(m, adj, thresholdDeg, useProvenance);
 
-  const size_t selected = wantConcave ? c.featureConcave : c.featureConvex;
+  // Creases of a blend a previous pass added are not creases of the shape. They
+  // are dropped from the selection rather than from the count, so the diagnostic
+  // still says what the mesh contains and says separately what was ignored.
+  const std::vector<bool> added = addedTriangles(m, addedID);
+  const std::vector<bool> addedSurface =
+    addedSurfaces(m, smoothSurfaces(m, adj, thresholdDeg, added), added);
+
+  const std::vector<EdgeKey> selectedKeys =
+    selectedEdges(m, adj, thresholdDeg, wantConcave, addedSurface);
+  const size_t selected = selectedKeys.size();
   LOG(message_group::Echo, node.modinst->location(), "",
       "%1$s: mesh %2$d verts (%3$d merged), %4$d tris, %5$d surfaces; "
       "%6$d edges (%7$d two-face, %8$d non-manifold); feature edges %9$d "
       "(concave %10$d, convex %11$d, %12$d same-surface); selects %13$d %14$s "
-      "edge(s) at %15$.1f deg",
+      "edge(s) at %15$.1f deg%16$s",
       node.name(), static_cast<int>(m.numRawVert), static_cast<int>(m.pos.size()),
       static_cast<int>(m.tris.size()), static_cast<int>(m.distinctIDs.size()),
       static_cast<int>(adj.size()), static_cast<int>(c.twoFace),
       static_cast<int>(c.nonManifold), static_cast<int>(c.feature),
       static_cast<int>(c.featureConcave), static_cast<int>(c.featureConvex),
       static_cast<int>(c.featureSameSurface), static_cast<int>(selected),
-      wantConcave ? "concave" : "convex", thresholdDeg);
+      wantConcave ? "concave" : "convex", thresholdDeg,
+      addedID ? STR(", ignoring ",
+                    static_cast<int>(wantConcave ? c.featureConcave : c.featureConvex) -
+                      static_cast<int>(selected),
+                    " on the blend already built")
+              : std::string{});
 
-  const std::vector<EdgeKey> selectedKeys = selectedEdges(m, adj, thresholdDeg, wantConcave);
   const std::vector<Chain> chains = buildChains(m, selectedKeys);
 
   // debug = true swaps the tool solid for a visualization: colored markers along
@@ -2267,7 +2320,7 @@ std::shared_ptr<const Geometry> buildFilletTool(
   // network, so one tight corner would shrink a fillet on the far side of the
   // part where nobody is looking.
   const std::vector<SizeVerdict> verdicts =
-    checkChainSizes(m, adj, usable, node.size, wantConcave, isWedgeOnly, thresholdDeg);
+    checkChainSizes(m, adj, usable, node.size, wantConcave, isWedgeOnly, thresholdDeg, added);
   std::vector<Chain> fitting;
   for (size_t ci = 0; ci < usable.size(); ++ci) {
     const SizeVerdict& verdict = verdicts[ci];
