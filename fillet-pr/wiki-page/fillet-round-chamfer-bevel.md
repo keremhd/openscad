@@ -64,9 +64,11 @@ walls.
 
 ![A tool solid, by hand](fig-wedge.png)
 
-*Left: the prism — that is `chamfer_tool(t = 4)`. Middle: the same prism with the
-cylinder subtracted. Right: what `fillet_tool(r = 4)` gives you. The prism is
-drawn reaching slightly into the walls, which is how it is actually built.*
+*Left to right: the prism, which is `chamfer_tool(t = 4)`; the same prism with
+the cylinder that comes out of it in red; what `fillet_tool(r = 4)` gives you;
+and the cross-section lying flat. The prism reaches a hair into the walls, so a
+tool crosses the surface it cuts rather than resting on it — drawn far larger
+than life in the last panel, being 0.004 mm at this size.*
 
 Everything else the operators do is that idea generalised: the corner bends, the
 walls curve, the angle between them changes along the way, and several corners

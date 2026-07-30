@@ -35,10 +35,12 @@ rolling down the corner, touching both walls the whole way.
 
 ![A tool solid, by hand](fig-wedge.png)
 
-*Left: the prism, which is `chamfer_tool(t = 4)`. Middle: the same prism with the
-cylinder subtracted. Right: `fillet_tool(r = 4)`. The prism is drawn reaching
-slightly into the walls, which is how it is built — a tool has to cross the
-surface it cuts, not rest on it.*
+*Left to right: `chamfer_tool(t = 4)` in gold on the model in grey; the same
+prism with the cylinder that comes out of it drawn in red; `fillet_tool(r = 4)`;
+and the cross-section lying flat. The section is a pentagon because every cell
+stands a hair past both walls — a tool has to cross the surface it cuts rather
+than rest on it — and that hair is drawn far larger than life, being 0.004 mm at
+this size.*
 
 The rest is that idea generalised: the corner bends, the walls curve, the angle
 between them changes along the way, and where several corners meet at a point the

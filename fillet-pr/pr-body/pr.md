@@ -59,9 +59,13 @@ the whole tool. `fillet_tool(r = 4)` is the same prism with a cylinder of radius
 
 ![One straight crease](fig-wedge.png)
 
-*Left: `chamfer_tool(t = 4)` in gold on the model in grey. Middle: the same
-wedge, with the cylinder that is about to come out of it drawn in red. Right:
-`fillet_tool(r = 4)`. Source: `fig-wedge.scad`.*
+*1: `chamfer_tool(t = 4)` in gold on the model in grey. 2: the same wedge, with
+the cylinder that is about to come out of it in red. 3: `fillet_tool(r = 4)`. 4:
+the cross-section, lying flat — the wedge is a **pentagon**, not a triangle,
+because each cell stands a hair past both walls so that it crosses the surface
+instead of resting on it. That hair is `1e-3` of the size — 0.004 mm here — so it
+is drawn far larger than life, and panels 1–3 show a triangle and are not wrong
+to. Source: `fig-wedge.scad`.*
 
 Where a blend stops and flat wall starts is decided by a ball of the requested
 radius: seat it in the crease so it touches both walls, and the two points it
@@ -78,10 +82,12 @@ leave for it:
 
 *1: an inside corner with the ball seated against all three walls. 2:
 `fillet_tool(r = 4)` on it — three beads and the corner cell between them. 3: the
-outside corner of a cube, cut open through the ball's centre, because at a convex
-corner the ball sits inside the material. 4: the whole `round_tool(r = 4)` for
-that cube — twelve beads and eight corner cells in one connected piece — with the
-same corner left solid and the rest dropped to alpha. Source: `fig-corner.scad`.*
+outside corner of a cube with its tip sliced off square to the body diagonal and
+the ball left whole, because at a convex corner the ball sits inside the
+material. 4: the whole `round_tool(r = 4)` for that cube — twelve beads and eight
+corner cells in one connected piece — with the far corner left solid and the rest
+dropped to alpha, so what shows is the cell's inner face. Source:
+`fig-corner.scad`.*
 
 The concave and convex cases are one construction with a sign flipped: the ball's
 centre goes into the empty quadrant for a fillet and into the material for a

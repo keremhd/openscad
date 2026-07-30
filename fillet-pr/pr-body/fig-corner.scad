@@ -17,16 +17,21 @@ $fn = 48;
 R = 4;
 S = 20;
 
-// The section plane for the outside corner: y = R, through the ball's centre.
-// The model is cut a hair deeper than the ball so the two faces do not land in
-// the same plane.
-module cutModel() intersection() {
+// The section for the outside corner: the corner tip sliced off square to the
+// body diagonal, through the ball's centre. The cut face is a triangle with one
+// edge on each of the three faces the ball touches, which keeps the cube reading
+// as a cube - a cut square to one face takes a whole face away with it. The
+// circle is the ball's great circle; it is not tangent to the triangle's edges,
+// because the three points where the ball touches the faces sit off this plane.
+// `off` moves the plane along the diagonal.
+NRM = [1, -1, 1] / sqrt(3);
+CEN = [S - R, R, S - R];
+BIG = 4 * S;
+module slice(off) difference() {
     children();
-    translate([-S, R + 0.05, -S]) cube([3 * S, 3 * S, 3 * S]);
-}
-module cutBall() intersection() {
-    children();
-    translate([-S, R, -S]) cube([3 * S, 3 * S, 3 * S]);
+    translate(CEN + off * NRM)
+        rotate(a = 54.735610, v = [1, 1, 0])
+            translate([-BIG / 2, -BIG / 2, 0]) cube([BIG, BIG, BIG]);
 }
 
 // An inside corner: the walls left behind are x = 6, y = 14 and z = 6.
@@ -53,22 +58,25 @@ translate([28, 0, 0]) {
 }
 
 // 3: where the ball sits, outside corner - one radius in from each of three
-// faces, seen in section.
+// faces. The corner tip is sliced off and the ball is left whole, so it stands
+// out of the cut face as a ball rather than reading as a disc painted on it.
 translate([56, 0, 0]) {
-    color("silver") cutModel() block();
-    color("tomato") cutBall() blockBall();
+    color("silver") slice(0) block();
+    color("tomato") blockBall();
 }
 
 // 4: the whole tool for that cube, with the same corner left solid and the rest
 // dropped to alpha - twelve beads and eight corner cells, one connected piece.
-module nearCorner() translate([S, 0, S]) sphere(r = 2.4 * R);
+// The corner left solid is the one furthest from the camera, so what shows is
+// the cell's inner face - the surface the finished round actually leaves.
+module farCorner() translate([0, S, 0]) sphere(r = 2.4 * R);
 translate([84, 0, 0]) {
     color("gold") intersection() {
         round_tool(r = R) block();
-        nearCorner();
+        farCorner();
     }
     color([1, 0.84, 0, 0.18]) difference() {
         round_tool(r = R) block();
-        nearCorner();
+        farCorner();
     }
 }
