@@ -1835,20 +1835,26 @@ a near-degenerate case being caught or missed rather than a missing branch. And
 `dx = 19` gives 607 mm³ for a tool that is 57 mm³ on one boss and ought to be
 somewhere near twice it; whatever goes wrong at a shallow crossing is not small.
 
-### Where to look
+### Where it is — not at the junction
 
-- **A junction the solve refuses still costs its beads their ends.** The
-  incident beads are truncated to make room for a corner cell before the solve is
-  asked whether it has a centre. If the answer is no, nothing fills what they
-  vacated. Check whether the refusal path also puts the truncation back.
-- **`wallOvershoot` at a triple point.** It walks the wall out to the tangency
-  point and stops at the first crease. At these junctions two of the three walls
-  are cylinders and the walk starts a facet or two from where two creases meet;
-  a walk that stops early reads the wall as flatter than it is and under-reaches.
-- **The corner profile is rebuilt at the corner cell's own distance past the
-  walls.** That distance is derived per wall; on a curved wall it carries the
-  sagitta term, and at a shallow crossing (`dx = 19`) the two cylinders' walls
-  are nearly tangent to each other, where that term is largest.
+Traced in [`log-2026-07-31-d13.md`](log-2026-07-31-d13.md), which supersedes the
+three places this entry used to send a reader. **None of them is where the hole
+is.** Cut the model down to one boss standing at `x = 38` and the tool still
+comes back genus 2 where a base ring is genus 1: one closed chain, no junction,
+no corner cell, no truncation, no runout. On the two-boss model the extra handle
+is at `(43.4, 29.4)`, fifteen millimetres from either junction.
+
+It is a **slit through the bead at one station of a curved chain**, and it comes
+from the wedges and the canals being cut into cells at the same stations:
+`appendChainCells` leaves consecutive cells abutting on a shared face, that face
+is always a station's plane, and the two unions therefore carry their seams in
+the *same* planes for the subtraction to resolve. Which way it falls is a matter
+of arithmetic, which is what makes the answer move with `$fn`, with `r` and with
+where the boss stands.
+
+Four ways of closing it are priced in the log. Two of them work; both cost
+something, and the log says what, along with what would have to change for
+neither to.
 
 **Acceptance:** the repro comes back genus 0 at `$fn = 48` and `$fn = 96` and at
 `dx = 12`, `16` and `19`; the tool's volume is monotone in `r` and continuous in
