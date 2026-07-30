@@ -1,8 +1,7 @@
 // fillet() is the whole operator in one call: it grows a bead along every inner
-// crease of its child and cuts a round along every outer one, in that order, so
-// that the second pass sees the beads the first built. The tool nodes are the
-// composable surface, and the comment above the node spells out how far a
-// hand-written composition of them gets.
+// crease of its child and cuts a round along every outer one. The tool nodes are
+// the composable surface — this is sugar over the composition of two of them,
+// and the comment above the node spells that composition out.
 //
 // A boss on a plate, because both halves have something obvious to do to it: a
 // closed concave ring where the cylinder meets the plate, and the plate's own

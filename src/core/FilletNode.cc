@@ -95,32 +95,19 @@ static std::shared_ptr<AbstractNode> builtin_bevel_tool(const ModuleInstantiatio
   return builtin_fillet_impl(inst, std::move(arguments), children, FilletType::BEVEL);
 }
 
-// The composition every fillet is: grow the inner creases, then cut back the
-// outer ones. Written out, because the tool nodes are the composable surface and
+// The composition every fillet is: grow the inner creases, cut back the outer
+// ones. Written out, because the tool nodes are the composable surface and
 // anyone wanting a different composition should be able to start from this one:
 //
 //   module fillet(r = 2, inner = true, outer = true, min_angle = undef) {
-//       module blended() {
+//       difference() {
 //           union() {
-//               children();
+//               children(0);
 //               if (inner) fillet_tool(r = r, min_angle = min_angle) children();
 //           }
-//       }
-//       difference() {
-//           blended() children();
-//           if (outer) round_tool(r = r, min_angle = min_angle) blended() children();
+//           if (outer) round_tool(r = r, min_angle = min_angle) children();
 //       }
 //   }
-//
-// "Then" is load-bearing and this node is not sugar over that module. The round
-// pass runs on the solid the fillet pass blended, because a bead that runs out
-// onto a face of the model leaves its end cross-section standing in that face
-// and a pass that never saw the bead leaves that crescent as a sharp lip over
-// the outline it rounded beside it. What the module above cannot say is the rest
-// of it: the node also tells the round pass which surfaces the first pass
-// created, so the bead's own facets are not read as walls wanting rounding.
-// Without that the module is better than nothing on polyhedral work and tears
-// curved work apart, and no .scad can ask which pass a surface came from.
 //
 // Under $preview the node hands back its child untouched, because the tools cost
 // a mesh analysis and two booleans on every keystroke and the fillets are

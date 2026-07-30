@@ -130,35 +130,9 @@ ClassCounts classifyEdges(const MergedMesh& m,
 // The edges this tool acts on: two-face edges whose dihedral clears thresholdDeg
 // and whose concavity matches the tool (concave for fillet/chamfer, convex for
 // round/bevel). These are the edges walked into chains.
-//
-// `addedSurface`, when given, is one flag per triangle marking the surfaces a
-// previous pass of the same operator added — see addedSurfaces(). An edge with
-// such a surface on *both* sides is that pass's own facetting and is not a
-// feature of the shape; it is skipped. An empty vector filters nothing, which is
-// every case but the outer half of fillet().
 std::vector<EdgeKey> selectedEdges(const MergedMesh& m,
                                    const std::map<EdgeKey, std::vector<int>>& adj,
-                                   double thresholdDeg, bool wantConcave,
-                                   const std::vector<bool>& addedSurface = {});
-
-// Which triangles carry the source id an earlier pass of the same operator
-// stamped on what it added. Empty id means nothing was added, and no triangle
-// is marked.
-std::vector<bool> addedTriangles(const MergedMesh& m, uint32_t addedID);
-
-// Which triangles belong to a surface made *wholly* of added ones, given the
-// smooth-surface grouping.
-//
-// Asked per surface rather than per triangle, because the two answers differ
-// exactly where it matters. A bead that runs out onto a face of the model ends
-// in a cap lying flush *in* that face: the cap's triangles are the tool's, but
-// they are flush with the face beside them and so join its surface, which the
-// model already had. The outline of that cap is the crease this whole
-// distinction exists to keep — it is where a bead is truncated by the model, and
-// it wants rounding as much as the outline it interrupts. The bead's own flank,
-// by contrast, is tangent to every wall it touches and comes out wholly added.
-std::vector<bool> addedSurfaces(const MergedMesh& m, const std::vector<int>& surfaceOf,
-                                const std::vector<bool>& added);
+                                   double thresholdDeg, bool wantConcave);
 
 // A stretch of one chain, in chain-parameter space: station i sits at parameter
 // i, so a value between two integers names a point partway along that segment.
@@ -255,26 +229,14 @@ std::vector<SpineFrame> spineFrames(const MergedMesh& m,
                                     const std::map<EdgeKey, std::vector<int>>& adj,
                                     const Chain& chain, double r, bool concave);
 
-// Two faces are flush when they lie in one plane. The question has no middle:
-// either the second pass's cap was cut in the face the model already had, or it
-// stands proud of it, and the only thing the tolerance has to cover is the noise
-// in a normal computed from coordinates that agree exactly.
-inline constexpr double kFlushDeg = 1e-6;
-
 // Group the triangles into surfaces: two triangles belong to the same surface
 // when the edge between them is a seam rather than a crease, i.e. when its
 // dihedral falls below the same threshold that separates feature edges from
 // tessellation. Returns one surface id per triangle. A bore's facets come out as
 // one surface, a cube's six faces as six.
-//
-// `added`, when given, marks the triangles an earlier pass of the same operator
-// put there (see addedSurfaces). Those never join a surface of the model across
-// a smooth seam, only across a flush one — a blend touches its walls
-// tangentially, and joining there would run one surface over the bead and onto
-// the wall opposite, which is not a wall anything can be seated against.
 std::vector<int> smoothSurfaces(const MergedMesh& m,
                                 const std::map<EdgeKey, std::vector<int>>& adj,
-                                double thresholdDeg, const std::vector<bool>& added = {});
+                                double thresholdDeg);
 
 // Where the tool meets the model at one chain station, and the ball seated in
 // the crease there. For the rounded tools that ball is the one being rolled; for
@@ -369,8 +331,7 @@ struct SizeVerdict
 std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
                                          const std::map<EdgeKey, std::vector<int>>& adj,
                                          const std::vector<Chain>& chains, double size,
-                                         bool concave, bool wedge, double thresholdDeg,
-                                         const std::vector<bool>& added = {});
+                                         bool concave, bool wedge, double thresholdDeg);
 
 // The chamfer/bevel cross-section at one chain station: the convex pentagon
 // TA, TB, TB', v', TA'. TA and TB are the setback points on the two walls; the

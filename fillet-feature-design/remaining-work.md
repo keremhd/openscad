@@ -56,14 +56,13 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
    bracket's reflex crease was never refused; what `4.4e-16` dropped was the
    convex chain running the end face's outline, where the spine turns from one
    wall onto the next. See below.
-12. ~~**D12**~~ — **done, and the provenance test alone was not enough.** The
-   round pass runs on the blended solid and is told which surfaces the fillet
-   pass made. Asked per triangle it drops the bead's end cap with the bead's own
-   facets and the lip survives; asked per surface it drops nothing on a curved
-   model, because a bead is tangent to every wall it touches and the grouping
-   ran the whole tee into three surfaces. The grouping itself had to learn about
-   the added pass — which is also what the size gate reads, and what was
-   refusing a rib's vertical creases for crowding. See below.
+12. **D12** — a concave bead that runs out to an open face leaves its end
+   cross-section standing as a sharp lip over the rounded outline beside it,
+   because both tools are built from the same original child. The obvious
+   composition fix — run the round tool on the already-filleted solid — is
+   strictly better on polyhedral models and destroys every curved one, and
+   `min_angle` does not separate the two cases. See below, including what it
+   costs the quoted SCAD equivalent.
 13. **DOC**, then **CLEAN**.
 
 ---
@@ -1450,7 +1449,7 @@ four combinations and the thin-wall refusal beside them. Whole unit suite and al
 
 ---
 
-## D12 — a bead that ends on an outer face leaves a sharp lip over the round — **DONE, and the fix had to reach the surface grouping, not only the selection**
+## D12 — a bead that ends on an outer face leaves a sharp lip over the round
 
 **Where the inner blend meets the outer one, the outer one does not know the
 inner one happened.** `fillet()` builds both tools from the *same* original child:
@@ -1472,29 +1471,16 @@ compositions below agree exactly on all of them.
 
 **The obvious composition fixes it and cannot be adopted.** Running the round tool
 on the already-unioned solid rounds the bead ends over into a continuous
-transition, and on the L bracket the round pass then reads 35 convex creases where
-it read 19.
-
-**Do not read the concave counts as spurious features — they are the real creases,
-and counting them that way gets the comparison backwards.** On the plain boss the
-round pass reports `concave = 32` at `$fn = 32`, which is the boss's own base ring,
-one genuine edge per cylinder facet: the count tracks `$fn` exactly (16 → 16,
-24 → 24, 32 → 32, 64 → 64). It reports `concave = 1` on the L bracket because the
-bracket has exactly one reflex crease. Neither is a sliver. Those creases
-disappear under the second composition for the obvious reason — the inner pass
-filled them — and not because anything was cleaned up. Measured the right way
-round, on the *filleted* boss the round pass sees `concave = 0` at `$fn` 16 and 24
-and `concave = 1` at 32 and 64, and *that* lone edge is a real tangential-contact
-sliver. So the second composition **introduces** one spurious feature on the boss
-where the current one has none. It is not better there; it is marginally worse.
-
-And on anything whose blend surface is curved it is destroyed, measured at
+transition, and on polyhedral models it is strictly better — on the L bracket the
+round pass then reads 35 convex creases and **no** spurious concave ones, against
+19 and 1 before; on the boss it *reduces* spurious concave features from 32 to 1.
+But on anything whose blend surface is curved it is destroyed, measured at
 `r = 2`, `$fn = 32`:
 
 | model | as built now | round tool on the filleted solid |
 |---|---|---|
 | cube | genus 0 | identical — no concave creases, so nothing changes |
-| boss on plate, blind bore | genus 0 | identical result; the boss gains one sliver at `$fn` 32 and above |
+| boss on plate, blind bore | genus 0 | identical result, fewer spurious features |
 | L bracket | genus 0, the lip | genus 0, **lip gone** |
 | rib on plate | genus 0 | genus 0, a wash |
 | pipe tee | genus 0, no warnings | **genus 31, 21 pieces, 31 warnings, 2963 mm³ gone** |
@@ -1532,90 +1518,129 @@ lip; every curved case above stays at its current genus and warning count; and
 whatever `fillet()` is documented to equal is something a reader can actually
 write, or is documented as no longer being sugar.
 
-### Landed — the second route, and the provenance test is not the whole of it
+### The provenance route was built, and is rejected — do not rebuild it
 
-The round pass now runs on the blended solid, which is stamped with a source id
-of its own on the way in, and the tool's selection drops a convex crease with a
-surface the fillet pass made on **both** sides of it. The sketch above had the
-shape of it right and the granularity wrong twice over, in opposite directions,
-and both corrections were forced by measurement rather than argued for:
+The second route above was implemented end to end and it works: the round pass
+runs on the blended solid, `fillet()` stamps the blend with a source id on the
+way in, and the round pass drops a convex crease with a wholly-stamped surface on
+both sides. Measured, it gave the whole table — L bracket lip gone at 6.568 mm3,
+every curved case bit-identical to today, zero warnings, all 82 case checks and
+all 21 regression baselines unchanged.
 
-**Per triangle is too coarse a keep, per surface too coarse a drop.** The bead's
-end cap is cut *flush in* the face the bead ran out onto — coplanar with it, and
-sharing its boundary — so the crescent's triangles carry the tool's id exactly as
-the bead's flank does. A test that asks the triangle drops the crease around the
-cap along with the flank's own facets, and the lip survives: measured, the L
-bracket comes back at 13292.8187 mm³ against 13292.8310 unfixed, which is to say
-it removed 0.012 of the 6.568 it had to. A test that asks the *surface* instead
-gets the cap right — the cap continues the face beside it, so its surface is not
-wholly added — and gets everything else wrong, because a surface is grouped by
-smooth seams and a bead is tangent to every wall it touches: on the pipe tee the
-whole model plus its beads came back as **three** surfaces, of which none was
-wholly added, and 340 of 344 convex creases were still selected. Genus 9, 33272
-triangles, 25 warnings.
+**It is still the wrong answer, and the reason is an invariant, not a
+measurement.** `round_tool` must return the same solid for a given input however
+that input was made — hand-authored, imported, or handed over by a fillet pass.
+Threading "these surfaces are mine" from `fillet()` into the builder couples two
+tools through the wrapper and makes the wrapper privileged: it can then do
+something no caller composing the four tool nodes can reproduce, and the tools
+being the composable surface is worth more than this bug. The commit that did it
+is reverted. If it is ever proposed again, this paragraph is the answer.
 
-**So the grouping itself has to know about the added pass**, and that is the
-change that made the difference: `smoothSurfaces` takes the added mask and
-refuses to join an added triangle to a model triangle across a *smooth* seam,
-joining only across a flush one. Then a bead's flank is its own surface, the cap
-belongs to the face it lies in, and asking "is this surface wholly added" answers
-both questions with one test.
+### What the composition change costs on its own — measured
 
-**That grouping is also what the size gate reads, and it was wrong there too, on
-a model with no bead ends at all.** The rib's four vertical creases stop where
-the base bead takes over; asking whether `r` fits at one of them means asking
-where the walls beside it are, and with the walls, the bead and the wall opposite
-all in one surface the answer to "the nearest point of the wall this ball must
-touch" came back as a point on the face opposite — `TA` equal to the ball centre
-itself. Two creases 5 apart then read as crowding each other out at a radius of
-2, and both were dropped, with warnings. Passing the mask into `checkChainSizes`
-fixes it; without it the rib is red whichever of the two selection rules is used,
-which is why this is recorded as part of the same defect rather than beside it.
+`fillet()` running its round pass on the blended solid, with no other change, is
+the naive composition, and it is what the module in DOC below writes. At
+`r = 2, `$fn = 32`: cube, boss, two bosses and dome unchanged; L bracket fixed,
+13292.8310 -> 13286.2630; **pipe tee destroyed**, genus 5, 25 warnings, 5633 mm3
+gone; rib 6 warnings. Severity moves with tessellation, so anything proposed here
+has to be measured at several: at `$fn = 48` the tee survives.
 
-**Measured, at `r = 2`, `$fn = 32`**, against the composition as it was:
+### Where the spurious creases come from — located, and it is not the classifier
 
-| model | old | new | symmetric difference |
-|---|---|---|---|
-| cube | 26695.1371 | 26695.1371 | empty |
-| boss on plate, blind bore | 18228.6631 | 18228.6631 | zero volume, both ways |
-| two bosses | 18843.4541 | 18843.4541 | zero volume, both ways |
-| pipe tee | 21773.1994 | 21773.1994 | zero volume, both ways |
-| dome on plate | 20373.2433 | 20373.2433 | empty |
-| L bracket | 13292.8310 | 13286.2630 | **8.4524 removed, 1.8835 kept back** |
-| rib on plate | 17373.7472 | 17380.6876 | **6.9403 kept back** |
+Measured on the blended tee at `r = 2, $fn = 32`, splitting every convex feature
+edge by whether the blend made both of its faces:
 
-Zero genus and zero warnings on all seven, at `r = 1` and `r = 2`; the boss and
-the two bosses are identical at `r = 3` as well, warnings and all. The L
-bracket's net −6.568 is the lip, to the digit measured before the fix. The rib's
-+6.940 is the other half of running the round pass on the blend and is a change
-of answer, not a defect: the vertical rounds used to run down past the end of
-their own creases and cut a notch out of the base bead, and now they stop where
-the crease stops. Pictures either side of that are what settled it.
+| | count | dihedral |
+|---|---|---|
+| both faces the model's | 96 | all exactly 90 deg |
+| both faces the blend's | 216 | 17.2 .. 175.8, **196 of them above 150** |
+| one of each | 0 | — |
 
-**Cost.** The round pass reads a bigger mesh, and on work that was already big
-that is nothing: the boss at `$fn = 128` goes 1475 -> 1498 ms, the pipe tee at
-`$fn = 64` 532 -> 533. What pays is a small polyhedral model whose blend is
-finely tessellated, where the round pass went from reading 30 triangles to
-reading 2776: the L bracket at `$fn = 128` goes 137 -> 354 ms. Absolute figures
-that small are not worth a switch.
+So the noise is not a rim of slivers between the bead and the wall, and it is not
+low-angle: it is almost all **folds**, faces turning back on each other, and it
+lies wholly inside the blend. That is why sweeping `min_angle` cannot reach it,
+and it also rules out the "group the bead's facets into one surface by tangency
+continuity" idea in the form it was proposed: facets 157 degrees apart are not
+tangent to each other and no grouping rule based on smoothness will join them.
 
-**Pinned** in `FilletBuilder_test.cc`, three cases, each asserting the wrong
-answer as well as the right one: that the ungrouped surfaces run from one wall
-of an L across its bead onto the other and the grouped ones do not; that the
-cap's outline is selected and the round it gets removes material the round of
-the bare child never reaches; and that the rib's convex chains all fit when the
-gate is told about the blend and are refused for crowding when it is not. Whole
-unit suite green, all 82 case checks unchanged, all 21 fillet regression
-baselines unchanged.
+**The tool's own mesh already carries them**, which is where this stops being a
+classifier question:
 
-**Documented as no longer sugar**, which is option 3 below, and all four copies
-moved together: `FilletNode.cc`, `doc-page/fillet.md`, the wiki draft and
-`pr-body/pr.md` now quote the forwarded composition as *how far a reader can
-get*, and say what it costs — the same solid to the last digit on polyhedral
-work, and a genus-5 tee with 5633 mm³ gone on curved work. The nested module is
-also single-child: `blended() children()` hands the group down as one child, so
-`children(0)` inside it can no longer pick the target out from the brushes.
-Measured, not assumed — a brush passed to it lands in the model.
+| | convex feature edges | of those, above 150 deg |
+|---|---|---|
+| tee, model alone | 96 | 0 |
+| tee, `fillet_tool` alone | 328 | 260 |
+| tee, model + tool | 312 | 196 |
+| boss, `fillet_tool` alone | 192 | 128 |
+| boss, model + tool | 76 | **0** |
+
+The boss absorbs every one of its tool's folds and the tee absorbs almost none.
+Located on the boss, the folds sit at `z = 6 - 0.002` and `rad = 10 - 0.002` —
+one `eps` behind each wall, along the whole tangency line. They are the overshoot
+ladder D2 built: the tool stands `eps` past each wall so the caller's boolean
+cuts across a face instead of arriving along it, and a thin ledge is what that
+overshoot looks like from outside before the union swallows it.
+
+**The union swallows it only when the wall is flat.** `eps` is `1e-3 * r` and it
+is stepped from a point *on the mesh* — a vertex of the wall. On a curved wall
+the facets either side of that vertex fall inside it by their own sagitta, which
+at `$fn = 32` on a radius-10 pipe is **0.048**, twenty-four times `eps`. So the
+step clears the wall at the station it was measured at and stands proud of it in
+between, and the ledge survives into the finished solid with nothing but the
+tool's own faces on either side of it. Nothing downstream can tell that from a
+crease of the shape.
+
+### The fix this points at, and how far it got
+
+Floor the overshoot at the wall's own sagitta, measured off the target's mesh
+rather than derived from the caller's facet angle — the same argument `ballPast`
+already makes for the ball's own facets, and the same "fix the mesh at the
+source" that closed D2. Probed with a crude global floor (the coarsest sub-right-
+angle seam in the whole mesh), the result is exact:
+
+| | convex feature edges on model + tool |
+|---|---|
+| tee, `eps` as now | 312, of which 196 are folds |
+| tee, floored at the mesh's sagitta | **96 — the model's own, and nothing else** |
+| boss, floored | **76 — likewise** |
+
+That is the whole of the noise, gone at the source, with no provenance, no new
+parameter and no change to the classifier. It should improve re-filleting for the
+same reason, which is the caveat under DOC.
+
+**What is not settled is how to measure the sagitta locally**, and a global
+maximum is not shippable — it would inflate the overshoot at a fine feature
+because of a coarse one elsewhere on the part. Two local estimators were tried
+and neither converged:
+
+- `0.5 * L * tan(turn / 4)` over the seams of the walls the crease runs between,
+  which reads a long nearly-flat triangulation diagonal as a chord of an enormous
+  circle: 0.737 on an L bracket, 37 % of `r`, where the true answer is zero.
+- The station's height above its own neighbouring facet planes, which is the
+  right quantity and was under-reaching: the tee came back worse than the naive
+  composition.
+
+The next thing to try is the quantity stated properly: the tool's rim is a chord
+from one station's overshoot point to the next, and what it must clear is the
+wall between them, so the measurement wants to be per *segment* of the crease and
+against the facets under that segment — not per station, and not across the wall.
+
+Two things to expect when it lands. The tool solid grows by a tessellation-scale
+amount on its buried side, which is invisible in any composition but is exactly
+what `FilletCompare_test.cc` measures against its hand references at `0.02 * r`;
+on a radius-10 pipe at `$fn = 32` the sagitta is 0.048 against a tolerance of
+0.04, so that tolerance has to become a statement about the target's tessellation
+or those comparisons have to move to the composed result. And the four builders
+need the crease threshold passed in, because "where does one wall stop" is the
+same question `isFeatureAngle` already answers and must not be answered twice.
+
+### What the rib says, whichever route is taken
+
+Running the round pass on the blend changes the rib's answer by 6.9403 mm3 and it
+is not a defect: the rib's four vertical creases stop where the base bead takes
+over, so their rounds stop there too instead of running past the end of their own
+creases and notching the bead. Pictures either side of that settled it. Whatever
+lands has to expect the rib to move.
 
 ---
 
@@ -1642,19 +1667,13 @@ Needed:
      honest doc line says so rather than implying the threshold handles it. If
      D2 lands, revisit this line.
 
-### The quoted SCAD equivalent — what can and cannot be written — **SETTLED, as option 3**
+### The quoted SCAD equivalent — what can and cannot be written
 
-**`fillet()` was documented as sugar for a composition a reader could have
-written, in four places, and no longer is: option 3 below, taken because D12
-landed as a selection change.** The four are the comment above `builtin_fillet`
-in `FilletNode.cc`, `doc-page/fillet.md`, the wiki draft and `pr-body/pr.md`, and
-they moved together. What they quote now is the forwarded composition below, as
-how far a reader can get, with what it costs stated beside it. The rest of this
-section is the working that got there, and it still holds.
-
-The old snippets quoted the child **twice** — once inside the union, once as the
-round tool's argument — which was fine only because both quotes were of the
-*original* child.
+`fillet()` is documented as sugar for a composition a reader could have written,
+and that claim appears in four places: the comment above `builtin_fillet` in
+`FilletNode.cc`, `doc-page/fillet.md`, the wiki draft, and `pr-body/pr.md`. All
+four quote the child **twice** — once inside the union, once as the round tool's
+argument — which is fine only because both quotes are of the *original* child.
 
 The moment either tool has to run on the *result* of the other (D12), the
 equivalent has to refer to an intermediate solid twice. That **is** writable: put
@@ -1678,16 +1697,6 @@ module my_fillet(r = 2, inner = true, outer = true, min_angle = undef) {
 Verified exact against the C++ composition it mirrors — same triangle count, same
 `13286.2607` mm³ — and the full signature behaves: `inner = false`,
 `outer = false` and `min_angle = 40` each give the solid they should.
-
-Two things it cannot do, both measured once D12 landed. It **rounds the beads it
-has just built**, since no `.scad` can ask which pass a surface came from: on
-polyhedral work that is free — L bracket, boss, two bosses and cube all come back
-identical to the node — and on curved work it is destructive, the pipe tee at
-genus 5 with 5633 mm³ gone and 25 warnings, and the dome losing a bead. And it
-takes **one child**: `blended() children()` hands the whole group down as a
-single child, so `children(0)` inside `blended()` can no longer pick the target
-out from the brushes, and a brush passed in lands in the model — measured, a
-40 x 60 x 60 brush on the L bracket comes back as 143449 mm³ against 13286.
 
 The `blended() children()` at both call sites is the whole trick and is not
 optional. `children()` **inside** `blended()` means *`blended()`'s* children, so
@@ -1756,7 +1765,7 @@ intermediate is written as a nested module or a repeated inline expression makes
 give the same tree bar `group()` wrappers, the same cache keys, and the same time
 to the millisecond (88 ms each). The submodule buys readability, nothing else.
 
-The three ways the docs could have gone, and which was taken:
+So whichever route D12 takes, decide deliberately which of these the docs say:
 
 1. **Quote the forwarded form above.** Honest, runnable, and legible — the
    duplicated-expression objection is gone, and the cost is one repeated boolean
@@ -1766,12 +1775,9 @@ The three ways the docs could have gone, and which was taken:
    is an implementation detail, not a difference in result, and it is small.
 3. **Stop calling it sugar.** Required outright if D12 lands as a selection change
    rather than a composition change, because "round only the creases the other
-   pass did not create" is not sayable in `.scad` at any length. **This is what
-   happened**, so 1 and 2 were never live: the snippet is quoted as the nearest
-   writable thing, not as an equivalence, and the sharing question it was going
-   to turn on is moot.
+   pass did not create" is not sayable in `.scad` at any length.
 
-All four copies moved together.
+Whatever is chosen, all four copies move together.
 
 ---
 

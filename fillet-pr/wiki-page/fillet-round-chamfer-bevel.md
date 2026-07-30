@@ -26,9 +26,8 @@ maintained by hand.
 
 ## The five modules
 
-`fillet()` runs the whole operator. Underneath are four modules that each build
-a **tool solid** — the material a blend adds or removes — which you compose
-yourself:
+`fillet()` is sugar. Underneath are four modules that each build a **tool
+solid** — the material a blend adds or removes — which you compose yourself:
 
 | Module | Blend | Edges it follows | How you use it |
 |---|---|---|---|
@@ -37,35 +36,23 @@ yourself:
 | `round_tool(r)` | round | convex (outer) | `difference()` it out |
 | `bevel_tool(t)` | flat | convex (outer) | `difference()` it out |
 
-and `fillet(r)` grows the beads first, then rounds what that left:
+and `fillet(r)` is exactly:
 
 ```openscad
-module my_fillet(r = 2, inner = true, outer = true) {
-    module blended() {
+module fillet(r = 2, inner = true, outer = true) {
+    difference() {
         union() {
-            children();
+            children(0);
             if (inner) fillet_tool(r = r) children();
         }
-    }
-    difference() {
-        blended() children();
-        if (outer) round_tool(r = r) blended() children();
+        if (outer) round_tool(r = r) children();
     }
 }
 ```
 
-The order is why a bead that runs out onto a face of the model gets its end
-rounded over instead of left standing there as a sharp crescent.
-
-`fillet()` is **not** simply that module, though. It also tells its round pass
-which surfaces the fillet pass created, so the bead's own flank is not read as a
-wall wanting rounding, and no `.scad` can ask which pass a surface came from.
-The written version matches it to the last digit on polyhedral parts and tears
-curved ones apart — a pipe tee comes back at genus 5 with 5633 mm³ missing.
-
-Write your own composition when you want a different one — a chamfer outside and
-a fillet inside, say, or two different sizes — and keep the parts curved where
-they matter in one `fillet()`. The tools are the surface you build on.
+Write your own version of that when you want a different composition — a
+chamfer outside and a fillet inside, say, or two different sizes. The tools are
+the surface you build on; `fillet()` is just the common case.
 
 ## Choosing edges
 

@@ -16,18 +16,13 @@ fillet(r = 3) my_model();
 | `chamfer_tool(t)` | flat | concave | caller `union()`s the tool |
 | `round_tool(r)` | round | convex | caller `difference()`s the tool |
 | `bevel_tool(t)` | flat | convex | caller `difference()`s the tool |
-| `fillet(r)` | round | both | the round pass run on the union of child and `fillet_tool` |
+| `fillet(r)` | round | both | `difference(union(child, fillet_tool), round_tool)` |
 
 The four `*_tool` modules return a **tool solid** and modify nothing. `fillet()`
-composes two of them in that order — the second pass sees the bead the first
-built, so a bead running out onto a face gets its end rounded over rather than
-left standing as a crescent — and the composition is written out as a comment
-above the node so anyone wanting a different one can start from it. It is not
-sugar over that comment: the node also tells the round pass which surfaces the
-fillet pass created, which no `.scad` can ask, and without it the round pass
-rounds the beads it has just built. The tools are still the composable surface;
-keeping them separate is what makes "chamfer outside, fillet inside, and leave
-these three edges alone" expressible without new syntax.
+is sugar over composing two of them, written out as a comment above the node so
+anyone wanting a different composition can start from it. The tools are the
+composable surface; keeping them separate is what makes "chamfer outside, fillet
+inside, and leave these three edges alone" expressible without new syntax.
 
 Input is any solid: a CSG tree, an imported STL, the output of `hull()`. No edge
 list is maintained by hand and nothing has to be authored specially.

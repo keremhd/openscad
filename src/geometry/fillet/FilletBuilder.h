@@ -18,7 +18,6 @@
  */
 #pragma once
 
-#include <cstdint>
 #include <memory>
 
 #include "core/FilletNode.h"
@@ -38,13 +37,7 @@ class ManifoldGeometry;
 // `type` is which tool to build, and is passed rather than read off the node
 // because the fillet() node asks for one of each sign from a single node.
 //
-// `addedID` names a source surface of the target that a previous pass of this
-// same operator put there, and is how fillet() runs its outer half on the solid
-// its inner half already blended without rounding that blend's own facets. Zero
-// — the default, and what every tool node passes — means the whole target is the
-// user's shape and every crease of it is a feature.
-//
 // Returns the tool solid, or nullptr where there is nothing to build.
 std::shared_ptr<const Geometry> buildFilletTool(
   const FilletNode& node, FilletType type, const std::shared_ptr<const ManifoldGeometry>& target,
-  const std::shared_ptr<const ManifoldGeometry>& brush = nullptr, uint32_t addedID = 0);
+  const std::shared_ptr<const ManifoldGeometry>& brush = nullptr);
