@@ -4,13 +4,8 @@
 merge; the text is meant to be pasted into the wiki, and the images uploaded
 alongside it.*
 
-Rounding an edge in OpenSCAD has always meant building the round yourself —
-`minkowski()` with a sphere, or `hull()` over spheres placed at the corners, or a
-`rotate_extrude()` profile subtracted by hand. Each works, each is slow or
-fiddly, and none of them lets you say *"this edge, not that one"* without
-rebuilding the model around the answer.
-
-These operators take a solid and find its edges themselves.
+These operators take a solid, find its edges themselves, and round or cut them
+back.
 
 ```openscad
 fillet(r = 3) my_model();
@@ -21,8 +16,7 @@ fillet(r = 3) my_model();
 *Left: the model as written. Right: the same model wrapped in `fillet()`.*
 
 It works on anything that is a solid — a CSG tree, an imported STL, the result
-of a `hull()`. Nothing has to be authored in a special way, and no edge list is
-maintained by hand.
+of a `hull()`.
 
 ## The five modules
 
@@ -36,23 +30,29 @@ solid** — the material a blend adds or removes — which you compose yourself:
 | `round_tool(r)` | round | convex (outer) | `difference()` it out |
 | `bevel_tool(t)` | flat | convex (outer) | `difference()` it out |
 
-and `fillet(r)` is exactly:
+and `fillet(r)` runs both, in that order: it unions the fillet tool into the
+model, then rounds the solid that produced.
 
 ```openscad
-module fillet(r = 2, inner = true, outer = true) {
-    difference() {
+module fillet(r = 2, inner = true, outer = true, min_angle = undef) {
+    module blended() {
         union() {
-            children(0);
-            if (inner) fillet_tool(r = r) children();
+            children();
+            if (inner) fillet_tool(r = r, min_angle = min_angle) children();
         }
-        if (outer) round_tool(r = r) children();
+    }
+    difference() {
+        blended() children();
+        if (outer) round_tool(r = r, min_angle = min_angle) blended() children();
     }
 }
 ```
 
-Write your own version of that when you want a different composition — a
-chamfer outside and a fillet inside, say, or two different sizes. The tools are
-the surface you build on; `fillet()` is just the common case.
+The round pass reads what the fillet pass left, so where an inner blend runs out
+onto a face, the outline it leaves there is rounded along with the rest.
+
+Write your own version when you want a different composition — a chamfer outside
+and a fillet inside, say, or two different sizes.
 
 ## What a tool solid is
 
@@ -95,9 +95,8 @@ solid, and the tool acts only where a crease lies inside it.
 ![Selective blending](fig-selective.png)
 
 *A block with a blind bore, near half cut away. The bore floor is filleted, the
-bore mouth is rounded, and the block's own corners are left sharp — which the
-sign of an edge cannot express on its own, since the mouth and the corners are
-both convex.*
+bore mouth is rounded, and the block's own corners are left sharp — a brush over
+the mouth is what separates it from the block's corners, which are convex too.*
 
 ```openscad
 module part() {
@@ -121,10 +120,10 @@ difference() {
 
 Two things to know about brushes:
 
-- **A brush selects; it does not shape.** The blend is the full size you asked
-  for wherever it is built, no matter how small the brush is.
+- **A brush chooses which stretches get built.** The blend is the full size you
+  asked for wherever it is built, however small the brush is.
 - **A blend stops square.** Where the brush boundary crosses an edge, the blend
-  ends in a flat cap. There is no taper back into the sharp edge.
+  ends in a flat cap.
 
 ## Curved edges
 
@@ -149,9 +148,9 @@ WARNING: fillet_tool: radius 2 does not fit the crease at [12, -12, 2] -
          dropped; the size is never clamped to make it fit.
 ```
 
-Every other edge on the model is still blended. The two ways a size fails to fit
-are that the blend would run off the end of a face it is meant to meet, or that
-a second feature nearby needs the same material.
+Every other edge on the model is still blended. A size fails to fit when the
+blend would run off the end of a face it is meant to meet, or when a second
+feature nearby needs the same material.
 
 ## Things to know
 
@@ -161,8 +160,6 @@ a second feature nearby needs the same material.
   build.
 - **One size per call.** Variable radius along an edge, and different radii
   meeting at a corner, are not supported.
-- **Blending an already-blended model is unreliable.** A finished blend meets
-  its wall tangentially, and a tessellated tangency produces slivers that read
-  back as edges the shape does not have. Blend the source model, not the result.
-- **`offset(chamfer = true)` is a different thing** — that is a 2D polygon
-  offset style, unrelated to `chamfer_tool()`.
+- **Blend the source model, not a blended result.** A finished blend meets its
+  wall tangentially, and a tessellated tangency produces slivers that read back
+  as edges the shape does not have.

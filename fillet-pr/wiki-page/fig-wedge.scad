@@ -1,55 +1,43 @@
-// Figure: the tool solid for one straight crease, written out by hand.
+// Figure: the tool solid for one straight crease.
 //
-// Left    the wedge: a prism laid along the crease, its cross-section the two
-//         setback points and the corner pushed a hair past each wall. That is
-//         chamfer_tool(t = 4) and nothing else.
-// Middle  the same prism with a cylinder of radius 4 taken out of it, which is
-//         fillet_tool(r = 4): a surface tangent to both walls.
-// Right   what fillet_tool(r = 4) actually builds, for comparison.
+// Left    chamfer_tool(t = 4) on an L - the wedge, a prism laid down the crease
+//         reaching t along each wall
+// Middle  the same wedge, with the cylinder that is about to be taken out of it
+//         drawn in red on the axis the ball rolls along
+// Right   fillet_tool(r = 4) - what is left once that cylinder is gone
 //
-// The crease runs away from the viewer so the cross-section faces the camera.
-// The overshoot `E` is drawn at 0.6 so it can be seen; the builder uses a hair.
+// silver  the model         gold  the tool solid        red  what gets subtracted
 
 $fn = 48;
 
 T = 4;      // setback / radius
-E = 0.6;    // overshoot past each wall, exaggerated
 H = 18;     // length of the crease
 
-// The L, as a profile: wall A is y = 6, wall B is x = 6, and the crease between
-// them runs up the extrusion at (6, 6). The empty quadrant is x > 6, y > 6.
-module ell2d() polygon([[0, 0], [20, 0], [20, 6], [6, 6], [6, 20], [0, 20]]);
+// The L: wall A is y = 6, wall B is x = 6, and the crease between them runs
+// along the extrusion at (6, 6).
+module ell() rotate([90, 0, 0]) linear_extrude(height = H)
+    polygon([[0, 0], [20, 0], [20, 6], [6, 6], [6, 20], [0, 20]]);
 
-// The wedge's cross-section: five points, and every one of them is placed by
-// the setback T or the overshoot E.
-module wedge2d()
-    polygon([[6 + T, 6],          // TA, T along wall A
-             [6,     6 + T],      // TB, T along wall B
-             [6 - E, 6 + T],      // TB pushed past wall B
-             [6 - E, 6 - E],      // the corner pushed past both
-             [6 + T, 6 - E]]);    // TA pushed past wall A
+// The ball's axis: one radius off each wall, so a cylinder of radius T about it
+// touches both walls all the way along. Drawn short of the near end, so the
+// wedge it is about to be taken out of is still visible in front of it.
+module roll() translate([6 + T, -10, 6 + T]) rotate([90, 0, 0]) cylinder(r = T, h = H - 9);
 
-module lay() rotate([90, 0, 0]) linear_extrude(height = H) children();
-
-// Left: the wedge alone.
+// Left: the wedge.
 translate([0, 0, 0]) {
-    color("silver") lay() ell2d();
-    color("gold") lay() wedge2d();
+    color("silver") ell();
+    color("gold") chamfer_tool(t = T) ell();
 }
 
-// Middle: the wedge minus the ball's path along the crease - here a cylinder,
-// because the crease is straight and the walls meet at the same angle all the
-// way along it.
+// Middle: the wedge and the cylinder that is coming out of it.
 translate([28, 0, 0]) {
-    color("silver") lay() ell2d();
-    color("gold") difference() {
-        lay() wedge2d();
-        translate([6 + T, 1, 6 + T]) rotate([90, 0, 0]) cylinder(r = T, h = H + 2);
-    }
+    color("silver") ell();
+    color("gold") chamfer_tool(t = T) ell();
+    color("tomato") roll();
 }
 
-// Right: the operator's own answer.
+// Right: the rounded tool.
 translate([56, 0, 0]) {
-    color("silver") lay() ell2d();
-    color("gold") fillet_tool(r = T) lay() ell2d();
+    color("silver") ell();
+    color("gold") fillet_tool(r = T) ell();
 }

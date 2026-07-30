@@ -16,82 +16,118 @@ fillet(r = 3) my_model();
 | `chamfer_tool(t)` | flat | concave | caller `union()`s the tool |
 | `round_tool(r)` | round | convex | caller `difference()`s the tool |
 | `bevel_tool(t)` | flat | convex | caller `difference()`s the tool |
-| `fillet(r)` | round | both | `difference(union(child, fillet_tool), round_tool)` |
+| `fillet(r)` | round | both | the concave pass, then the convex pass over its result |
 
 The four `*_tool` modules return a **tool solid** and modify nothing. `fillet()`
-is sugar over composing two of them. Keeping the tools separate is what makes
-"chamfer outside, fillet inside, and leave these three edges alone" expressible
-without new syntax.
+composes two of them, and is exactly this:
+
+```openscad
+module fillet(r = 2, inner = true, outer = true, min_angle = undef) {
+    module blended() {
+        union() {
+            children();
+            if (inner) fillet_tool(r = r, min_angle = min_angle) children();
+        }
+    }
+    difference() {
+        blended() children();
+        if (outer) round_tool(r = r, min_angle = min_angle) blended() children();
+    }
+}
+```
+
+**"Then" is load-bearing.** The round pass is measured against the solid the
+fillet pass left, not against the original child. Where an inner bead runs out
+onto a face of the model it leaves its end cross-section standing in that face,
+and a round pass that never saw the bead leaves that crescent as a sharp lip
+beside the outline it just rounded.
+
+Keeping the tools separate is what makes "chamfer outside, fillet inside, and
+leave these three edges alone" expressible without new syntax.
 
 Input is any solid: a CSG tree, an imported STL, the output of `hull()`. No edge
 list is maintained by hand and nothing has to be authored specially.
 
 ---
 
-## What a tool solid is
+## One straight crease
 
-Take an L whose two walls are `x = 6` and `y = 6`, so its one straight concave
-crease runs up the extrusion at `(6, 6)`. The chamfer along that crease is a
-prism laid down it, and the cross-section is fully described by the setback `T`:
-one point `T` along each wall, and the corner itself pushed past each wall by an
-overshoot `E`, so the tool crosses the surface instead of resting on it. Five
-points — the whole cell:
+Take an L with a single concave crease running down it. `chamfer_tool(t = 4)`
+lays a prism along that crease, reaching 4 mm back along each wall. That prism is
+the whole tool. `fillet_tool(r = 4)` is the same prism with a cylinder of radius
+4 taken out of it, on the axis one radius off each wall:
 
-```openscad
-// this is chamfer_tool(t = T) for that crease, written out
-polygon([[6 + T, 6], [6, 6 + T],                              // T along each wall
-         [6 - E, 6 + T], [6 - E, 6 - E], [6 + T, 6 - E]]);    // pushed past both
+![One straight crease](fig-wedge.png)
+
+*Left: `chamfer_tool(t = 4)` in gold on the model in grey. Middle: the same
+wedge, with the cylinder that is about to come out of it drawn in red. Right:
+`fillet_tool(r = 4)`. Source: `fig-wedge.scad`.*
+
+Where a blend stops and flat wall starts is decided by a ball of the requested
+radius: seat it in the crease so it touches both walls, and the two points it
+touches at are where the tool's cross-section ends. Everything below is that same
+ball, in the places where it is not simply a cylinder.
+
+## Corners
+
+Where three walls meet, the ball has nowhere to roll. It seats once, against all
+three at the same time, and the corner of the tool is the piece the three beads
+leave for it:
+
+![Corners, inside and out](fig-corner.png)
+
+*1: an inside corner with the ball seated against all three walls. 2:
+`fillet_tool(r = 4)` on it — three beads and the corner cell between them. 3: the
+outside corner of a cube, cut open through the ball's centre, because at a convex
+corner the ball sits inside the material. 4: the whole `round_tool(r = 4)` for
+that cube — twelve beads and eight corner cells in one connected piece — with the
+same corner left solid and the rest dropped to alpha. Source: `fig-corner.scad`.*
+
+The concave and convex cases are one construction with a sign flipped: the ball's
+centre goes into the empty quadrant for a fillet and into the material for a
+round, and the tool is the material on the other side of it either way.
+
+## A crease with many edges in it
+
+A crease that curves is a run of edges rather than one, and each end of each edge
+is a **station** with its own seated ball. Consecutive balls are hulled into a
+cell, and the cells unioned:
+
+![A curved crease](fig-hull.png)
+
+*Left pair: the foot of a boss — a concave crease right round the cylinder — with
+a ball drawn at twelve stations, and `fillet_tool(r = 3)` on the same model. Right
+pair: the convex crease at the top rim, the model cut in half so the balls that
+sit inside the material can be seen, and `round_tool(r = 3)` on the same cut.
+Source: `fig-hull.scad`.*
+
+So the tool is never one long prism except in the straight case. Each station
+gets its **own** cross-section, built from that station's own two wall normals —
+which is what lets both walls curve independently, as they do where two pipes
+cross. Consecutive cross-sections are hulled into one cell per segment, and the
+cells are unioned:
+
+```
+station i      station i+1     station i+2
+   ▢───────────────▢───────────────▢        cross-sections, one per station
+   └── hull ───────┘└── hull ──────┘        one cell per segment, then union
 ```
 
-The rounded version is that same prism with the ball's path taken back out of
-it. On a straight crease between two flat walls, the ball's path is a cylinder:
+Hulling two sections *is* the linear interpolation between them, which is why a
+brush that stops partway along a segment can be honoured exactly: interpolate the
+section to that parameter and hull to there.
 
-```openscad
-difference() {
-    wedge();                                            // the prism above
-    translate([6 + T, 6 + T, -1]) cylinder(r = T, h = H + 2);   // the ball's path
-}
-```
-
-![The wedge, by hand](fig-wedge.png)
-
-*Left: the wedge alone — `chamfer_tool(t = 4)`. Middle: the same wedge with the
-cylinder subtracted. Right: what `fillet_tool(r = 4)` builds. The overshoot is
-drawn larger than it is so it can be seen. Source: `fig-wedge.scad`.*
-
-That is the whole idea. Everything else is generalising it: the crease bends, the
-walls curve, the angle between them changes along the crease, and several creases
-meet at a point.
-
-## The same thing said as a ball
-
-A blend is where a ball of the requested radius can sit. Seat it so it touches
-both walls — centre one radius off each — slide it along the crease, and the
-surface it sweeps is the blend. Down a straight crease the centre runs in a
-straight line, so that sweep is a cylinder of the same radius, capped by the ball
-at each end — which is exactly the cylinder subtracted above.
-
-![The rolling ball](fig-ball.png)
-
-*The seated ball, the cylinder it sweeps down the crease, the finished blend,
-and — right — a corner, where the sweep has no axis to run along and it is one
-ball touching three walls at once. Source: `fig-ball.scad`.*
-
-The two views are the same construction. The ball says what the surface is; the
-wedge is how it gets built, because subtracting the sweep from a prism is one
-boolean, and prisms are what a mesh kernel is fast at.
-
-Curve the crease and the cylinder becomes the hull of consecutive seated balls,
-one cell per spine segment; bring three creases together and there is no axis
-left, only the ball seated against all three walls, which is the corner cell.
+The subtracted ball follows the same treatment — an arc section per station,
+hulled pairwise — so on a straight crease the two hulls give back a cylinder, and
+on a curved one they give a canal that bends with it. A cylinder meeting a plane,
+a spine that turns a corner and an imported mesh all arrive at this same loop.
 
 ---
 
 ## How it works
 
-Everything happens on the target's triangle soup. There is no node-tree
-pattern-matching and no analytic special case — a cylinder meeting a plane goes
-through the same code as an imported mesh.
+Everything happens on the target's triangle soup, so a cylinder meeting a plane
+goes through the same code as an imported mesh.
 
 **1. Classify.** Merge coincident vertices, rebuild edge → two-face adjacency,
 give every two-face edge a dihedral angle and a sign. An edge is a **feature**
@@ -119,19 +155,16 @@ stops being a blend and becomes flat wall again.
 
 **4. Check the size fits**, per crease rather than per model — see below.
 
-**5. Build the tool.** One prism cell per spine segment, and for the rounded
-tools the swept ball subtracted from the result in a single boolean.
+**5. Build the tool.** One cross-section per station, hulled with its neighbour
+into a cell per spine segment, unioned; for the rounded tools the ball's own
+sections are hulled the same way and subtracted in a single boolean.
 
 **6. Close the junctions.** Where three or more creases meet, each incident bead
 stops short of the vertex and a **corner cell** fills what they vacated, hulled
 from the ball seated at the junction and the sections the beads stop at. A
 trihedral corner blend has no closed form at equal radius, so the junction is
-solved rather than looked up.
-
-![Corner cells](fig-corner.png)
-
-*Left: the tool for a cube — twelve beads and eight corner cells, one connected
-piece. Right: the same tool subtracted from it.*
+solved for a centre tangent to every incident wall; at valence four and above,
+several distinct centres can satisfy that, and the solve picks among them.
 
 A selection brush is honoured where it lies: a bead is cut square where the brush
 boundary crosses a crease, and a corner cell is built only where the brush covers
@@ -155,7 +188,10 @@ unaffected.
 
 ### Which wall — `smoothSurfaces`
 
-Both questions are asked of *walls*, and a wall is not a triangle.
+Both questions are asked of *walls*, and a wall is not a triangle. This grouping
+is the size check's business only — the tool itself is built per station, from
+that station's own two normals — but the check has to know where a wall ends.
+
 `smoothSurfaces` groups triangles into surfaces by union-find, joining across
 every edge that is **not** a crease. All 48 facets of a bore come back as one
 wall; a cube's face is another.

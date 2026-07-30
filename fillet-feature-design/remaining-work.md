@@ -1752,13 +1752,11 @@ answer is whether a crease shorter than the bead it would carry should be
 selected at all — which is a question about selection, not about this
 composition.
 
-### Still to do: three copies of the quoted SCAD
+### The three copies of the quoted SCAD — **DONE**
 
-`FilletNode.cc` now quotes the forwarded form. `doc-page/fillet.md`, the wiki
-draft and `pr-body/pr.md` still quote the old one, which is no longer what the
-node does — they were being edited elsewhere when this landed and were left
-alone deliberately. The replacement is the comment above `builtin_fillet`,
-verbatim, plus the sentence about `blended() children()` being the whole trick.
+`FilletNode.cc`, `doc-page/fillet.md`, the wiki draft and `pr-body/pr.md` all
+quote the forwarded form now, with the sentence about `blended() children()`
+alongside it in the two places a reader might try to write it themselves.
 
 ### What the rib says, whichever route is taken
 
@@ -1767,6 +1765,98 @@ is not a defect: the rib's four vertical creases stop where the base bead takes
 over, so their rounds stop there too instead of running past the end of their own
 creases and notching the bead. Pictures either side of that settled it. Whatever
 lands has to expect the rib to move.
+
+---
+
+## D13 — two bosses that overlap leave a hole where their seam meets the plate
+
+**A model with no holes comes back with one.** Two overlapping cylinders on a
+plate, filleted at `r = 2`:
+
+```openscad
+$fn = 48;
+module bosses() {
+    cube([60, 40, 6]);
+    translate([22, 20, 6]) cylinder(r = 10, h = 16);
+    translate([38, 20, 6]) cylinder(r = 10, h = 16);
+}
+union() { bosses(); fillet_tool(r = 2) bosses(); }
+```
+
+| | genus | volume |
+|---|---|---|
+| the bosses alone | 0 | 23907.158 |
+| unioned with the tool, `$fn = 48` | **1** | 24049.706 |
+| the same at `$fn = 96` | 0 | 24054.164 |
+
+**No warning is printed in any of these.** The size gate is content; nothing is
+dropped. This is the middle panel of `wiki-page/fig-curved`, so the wiki draft is
+currently advertising it.
+
+### What the tool looks like
+
+Three creases meet at each of the two points where the base rings cross the
+vertical boss-to-boss seam — `(30, 26, 6)` and `(30, 14, 6)`, both valence-3
+junctions with one straight wall and two curved ones. Rendering the tool alone
+shows the vertical seam bead ending there in flat, spiky cut faces that do not
+close against either ring bead. The gap between them is the hole.
+
+The seam itself is not degenerate: at the crossing line the two cylinder normals
+are `(0.8, 0.6, 0)` and `(-0.8, 0.6, 0)`, so `phi` is 106.3° and the seated ball
+sits `r / cos(phi/2)` = 3.33 off the crease. There is room for the bead; it is
+the closing that fails.
+
+### It moves with the tessellation, which is the useful part
+
+The bare tool, across configurations — `dx` is the distance between the two boss
+axes, so `dx = 0` is a single boss and `dx = 19` is a 1 mm overlap:
+
+| config | genus | volume |
+|---|---|---|
+| `dx = 0`, `r = 2`, `$fn = 48` | 1 | 57.169 |
+| `dx = 12`, `r = 2`, `$fn = 48` | 1 | 90.872 |
+| `dx = 16`, `r = 2`, `$fn = 48` | 2 | 202.262 |
+| `dx = 16`, `r = 2`, `$fn = 96` | 1 | 175.360 |
+| `dx = 16`, `r = 1`, `$fn = 48` | 1 | 46.299 |
+| `dx = 16`, `r = 3`, `$fn = 48` | 1 | 495.378 |
+| `dx = 19`, `r = 2`, `$fn = 48` | **5** | 607.764 |
+
+Two things to read off it. The genus is not a function of the shape — the same
+model at twice the resolution gives a different answer, which says the failure is
+a near-degenerate case being caught or missed rather than a missing branch. And
+`dx = 19` gives 607 mm³ for a tool that is 57 mm³ on one boss and ought to be
+somewhere near twice it; whatever goes wrong at a shallow crossing is not small.
+
+### Where to look
+
+- **A junction the solve refuses still costs its beads their ends.** The
+  incident beads are truncated to make room for a corner cell before the solve is
+  asked whether it has a centre. If the answer is no, nothing fills what they
+  vacated. Check whether the refusal path also puts the truncation back.
+- **`wallOvershoot` at a triple point.** It walks the wall out to the tangency
+  point and stops at the first crease. At these junctions two of the three walls
+  are cylinders and the walk starts a facet or two from where two creases meet;
+  a walk that stops early reads the wall as flatter than it is and under-reaches.
+- **The corner profile is rebuilt at the corner cell's own distance past the
+  walls.** That distance is derived per wall; on a curved wall it carries the
+  sagitta term, and at a shallow crossing (`dx = 19`) the two cylinders' walls
+  are nearly tangent to each other, where that term is largest.
+
+**Acceptance:** the repro comes back genus 0 at `$fn = 48` and `$fn = 96` and at
+`dx = 12`, `16` and `19`; the tool's volume is monotone in `r` and continuous in
+`dx`; no new warnings anywhere; the 21 regression baselines and every case in
+`FilletBuilder_test.cc` and `FilletCompare_test.cc` unchanged.
+
+### Related, and probably a different defect
+
+The pipe tee — `wiki-page/fig-curved`'s left panel — is not holed, but its weld
+bead is visibly scalloped at `$fn = 48` and clean at `$fn = 96`. Station normals
+are the face normals of the two triangles adjacent to the crease, averaged over
+the station's two incident chain edges. On a seam between two curved walls those
+triangles are slivers whose face normals are a poor stand-in for the surface
+normal, so `TA` and `TB` jitter from station to station and the bead's boundary
+comes out sawtoothed. An angle- or area-weighted normal over the whole fan on
+each wall is the obvious thing to measure against.
 
 ---
 

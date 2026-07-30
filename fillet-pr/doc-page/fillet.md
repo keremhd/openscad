@@ -3,10 +3,9 @@
 *Draft of the reference page. This moves into `doc/` before the PR merges; the
 directory it currently sits in does not survive the merge.*
 
-OpenSCAD can round or cut back the edges of a solid it is given, without being
-told where those edges are. The operators find the edges themselves by reading
-the mesh, so they work on anything — a CSG tree, an imported STL, the output of
-`hull()` or `minkowski()`.
+OpenSCAD can round or cut back the edges of a solid it is given. The operators
+read the mesh and find the edges themselves, so they work on anything that is a
+solid — a CSG tree, an imported STL, the output of `hull()` or `minkowski()`.
 
 There are five modules. One is sugar over the other four.
 
@@ -23,10 +22,9 @@ There are five modules. One is sugar over the other four.
 *Back row: each tool solid on its own. Front row: the same tool composed with the
 model it was built from.*
 
-The four `*_tool` modules do not modify anything. Each returns a **tool solid** —
-the material a blend adds or removes — which you then compose yourself. That is
-deliberate: it is what makes the operators composable rather than a fixed
-pipeline you cannot get inside of.
+The four `*_tool` modules each return a **tool solid** — the material a blend
+adds or removes — which you compose yourself. That is what makes them
+composable: any arrangement you can write in OpenSCAD is available to you.
 
 ### What a tool solid is
 
@@ -52,20 +50,32 @@ ball has nowhere to roll and simply sits, touching every wall at once.
 fillet(r = 2) my_model();
 ```
 
-`fillet()` is the whole thing in one call. It is exactly this composition, and
-nothing more:
+`fillet()` is the whole thing in one call: it unions the fillet tool into the
+model, and then rounds the solid that produced.
 
 ```openscad
-module fillet(r = 2, inner = true, outer = true) {
-    difference() {
+module fillet(r = 2, inner = true, outer = true, min_angle = undef) {
+    module blended() {
         union() {
-            children(0);
-            if (inner) fillet_tool(r = r) children();
+            children();
+            if (inner) fillet_tool(r = r, min_angle = min_angle) children();
         }
-        if (outer) round_tool(r = r) children();
+    }
+    difference() {
+        blended() children();
+        if (outer) round_tool(r = r, min_angle = min_angle) blended() children();
     }
 }
 ```
+
+The node is exactly that. **"Then" is the load-bearing word**: the round pass is
+measured against the solid the fillet pass left, not against your model. Where an
+inner bead runs out onto a face it leaves the end of its cross-section standing
+in that face, and that outline gets rounded along with everything else.
+
+`blended() children()` at both call sites is the trick that makes this writable
+in OpenSCAD — inside `blended()`, `children()` means *its* children, so the model
+has to be handed in at each call.
 
 ![fillet() and its halves](fig-fillet.png)
 
@@ -147,13 +157,12 @@ Children 1 and later of a tool module are **selection brushes**: solids whose
 volume says where the tool may act. They are unioned together, and a crease is
 built where it lies inside that volume and left sharp where it does not.
 
-A brush selects; it does not shape. The blend is the full requested size
-wherever it is built, however narrow the brush is. What the brush controls is
-*extent along the edge* — where the blend starts and stops.
+A brush controls *extent along the edge* — where the blend starts and stops. The
+blend is the full requested size wherever it is built, however narrow the brush
+is.
 
 Where a brush boundary crosses a crease, the blend is **cut square across**,
-ending in a flat cap. There is no taper back into the sharp edge: a blend that
-fades out along a crease is a runout, and these operators do not have one.
+ending in a flat cap.
 
 ![Selecting with a brush](fig-brush.png)
 
@@ -279,5 +288,3 @@ solid, so it is for looking at, not for building with.
   tapered.
 - **Manifold backend.** The tools are built on Manifold; under the CGAL backend
   they warn and emit nothing.
-- **`offset(chamfer = true)` is unrelated.** That is a 2D polygon-offset join
-  style, not a 3D chamfer.
