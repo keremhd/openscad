@@ -1506,11 +1506,12 @@ routes worth measuring:
   fillet pass created, keeping those where a bead is truncated by an original
   face — which is exactly the end caps.
 
-**This costs `fillet()` its "it is only sugar" framing, and that is the part to
-decide first.** See the note under DOC below: the composition is currently quoted
-as user-writable SCAD in three documents and in `FilletNode.cc`. Neither route
-above is expressible as a composition of the four tool modules, because both need
-to know which surface came from which pass — something no `.scad` can ask.
+**Either route costs `fillet()` its "it is only sugar" framing, and that is the
+part to decide first.** See the note under DOC below. The composition is quoted as
+user-writable SCAD in three documents and in `FilletNode.cc`, and *running* one
+tool on the other's output stays writable — a module with the children forwarded
+into it does that. What is not writable is either route's actual rule, because
+both need to know which surface came from which pass, and no `.scad` can ask that.
 
 **Acceptance:** the L bracket's bead ends round over into the outline, with no
 lip; every curved case above stays at its current genus and warning count; and
@@ -1551,52 +1552,56 @@ four quote the child **twice** — once inside the union, once as the round tool
 argument — which is fine only because both quotes are of the *original* child.
 
 The moment either tool has to run on the *result* of the other (D12), the
-equivalent needs to name an intermediate solid, and **OpenSCAD has no way to do
-that.** The natural attempt is silently wrong:
+equivalent has to refer to an intermediate solid twice. That **is** writable: put
+it in a module and forward the children into it.
 
 ```openscad
-module my_fillet(r = 2) {
-    module blended() {                      // WRONG - produces nothing at all
-        union() { children(); fillet_tool(r = r) children(); }
+module my_fillet(r = 2, inner = true, outer = true, min_angle = undef) {
+    module blended() {
+        union() {
+            children();
+            if (inner) fillet_tool(r = r, min_angle = min_angle) children();
+        }
     }
-    difference() { blended(); round_tool(r = r) blended(); }
-}
-```
-
-`children()` inside `blended()` means *`blended()`'s* children, and it has none,
-so both branches are empty. It does not error. The `.csg` dump shows the hole:
-every `children()` came out as a bare `group()`, and the render is an empty solid.
-Anyone who writes this by hand gets nothing and no reason why.
-
-What does work is refusing to name it and repeating the expression:
-
-```openscad
-module my_fillet(r = 2) {
     difference() {
-        union() { children(); fillet_tool(r = r) children(); }
-        round_tool(r = r) union() { children(); fillet_tool(r = r) children(); };
+        blended() children();
+        if (outer) round_tool(r = r, min_angle = min_angle) blended() children();
     }
 }
 ```
 
-Verified exact — same triangle count and the same `13286.2607` mm³ as the C++
-composition it mirrors. Two costs. It evaluates `fillet_tool` twice, measured at
-**+15%** on the L bracket (85 ms → 98 ms), where a C++ node would build the union
-once and hand the same pointer to both consumers; and it puts a duplicated
-sub-expression in the one snippet whose whole job is to be read and understood.
+Verified exact against the C++ composition it mirrors — same triangle count, same
+`13286.2607` mm³ — and the full signature behaves: `inner = false`,
+`outer = false` and `min_angle = 40` each give the solid they should.
+
+The `blended() children()` at both call sites is the whole trick and is not
+optional. `children()` **inside** `blended()` means *`blended()`'s* children, so
+writing the calls as a bare `blended()` and relying on the definition to see the
+outer children produces **nothing at all, silently** — both branches come out
+empty, with no error and no warning. The `.csg` dump is where it shows: every
+`children()` becomes a bare `group()`. It is the first thing a reader will try, so
+it is worth a sentence in the docs.
+
+What is *not* writable is **sharing** the result. `blended()` is instantiated
+twice and so the fillet tool runs twice, measured at **+14%** on the L bracket
+(77 ms → 88 ms), identical to the cost of crudely duplicating the union
+expression. A C++ node builds the union once and hands the same pointer to both
+consumers; no `.scad` can say that.
 
 So whichever route D12 takes, decide deliberately which of these the docs say:
 
-1. **Quote the repeated-union form.** Honest and runnable, 15% slower than what
-   the node actually does, and ugly in exactly the place that must be legible.
-2. **Quote the composition and note the node computes the shared solid once.**
-   Keeps the snippet clean; the equivalence becomes "up to sharing".
+1. **Quote the forwarded form above.** Honest, runnable, and legible — the
+   duplicated-expression objection is gone. Only caveat is that it is 14% slower
+   than what the node does, because it cannot share the intermediate.
+2. **Quote it and note the node computes the shared solid once.** Same snippet,
+   plus one sentence; the equivalence becomes "up to sharing". Preferred, since
+   the gap is real but is an implementation detail rather than a difference in
+   result.
 3. **Stop calling it sugar.** Required outright if D12 lands as a selection change
    rather than a composition change, because "round only the creases the other
    pass did not create" is not sayable in `.scad` at any length.
 
-Whatever is chosen, all four copies move together, and the nested-module trap is
-worth one sentence in the docs — it is the first thing a reader will try.
+Whatever is chosen, all four copies move together.
 
 ---
 
