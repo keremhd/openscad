@@ -2449,20 +2449,43 @@ std::shared_ptr<const Geometry> buildFilletTool(
   const std::vector<SizeVerdict> verdicts =
     checkChainSizes(m, adj, usable, node.size, wantConcave, isWedgeOnly, thresholdDeg);
   std::vector<Chain> fitting;
+  size_t refused = 0;
+  const SizeVerdict *worst = nullptr;
   for (size_t ci = 0; ci < usable.size(); ++ci) {
     const SizeVerdict& verdict = verdicts[ci];
     if (verdict.fault == SizeFault::Fits) {
       fitting.push_back(std::move(usable[ci]));
       continue;
     }
-    LOG(message_group::Warning, node.modinst->location(), "",
-        "%1$s: %2$s %3$g does not fit the crease at [%4$.4g, %5$.4g, %6$.4g] - %7$s. "
-        "That crease is dropped; the size is never clamped to make it fit.",
-        node.name(), isWedgeOnly ? "setback" : "radius", node.size, verdict.where.x(),
-        verdict.where.y(), verdict.where.z(),
-        verdict.fault == SizeFault::OffFace
-          ? STR("the blend would leave the surface it is meant to meet, by ", verdict.amount)
-          : STR("another feature ", verdict.amount, " away needs the same material"));
+    ++refused;
+    // The one worth naming is the one that misses by the most: it is the crease
+    // to look at first, and on a target with many it is the one whose size the
+    // caller most likely meant to ask about.
+    if (!worst || verdict.amount > worst->amount) worst = &verdict;
+  }
+  // One line however many creases went, because a crease is refused per crease
+  // and read per model. A target that refuses one is a size to reconsider; a
+  // target that refuses thirty is the same message thirty times, and the count
+  // is the part that was not already obvious.
+  if (worst) {
+    const std::string why =
+      worst->fault == SizeFault::OffFace
+        ? STR("the blend would leave the surface it is meant to meet, by ", worst->amount)
+        : STR("another feature ", worst->amount, " away needs the same material");
+    if (refused == 1)
+      LOG(message_group::Warning, node.modinst->location(), "",
+          "%1$s: %2$s %3$g does not fit the crease at [%4$.4g, %5$.4g, %6$.4g] - %7$s. "
+          "That crease is dropped; the size is never clamped to make it fit.",
+          node.name(), isWedgeOnly ? "setback" : "radius", node.size, worst->where.x(),
+          worst->where.y(), worst->where.z(), why);
+    else
+      LOG(message_group::Warning, node.modinst->location(), "",
+          "%1$s: %2$s %3$g does not fit %4$d of the %5$d crease(s) selected; the worst is at "
+          "[%6$.4g, %7$.4g, %8$.4g] - %9$s. Those creases are dropped; the size is never clamped "
+          "to make it fit.",
+          node.name(), isWedgeOnly ? "setback" : "radius", node.size, static_cast<int>(refused),
+          static_cast<int>(usable.size()), worst->where.x(), worst->where.y(), worst->where.z(),
+          why);
   }
   usable = std::move(fitting);
 
