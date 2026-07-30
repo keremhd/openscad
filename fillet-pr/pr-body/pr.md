@@ -19,13 +19,71 @@ fillet(r = 3) my_model();
 | `fillet(r)` | round | both | `difference(union(child, fillet_tool), round_tool)` |
 
 The four `*_tool` modules return a **tool solid** and modify nothing. `fillet()`
-is sugar over composing two of them, written out as a comment above the node so
-anyone wanting a different composition can start from it. The tools are the
-composable surface; keeping them separate is what makes "chamfer outside, fillet
-inside, and leave these three edges alone" expressible without new syntax.
+is sugar over composing two of them. Keeping the tools separate is what makes
+"chamfer outside, fillet inside, and leave these three edges alone" expressible
+without new syntax.
 
 Input is any solid: a CSG tree, an imported STL, the output of `hull()`. No edge
 list is maintained by hand and nothing has to be authored specially.
+
+---
+
+## What a tool solid is
+
+Take an L whose two walls are `x = 6` and `y = 6`, so its one straight concave
+crease runs up the extrusion at `(6, 6)`. The chamfer along that crease is a
+prism laid down it, and the cross-section is fully described by the setback `T`:
+one point `T` along each wall, and the corner itself pushed past each wall by an
+overshoot `E`, so the tool crosses the surface instead of resting on it. Five
+points — the whole cell:
+
+```openscad
+// this is chamfer_tool(t = T) for that crease, written out
+polygon([[6 + T, 6], [6, 6 + T],                              // T along each wall
+         [6 - E, 6 + T], [6 - E, 6 - E], [6 + T, 6 - E]]);    // pushed past both
+```
+
+The rounded version is that same prism with the ball's path taken back out of
+it. On a straight crease between two flat walls, the ball's path is a cylinder:
+
+```openscad
+difference() {
+    wedge();                                            // the prism above
+    translate([6 + T, 6 + T, -1]) cylinder(r = T, h = H + 2);   // the ball's path
+}
+```
+
+![The wedge, by hand](fig-wedge.png)
+
+*Left: the wedge alone — `chamfer_tool(t = 4)`. Middle: the same wedge with the
+cylinder subtracted. Right: what `fillet_tool(r = 4)` builds. The overshoot is
+drawn larger than it is so it can be seen. Source: `fig-wedge.scad`.*
+
+That is the whole idea. Everything else is generalising it: the crease bends, the
+walls curve, the angle between them changes along the crease, and several creases
+meet at a point.
+
+## The same thing said as a ball
+
+A blend is where a ball of the requested radius can sit. Seat it so it touches
+both walls — centre one radius off each — slide it along the crease, and the
+surface it sweeps is the blend. Down a straight crease the centre runs in a
+straight line, so that sweep is a cylinder of the same radius, capped by the ball
+at each end — which is exactly the cylinder subtracted above.
+
+![The rolling ball](fig-ball.png)
+
+*The seated ball, the cylinder it sweeps down the crease, the finished blend,
+and — right — a corner, where the sweep has no axis to run along and it is one
+ball touching three walls at once. Source: `fig-ball.scad`.*
+
+The two views are the same construction. The ball says what the surface is; the
+wedge is how it gets built, because subtracting the sweep from a prism is one
+boolean, and prisms are what a mesh kernel is fast at.
+
+Curve the crease and the cylinder becomes the hull of consecutive seated balls,
+one cell per spine segment; bring three creases together and there is no axis
+left, only the ball seated against all three walls, which is the corner cell.
 
 ---
 
@@ -35,124 +93,97 @@ Everything happens on the target's triangle soup. There is no node-tree
 pattern-matching and no analytic special case — a cylinder meeting a plane goes
 through the same code as an imported mesh.
 
-### 1. Classify
-
-Merge coincident vertices, rebuild edge → two-face adjacency, and give every
-two-face edge a dihedral angle and a sign. An edge is a **feature** when it turns
-by more than a threshold, and a **seam** otherwise.
+**1. Classify.** Merge coincident vertices, rebuild edge → two-face adjacency,
+give every two-face edge a dihedral angle and a sign. An edge is a **feature**
+when it turns by more than a threshold, and tessellation otherwise.
 
 The threshold is derived rather than fixed: **1.5 × the caller's own facet
 angle**. An edge is a feature of the shape when it turns more sharply than the
 tessellation's own facets do, which is what lets a cylinder keep smooth sides at
 any `$fn` while a real 90° corner is found on any model. `min_angle=` overrides
-it. Exact ties are rejected rather than accepted — a model tessellated at two
-thirds the caller's `$fn` turns by *exactly* the threshold, and float noise there
-would otherwise split edges that are identical by symmetry.
+it.
 
 ![Classification overlay](fig-classify.png)
 
 *`debug = true` emits the classifier's verdict instead of the tool: red concave
-feature, green convex feature, grey rejected seam, with the per-station ball
-centre and both tangency points drawn for the creases this tool selected.*
+feature, green convex feature, grey rejected seam, with the ball centre and both
+tangency points drawn for the creases this tool selected.*
 
-### 2. Walk into chains
+**2. Walk into chains.** Selected edges are walked into open arcs and closed
+rings. A chain is the unit everything downstream works on; a vertex where three
+or more selected creases meet is a **junction**.
 
-Selected edges are walked into chains — open arcs and closed rings. A chain is
-the unit everything downstream works on, and a vertex where three or more
-selected creases meet is a **junction**.
+**3. Frame each station.** At every vertex along a chain, seat the ball as above.
+That gives the centre `C` and the two tangency points `TA`, `TB` where the blend
+stops being a blend and becomes flat wall again.
 
-### 3. Frame each station
+**4. Check the size fits**, per crease rather than per model — see below.
 
-At every vertex along a chain, seat a ball of the requested radius into the
-corner so it touches both walls. That gives the ball centre `C` and the two
-tangency points `TA`, `TB` where the finished blend stops being a blend and
-becomes flat wall again. A chamfer's setback is the same construction with the
-arc replaced by a straight cut.
+**5. Build the tool.** One prism cell per spine segment, and for the rounded
+tools the swept ball subtracted from the result in a single boolean.
 
-### 4. Check the size fits — per crease, not per model
+**6. Close the junctions.** Where three or more creases meet, each incident bead
+stops short of the vertex and a **corner cell** fills what they vacated, hulled
+from the ball seated at the junction and the sections the beads stop at. A
+trihedral corner blend has no closed form at equal radius, so the junction is
+solved rather than looked up.
+
+![Corner cells](fig-corner.png)
+
+*Left: the tool for a cube — twelve beads and eight corner cells, one connected
+piece. Right: the same tool subtracted from it.*
+
+A selection brush is honoured where it lies: a bead is cut square where the brush
+boundary crosses a crease, and a corner cell is built only where the brush covers
+the radius down every crease meeting there.
+
+### Does the size fit?
 
 Two questions are asked along each chain, sampled by length rather than only at
 mesh vertices, because on a tapering feature the room runs out *between* two
 vertices:
 
-- **Does the blend still meet the model?** `TA` and `TB` are taken as the
-  *nearest points on their walls* to the ball centre, so they lie on the wall by
-  construction; the question is then whether that point is in the wall's interior
-  or on its boundary. Stepping off the centre along an averaged normal instead —
-  which is what this used to do — assumes the wall is flat, and refused perfectly
-  good blends on a dome by the sagitta `r²/2R`.
+- **Does the blend still meet the model?** `TA` and `TB` have to land in the
+  interior of the walls they are meant to blend, not past their ends. A radius of
+  35 has nowhere to sit on a 30 mm face.
 - **Is the material it needs its own?** Whether another crease's blend reaches
-  into the corner this one occupies. Asked of the corner rather than of the seated
-  ball, because the ball is a full sphere reaching `r` *along* each wall past its
-  own tangency line, into material the finished blend never touches — asking about
-  it refused every radius past a third of a cube's side, where the geometry runs
-  out at half.
+  into the corner this one occupies.
 
 A crease that fails either is **dropped with a warning naming the point and the
 reason**. The size is never clamped to make it fit, and the rest of the model is
 unaffected.
 
-### 5. Build the tool
+### Which wall — `smoothSurfaces`
 
-Per spine segment, a prism cell whose faces are set back along each wall. For the
-rounded tools, the swept ball is then subtracted from the wedge in one boolean,
-which leaves a surface tangent to both walls.
+Both questions are asked of *walls*, and a wall is not a triangle.
+`smoothSurfaces` groups triangles into surfaces by union-find, joining across
+every edge that is **not** a crease. All 48 facets of a bore come back as one
+wall; a cube's face is another.
 
-![Anatomy of a tool](fig-anatomy.png)
+Without that grouping, "the wall" would be the one triangle the station named,
+and the contact point almost never lands on it: the tangency sits a radius away
+from the crease, which on any tessellated wall is a triangle or two along. Every
+fillet at the foot of a bore would be refused for running off a wall it had not
+actually left. Grouped, the contact point walks the facets freely and leaves the
+wall only where the wall genuinely ends — at a crease, which is the same question
+the classifier already answers. That is what also makes the check mean something
+in the other direction: the surface's rim is where the model really stops, so
+`r = 35` on a 30 mm arm is still caught.
 
-*Left: `chamfer_tool` — the wedge. Middle: `fillet_tool` — the same wedge with
-the rolling ball taken back out. Right: the ball, seated at three stations.*
+The walk is bounded to the surface the station named and to the distance the
+seated ball can reach, which matters on a model that has already been blended:
+a bead is tangent to its walls, so the smooth grouping runs straight through it
+and a rib, its two beads and the plate would otherwise come back as one surface.
 
-### 6. Close the junctions
-
-Where three or more creases meet, each incident bead is truncated short of the
-vertex and a **corner cell** fills what they vacated, hulled from the ball seated
-at the junction and the sections the beads stop at. A trihedral corner blend has
-no closed form at equal radius, so this is solved rather than looked up: the
-constraint is a ball tangent to all incident walls, and at valence four and above
-several distinct centres can be feasible.
-
-![Corner cells](fig-corner.png)
-
-*Left: the tool for a cube — twelve beads and eight corner cells. Right: the same
-tool subtracted from it.*
-
-A selection brush is honoured where it lies: a bead is cut square where the brush
-boundary crosses a crease, and a corner cell — which is the full seated ball
-whatever is selected, and cannot be clipped against three perpendiculars at once —
-is built only where the brush covers the radius down every crease meeting there.
-
-Junctions the solve refuses — a needle whose apex half-angle puts the seated ball
-far down the axis — get no corner, and the incident blends fade out to the vertex
-rather than ending in a cliff.
-
-### 7. Overshoot
+### Overshoot
 
 Each piece of the tool stands slightly past the wall it has to cut through, on a
-ladder: wedge cells `eps`, corner cells `1.5 eps`, and the subtracted arc
-`2 eps`. This is not cosmetic. When two surfaces meet *along* a face rather than
-crossing it, the triangles left behind enclose no area, and CGAL refuses to
-convert such a mesh at all. The ladder guarantees every cut crosses transversally.
-The arc's share is two extra hull points per section, in the tangency directions,
-so the blend still meets each wall exactly where a ball of radius `r` touches it.
-
-Two consequences of the ladder are worth knowing, because both were bugs before
-they were rules:
-
-- **The corner cell may not be built from the bead's own cross-section.** It used
-  to be, and a section of a chain is by construction where that chain's cells
-  end — so the two solids touched along a whole shared face before separating, at
-  whatever angle their faces made, which on a spike is a fraction of a degree.
-  The profile is now rebuilt from the same three points at the corner cell's own
-  distance past the walls, so the surfaces sit half an `eps` apart and cross
-  transversally. Smallest triangle on the three-face pocket: `2.4e-13` before,
-  `8.1e-07` after.
-- **At a corner the cutter is a ball, and a tessellated ball is short.** Drawn as
-  an inscribed polyhedron it reaches its faces' distance from the centre, not
-  `r` — 0.034 short at `$fn = 24` on `r = 2`, 0.0086 at 48. The point that stands
-  past a wall has to clear that shortfall first, measured off the ball's own mesh
-  rather than assumed from the segment count, or the corner sheds the overshoot
-  it cannot reach. That is what made a wafer appear at `$fn = 48` and not at 24.
+ladder: wedge cells `eps`, corner cells `1.5 eps`, the subtracted arc `2 eps`.
+This is not cosmetic. When two surfaces meet *along* a face rather than crossing
+it, the triangles left behind enclose no area, and CGAL refuses to convert such a
+mesh at all. The ladder guarantees every cut crosses transversally. The arc's
+share is two extra hull points per section, in the tangency directions, so the
+blend still meets each wall exactly where a ball of radius `r` touches it.
 
 ---
 
@@ -166,72 +197,46 @@ they were rules:
 
 The comparison tests are the interesting half. Where a blend has a closed form,
 the result is compared against it exactly — the hole mouth against an annulus
-prism minus a torus, the inner corner against a hand-written bead, a cube corner
-against the true rounded solid. Where it has none — a trihedral pocket, an
-asymmetric valence-5 apex — it is compared against a shrink-and-grow reference,
-and the comparison is calibrated by two self-tests that pin it between
-always-pass and always-fail.
+prism minus a torus, a cube corner against the true rounded solid. Where it has
+none, it is compared against a shrink-and-grow reference, calibrated by two
+self-tests that pin it between always-pass and always-fail.
 
 ![Hard configurations](fig-hard-cases.png)
 
-*Left: a three-face pocket, cut open — an apex where three concave walls meet,
-which has no closed-form equal-radius blend. Middle: a sheared five-sided pyramid,
-an asymmetric high-valence corner, where the junction yields several distinct
-seated balls rather than the single one a symmetric cone collapses to. Right: a
-rib on a plate, where two concave creases and one convex one meet at a vertex, so
-whichever tool runs hears about only some of the walls bounding its corner.*
+*Left: a three-face pocket, cut open — three concave walls meeting at an apex,
+which has no closed-form equal-radius blend. Middle: a sheared five-sided pyramid
+— an asymmetric high-valence corner. Right: a rib on a plate, where two concave
+creases and one convex one meet at a vertex.*
+
+### Known red
+
+Two prototyping-bench cases — the three- and four-face pockets — fail the bench's
+dilation check, which needs CGAL to convert the mesh to a Nef polyhedron. That
+conversion now succeeds; the refusal has moved into CGAL's convex decomposition,
+on a mesh whose smallest triangle is `8.1e-07` and which Manifold reports as a
+clean solid of the expected genus. Both pockets are pinned exactly by
+`FilletCompare_test.cc`, which does not go near CGAL.
+
+Several other bench cases are red because the check asks that the result stay
+within the tool's own size of the model, and rounding a sharp apex moves the
+surface by more than the radius — that is the check failing to express the
+answer, not the answer being wrong.
+
+Re-reading a rounded cube back in still classifies 360 features, 216 of them
+spurious, on a solid that has none. That is the tangential-contact sliver problem
+the *Re-filleting* caveat is about; `FilletBuilder_test.cc` carries it as a bound.
 
 ---
 
-## What is still red, and why it is not the operator
+## Not built
 
-Two harness cases — the three-face and four-face pockets — still fail the
-prototyping bench's dilation check. The check works by growing the result with a
-Minkowski sum and asking that the blended solid stay inside it, so it needs CGAL
-to convert the mesh to a Nef polyhedron.
-
-**That conversion now succeeds.** It used to throw, and the two defects behind it
-are fixed (both are described under *Overshoot* above). The refusal has moved
-downstream into CGAL's convex decomposition, which reports two facets sharing a
-halfedge on a mesh whose smallest triangle is `8.1e-07` and which Manifold
-reports as a clean solid of the expected genus. Nothing measured says that one
-belongs to these operators, and the correctness of both pockets is pinned exactly
-elsewhere — `FilletCompare_test.cc` compares each against a shrink-and-grow
-reference without going near CGAL.
-
-Several other bench cases are red for a reason the bench itself documents: the
-check asks that the result stay within the tool's own size of the model, and
-rounding a sharp apex moves the surface by far more than the radius — a ball of 6
-seated in a 30 × 60 cone tops out 18.7 below the tip. That is the check failing
-to express the answer, not the answer being wrong.
-
-One re-read measurement is worth stating plainly because it bounds a documented
-caveat rather than a bug: a rounded cube read back in still classifies 360
-features, 216 of them spurious concave ones, on a solid that has none. That is
-the tangential-contact sliver problem the *Re-filleting* caveat is about. It has
-improved twice with the mesh fixes — 650 → 480 → 360 — and the shortest edge a
-spurious crease sits on has gone `6.6e-4` → `5.6e-3` on a 40 mm part.
-`FilletBuilder_test.cc` carries that as a bound.
-
----
-
-## Deliberate non-goals
-
-Each of these was considered and rejected with a reason, not left undone:
-
-- **Re-fillet tagging** (reserved ID ranges, stamping originating IDs through
-  MeshGL). The angle threshold plus `min_angle=` is the protection; the
-  requirement is that re-filleting does not crash, which is pinned by a test. The
-  tagging machinery was the riskiest thing in the design and buys a rule nobody
-  asked for.
-- **Analytic fast paths** (exact torus for plane-meets-cylinder). Optional speed
-  work, to be taken only if profiling demands it. Nothing has.
-- **A second classifier filter on triangle quality or area.** Measured, and the
-  two populations are *inverted*: a real crease running against a bead has worse
-  triangles at the median than the noise does, so every threshold takes the
-  feature first.
 - **Runout, variable radius along a chain, unequal radii at a vertex.** A tool
   node carries one size for the whole invocation.
+- **Re-fillet tagging** (stamping originating IDs through MeshGL). The angle
+  threshold plus `min_angle=` is the protection; that re-filleting does not crash
+  is pinned by a test.
+- **Analytic fast paths** (exact torus for plane-meets-cylinder). Optional speed
+  work, to be taken only if profiling demands it.
 
 ## Reviewing this
 

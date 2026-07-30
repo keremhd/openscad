@@ -54,6 +54,25 @@ Write your own version of that when you want a different composition — a
 chamfer outside and a fillet inside, say, or two different sizes. The tools are
 the surface you build on; `fillet()` is just the common case.
 
+## What a tool solid is
+
+Nothing exotic. Take an L with one straight inside corner. The chamfer along it
+is a prism laid down the corner: one point `t` along each wall, joined across.
+The fillet is that same prism with a cylinder of radius `r` taken out of it —
+the path a ball of that radius takes when it rolls down the corner touching both
+walls.
+
+![A tool solid, by hand](fig-wedge.png)
+
+*Left: the prism — that is `chamfer_tool(t = 4)`. Middle: the same prism with the
+cylinder subtracted. Right: what `fillet_tool(r = 4)` gives you. The prism is
+drawn reaching slightly into the walls, which is how it is actually built.*
+
+Everything else the operators do is that idea generalised: the corner bends, the
+walls curve, the angle between them changes along the way, and several corners
+meet at a point — where the rolling ball has nowhere to roll and simply sits,
+touching all three walls.
+
 ## Choosing edges
 
 Two things decide whether an edge is treated.

@@ -28,6 +28,24 @@ the material a blend adds or removes — which you then compose yourself. That i
 deliberate: it is what makes the operators composable rather than a fixed
 pipeline you cannot get inside of.
 
+### What a tool solid is
+
+Take an L with one straight inside corner. The chamfer along it is a prism laid
+down the corner, reaching `t` along each wall. The fillet is that same prism with
+a cylinder of radius `r` taken out of it — the path a ball of that radius takes
+rolling down the corner, touching both walls the whole way.
+
+![A tool solid, by hand](fig-wedge.png)
+
+*Left: the prism, which is `chamfer_tool(t = 4)`. Middle: the same prism with the
+cylinder subtracted. Right: `fillet_tool(r = 4)`. The prism is drawn reaching
+slightly into the walls, which is how it is built — a tool has to cross the
+surface it cuts, not rest on it.*
+
+The rest is that idea generalised: the corner bends, the walls curve, the angle
+between them changes along the way, and where several corners meet at a point the
+ball has nowhere to roll and simply sits, touching every wall at once.
+
 ## fillet()
 
 ```openscad
@@ -64,17 +82,13 @@ module fillet(r = 2, inner = true, outer = true) {
 
 ### Preview
 
-**Under F5, `fillet()` hands back its child untouched.** The blends cost a mesh
-analysis and two booleans on every keystroke, and they are usually the last thing
-you are iterating on. Press F6 to see them, or pass `disable_preview = false` to
-build them in preview too.
+**Under F5, `fillet()` hands back its child untouched**, because the blends cost
+a mesh analysis and two booleans on every keystroke. Press F6 to see them, or
+pass `disable_preview = false`. One consequence worth knowing: a blend that adds
+material into a clearance gap will not show that interference in preview.
 
-One consequence worth knowing: a blend that adds material into a clearance gap
-will not show that interference in preview.
-
-The four `*_tool` modules never pass through, in preview or otherwise. A tool is
-a solid you are composing with, and one that vanished under a render mode would
-break every composition built out of it.
+The four `*_tool` modules always build, in preview and render alike — a tool that
+vanished under one render mode would break every composition built out of it.
 
 ## The tool modules
 
@@ -179,13 +193,10 @@ round_tool(r = 3) {
 }
 ```
 
-**One whole edge, end to end** — this needs care. A brush tall enough to reach
-both faces also contains the first few millimetres of the four edges meeting the
-one you want, and those get rounded too: 5 of 12, not 1. Keeping the brush from
-reaching a full radius sideways drops them: each of those four overlaps runs into
-the corner at the shared vertex, and a stretch that reaches a corner without
-covering the radius down every edge of it is not built. So the one vertical edge
-is blended over its full height, and the other four stay sharp:
+**One whole edge, end to end** — this needs care. A brush long enough to reach
+both ends also catches the start of the four edges meeting the one you want, and
+those get rounded too. Keep it narrow — less than a radius out from the edge on
+each side — and they drop out:
 
 ```openscad
 round_tool(r = 3) {
@@ -194,11 +205,9 @@ round_tool(r = 3) {
 }
 ```
 
-The width that matters is how far the brush reaches **from the edge**, and the
-limit is the radius: reach `r` sideways and the four neighbours come with it. At
-`r = 3` that means a box up to just under 6 mm across works, and anything from a
-hair upwards does the same thing — the width decides which creases are taken,
-never what is built along them.
+What matters is how far the brush reaches **from the edge**, and the limit is the
+radius. The width decides which creases are taken, never what is built along
+them.
 
 **One corner** — a box around the vertex selects the three creases meeting there,
 and the corner between the three blends is built as well:
