@@ -66,7 +66,15 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
    being a fixed hair — but the lip itself is still there, and the composition
    that closes it is still to be chosen. See below, including what it costs the
    quoted SCAD equivalent.
-13. **DOC**, then **CLEAN**.
+13. **D13** — two overlapping bosses come back with a hole where their seam
+   meets the plate, and the genus moves with the tessellation. See below.
+14. **D14** — the rounded tools are superquadratic in time and memory, and
+   almost none of it is geometry: one cleanup helper is 98% of the run. It is
+   independent of everything above and can be taken at any point. See below.
+15. **REVIEW** — an outside read of what ships, in
+   [`pr-review.md`](pr-review.md). Five blocking items, four worth doing. Kept
+   out of this file because it judges the branch rather than the feature.
+16. **DOC**, then **CLEAN**.
 
 ---
 
@@ -1860,6 +1868,105 @@ each wall is the obvious thing to measure against.
 
 ---
 
+## D14 — the sweep that tidies up after the cells costs more than everything else together
+
+**The rounded tools are superquadratic in what they build, and the geometry is
+not where the time goes.** A plate carrying an N x N grid of bosses,
+`fillet_tool(r = 1)` at `$fn = 32` — one pass, no composition:
+
+| bosses | 4 | 9 | 16 | 36 | 64 | 81 | 100 |
+|---|---|---|---|---|---|---|---|
+| seconds | 0.13 | 0.29 | 0.60 | 2.15 | 11.08 | — | **53.93** |
+| peak RSS, GB | 0.11 | 0.21 | 0.40 | 1.07 | 4.45 | 8.52 | **15.55** |
+
+The same model unioned without any tool is 0.48 s. The exponent is not constant
+and it is climbing — 1.0 between 4 and 9 bosses, 1.6 at 16 to 36, 2.9 at 36 to
+64, 3.6 at 64 to 100 — which is what a quadratic looks like once it is also
+paging. **Fifteen gigabytes for a plate with a hundred bosses on it** is the part
+to lead with: this fails by exhausting the machine before it fails by being slow.
+
+### It is one helper, and it is not doing geometry
+
+`sample` over the whole of the 100-boss run:
+
+| | samples | share of `buildRoundSolid` |
+|---|---|---|
+| `dropVolumelessParts` | 31018 | 98.6% |
+| — of which `manifold::Manifold::Decompose()` | 28032 | 89% |
+| `manifold::BatchBoolean` | 717 | 2% |
+| `checkChainSizes`, `chainContacts` | below the noise floor | — |
+
+The size gate, the surface walks and the contact solve — the parts that look
+expensive — do not register. Essentially all of the wall clock and all of the
+memory is inside the fifteen-line helper that exists only to sweep up shells the
+builder deliberately creates.
+
+### Why it grows
+
+`dropVolumelessParts` calls `Manifold::Decompose()`, which materialises one
+`Manifold` — each with its own mesh — per connected component. The component
+count is not the number of creases. The comment above the helper says where the
+components come from: consecutive cells that share a section face leave "one
+degenerate four-triangle shell behind per such contact". Cells are one per spine
+station, so the shells scale as creases x tessellation. `Decompose()` then builds
+thousands of meshes over a mesh that is itself growing, and when any part is
+dropped the helper runs a second full `BatchBoolean` to reassemble parts that
+were disjoint by construction.
+
+So the cost is (shells proportional to cells) x (`Decompose` proportional to mesh
+size), in both time and resident memory.
+
+Two measurements pin it:
+
+- **The wedge tools are linear.** `chamfer_tool(t = 1)` on the same grids: 9
+  bosses 0.08 s, 36 bosses 0.20 s, 100 bosses 0.76 s at 0.46 GB. Same
+  `unionCells` -> `dropVolumelessParts` path, no canal and no subtraction. On the
+  100-boss model the rounded tool costs 71x the time and 34x the memory of the
+  wedge one.
+- **It tracks cells, not creases.** Holding the grid at 36 bosses and raising the
+  tessellation: `$fn = 16` 0.75 s, `$fn = 32` 2.52 s, `$fn = 64` 33.05 s.
+  Doubling the tessellation costs 13x, with the crease count unchanged.
+
+### Where to look
+
+- **Stop producing the shells.** The technique is already in the file:
+  `kCanalOverlap` runs each canal cell a fraction of a segment past the station
+  it would otherwise stop at, so consecutive cells share a slab rather than a
+  face and no degenerate shell is produced. It is applied to the canal and
+  explicitly declined for the wedges, on the grounds that their shared faces
+  "cost nothing but the volumeless shells `dropVolumelessParts` already sweeps
+  up". That is the cost assessment this entry refutes. With nothing abutting, the
+  helper returns at `parts.size() < 2` and the sweep disappears.
+- **Or answer the question in one pass instead of through `Decompose()`.**
+  Union-find over `MeshGL64` labels the components in O(N a(N)), and each
+  component's signed volume falls out of the same sweep by the divergence
+  theorem. No intermediate `Manifold` is constructed — which is where the
+  gigabytes are — and the result is rebuilt only if something has to be dropped.
+- **The reassembly is a boolean over disjoint parts.** The `BatchBoolean(
+  solidParts, Add)` at the end of the helper unions parts that cannot overlap.
+  That is a mesh concatenation.
+- **It is called more often than it needs to be** — once per `unionCells`, for
+  the wedge and again for the canal, and a third time on the final subtraction.
+  Once, at the end, is enough.
+
+Either of the first two should be sufficient alone; they are independent.
+
+**Acceptance:** the boss-grid series above is linear in the crease count and in
+the tessellation, in time and in peak memory both; 100 bosses fits in the memory
+a 36-boss model needs today; `chamfer_tool` does not regress; the 21 regression
+baselines and every case in `FilletBuilder_test.cc` and `FilletCompare_test.cc`
+are unchanged.
+
+### The interaction worth knowing about
+
+Cell count is the driver, and the seam-cover work in flight adds one straddling
+cell per seam — roughly half again as many. Whatever is done here wants
+re-measuring after that lands, and the first bullet above would close both at
+once: a cell that already overlaps its neighbour has no coincident face left for
+a bridging cell to cover.
+
+---
+
 ## DOC — user-facing documentation
 
 The feature has zero mentions outside `src/`, `tests/` and the design directory.
@@ -2000,7 +2107,9 @@ Whatever is chosen, all four copies move together.
 ## CLEAN — before merge
 
 - Delete `fillet-feature-design/`. Its own convention calls it scaffolding, and
-  the source deliberately carries no references to it.
+  the source deliberately carries no references to it. [`pr-review.md`](pr-review.md)
+  goes with it — but its blocking items are changes to `src/` and `tests/` and
+  have to be made first, or they leave with the directory unaddressed.
 - Move `fillet-tests/` under `tests/` or delete it. It is the place a case is
   prototyped before it has a baseline; decide whether that role survives the
   merge.
