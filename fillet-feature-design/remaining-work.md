@@ -1597,23 +1597,49 @@ traversed. So:
   only at the *difference's* postfix, after both have run. Neither can see the
   other. The union boolean is the one thing genuinely repeated.
 
-Measured on a boss at `$fn = 128`, where the tool is the expensive part: the tool
-alone is 316 ms, the current composition 744 ms, and the forwarded form 780 ms.
-**+36 ms, not +250** — the tool was reused. On the tiny L bracket the same repeat
-is 77 ms → 88 ms, which is 14% only because everything there is cheap.
+And the repeated boolean is the cheap half. Broken down on a boss at `$fn = 128`:
 
-A C++ node still wins by handing both consumers the same pointer, so the gap is
-real; it is one boolean, not one blend.
+| | ms |
+|---|---|
+| the boss alone | 56 |
+| `fillet_tool` on it | 314 |
+| `union` of the two | 332 — so **the union boolean is ~18 ms** |
+| `round_tool` on the plain boss | 488 |
+| `round_tool` on the filleted boss | 767 — the round pass costs the same either way |
 
-Two general notes fell out of measuring this, both worth remembering before
-optimising anything here. Duplicated **top-level siblings** never dedupe, for the
-postfix reason above — two identical `fillet_tool` calls side by side cost the same
-as two different ones (364 ms vs 361 ms, against 210 ms for one). And whether the
-intermediate is written as a nested module or as a repeated inline expression makes
-**no difference to any of this**: module instantiation is inlined into the node
-tree, so both forms produce the same tree up to `group()` wrappers, the same cache
-keys, and the same time to the millisecond (88 ms each). The submodule is a
-readability choice and nothing more.
+So the whole composition is two ~300–430 ms tool passes and one 18 ms boolean, and
+the 18 ms boolean is the only thing a duplicate reference repeats. The forwarded
+form measures 780 ms against 744 for the current composition, and almost all of
+that 36 ms is composition B doing a second `union`, not the SCAD being written
+badly.
+
+**A duplicated sibling can be made to dedupe, by adding one level above the first
+occurrence.** A node's geometry is inserted at its *parent's* postfix, so wrapping
+the first occurrence in a `union()` or `group()` gives it a parent that finishes —
+and inserts — before the second occurrence is traversed. Measured on a
+deliberately expensive union of two `$fn = 200` spheres:
+
+| | ms |
+|---|---|
+| the union once | 204 |
+| the same union twice, as siblings of a `difference` | 322 |
+| twice, with an extra `union()` around the first | **214** |
+| twice, with an extra `group()` around the first | 215 |
+
+It recovers essentially all of it, and it is worth knowing as a general OpenSCAD
+technique. It does **not** help here, for the reason the table above gives: the
+duplicated union is 18 ms out of 780, so there is nothing to win — measured 781 ms
+with the wrapper against 780 without, which is noise. Reach for it when the shared
+subtree is expensive, not by reflex.
+
+Two more notes. Duplicated top-level siblings otherwise never dedupe, and this is
+not specific to the fillet nodes — two identical `fillet_tool` calls side by side
+cost what two different ones cost (364 ms vs 361 ms, against 210 ms for one), and
+so do two identical plain unions (322 vs 327, against 204). And whether the
+intermediate is written as a nested module or a repeated inline expression makes
+**no difference to any of it**: instantiation is inlined into the node tree, so both
+give the same tree bar `group()` wrappers, the same cache keys, and the same time
+to the millisecond (88 ms each). The submodule buys readability, nothing else.
 
 So whichever route D12 takes, decide deliberately which of these the docs say:
 
