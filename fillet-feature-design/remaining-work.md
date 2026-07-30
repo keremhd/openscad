@@ -56,7 +56,14 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
    bracket's reflex crease was never refused; what `4.4e-16` dropped was the
    convex chain running the end face's outline, where the spine turns from one
    wall onto the next. See below.
-12. **DOC**, then **CLEAN**.
+12. **D12** — a concave bead that runs out to an open face leaves its end
+   cross-section standing as a sharp lip over the rounded outline beside it,
+   because both tools are built from the same original child. The obvious
+   composition fix — run the round tool on the already-filleted solid — is
+   strictly better on polyhedral models and destroys every curved one, and
+   `min_angle` does not separate the two cases. See below, including what it
+   costs the quoted SCAD equivalent.
+13. **DOC**, then **CLEAN**.
 
 ---
 
@@ -1442,6 +1449,76 @@ four combinations and the thin-wall refusal beside them. Whole unit suite and al
 
 ---
 
+## D12 — a bead that ends on an outer face leaves a sharp lip over the round
+
+**Where the inner blend meets the outer one, the outer one does not know the
+inner one happened.** `fillet()` builds both tools from the *same* original child:
+
+```
+difference() { union() { child; fillet_tool(child); } round_tool(child); }
+```
+
+So the round tool is seated against walls that the fillet tool has already
+changed. Where a concave bead **runs out to an open face** — every extruded L, T
+or rib profile, which is to say the shape most people will try — the bead's end
+cross-section is left standing on that face as a sharp-edged crescent, overhanging
+the rounded outline beside it. Visible in a close-up of the L bracket at
+`r = 2`: a lip of `6.568` mm³ across the two ends.
+
+Closed beads do not show it. A boss ring, a bore ring, a rib's base ring never
+terminate on a face, so there is no end cap to leave behind, and the two
+compositions below agree exactly on all of them.
+
+**The obvious composition fixes it and cannot be adopted.** Running the round tool
+on the already-unioned solid rounds the bead ends over into a continuous
+transition, and on polyhedral models it is strictly better — on the L bracket the
+round pass then reads 35 convex creases and **no** spurious concave ones, against
+19 and 1 before; on the boss it *reduces* spurious concave features from 32 to 1.
+But on anything whose blend surface is curved it is destroyed, measured at
+`r = 2`, `$fn = 32`:
+
+| model | as built now | round tool on the filleted solid |
+|---|---|---|
+| cube | genus 0 | identical — no concave creases, so nothing changes |
+| boss on plate, blind bore | genus 0 | identical result, fewer spurious features |
+| L bracket | genus 0, the lip | genus 0, **lip gone** |
+| rib on plate | genus 0 | genus 0, a wash |
+| pipe tee | genus 0, no warnings | **genus 31, 21 pieces, 31 warnings, 2963 mm³ gone** |
+| two bosses | genus 0, no warnings | **genus 1, 33 warnings** |
+| dome on plate | genus 0, no warnings | **11 warnings, beads dropped** |
+
+**`min_angle` does not separate the two.** Swept 18 / 30 / 45 / 60 on the three
+curved cases: the tee stays genus 12–31 with 31+ warnings throughout. The creases
+being wrongly selected are not low-angle slivers, so no threshold reaches them —
+they are the bead's own surface, at honest angles, being read as a wall that wants
+rounding. This is *not* the tangential-contact sliver problem the *Re-filleting*
+caveat describes; it is a second, larger one hiding behind it.
+
+**So the fix has to be selection, not composition.** The round pass needs to
+distinguish a convex crease that bounds the original solid from one the fillet
+pass introduced, and round only the first kind plus the bead **end caps**. Two
+routes worth measuring:
+
+- Classify convex creases on the original child as today, but seat the tool's
+  contacts against the filleted solid, so the geometry sees the wall that is
+  really there.
+- Classify on the filleted solid and subtract every crease lying on a surface the
+  fillet pass created, keeping those where a bead is truncated by an original
+  face — which is exactly the end caps.
+
+**This costs `fillet()` its "it is only sugar" framing, and that is the part to
+decide first.** See the note under DOC below: the composition is currently quoted
+as user-writable SCAD in three documents and in `FilletNode.cc`. Neither route
+above is expressible as a composition of the four tool modules, because both need
+to know which surface came from which pass — something no `.scad` can ask.
+
+**Acceptance:** the L bracket's bead ends round over into the outline, with no
+lip; every curved case above stays at its current genus and warning count; and
+whatever `fillet()` is documented to equal is something a reader can actually
+write, or is documented as no longer being sugar.
+
+---
+
 ## DOC — user-facing documentation
 
 The feature has zero mentions outside `src/`, `tests/` and the design directory.
@@ -1464,6 +1541,62 @@ Needed:
      into slivers. Filleting a fillet is therefore not reliable today, and the
      honest doc line says so rather than implying the threshold handles it. If
      D2 lands, revisit this line.
+
+### The quoted SCAD equivalent — what can and cannot be written
+
+`fillet()` is documented as sugar for a composition a reader could have written,
+and that claim appears in four places: the comment above `builtin_fillet` in
+`FilletNode.cc`, `doc-page/fillet.md`, the wiki draft, and `pr-body/pr.md`. All
+four quote the child **twice** — once inside the union, once as the round tool's
+argument — which is fine only because both quotes are of the *original* child.
+
+The moment either tool has to run on the *result* of the other (D12), the
+equivalent needs to name an intermediate solid, and **OpenSCAD has no way to do
+that.** The natural attempt is silently wrong:
+
+```openscad
+module my_fillet(r = 2) {
+    module blended() {                      // WRONG - produces nothing at all
+        union() { children(); fillet_tool(r = r) children(); }
+    }
+    difference() { blended(); round_tool(r = r) blended(); }
+}
+```
+
+`children()` inside `blended()` means *`blended()`'s* children, and it has none,
+so both branches are empty. It does not error. The `.csg` dump shows the hole:
+every `children()` came out as a bare `group()`, and the render is an empty solid.
+Anyone who writes this by hand gets nothing and no reason why.
+
+What does work is refusing to name it and repeating the expression:
+
+```openscad
+module my_fillet(r = 2) {
+    difference() {
+        union() { children(); fillet_tool(r = r) children(); }
+        round_tool(r = r) union() { children(); fillet_tool(r = r) children(); };
+    }
+}
+```
+
+Verified exact — same triangle count and the same `13286.2607` mm³ as the C++
+composition it mirrors. Two costs. It evaluates `fillet_tool` twice, measured at
+**+15%** on the L bracket (85 ms → 98 ms), where a C++ node would build the union
+once and hand the same pointer to both consumers; and it puts a duplicated
+sub-expression in the one snippet whose whole job is to be read and understood.
+
+So whichever route D12 takes, decide deliberately which of these the docs say:
+
+1. **Quote the repeated-union form.** Honest and runnable, 15% slower than what
+   the node actually does, and ugly in exactly the place that must be legible.
+2. **Quote the composition and note the node computes the shared solid once.**
+   Keeps the snippet clean; the equivalence becomes "up to sharing".
+3. **Stop calling it sugar.** Required outright if D12 lands as a selection change
+   rather than a composition change, because "round only the creases the other
+   pass did not create" is not sayable in `.scad` at any length.
+
+Whatever is chosen, all four copies move together, and the nested-module trap is
+worth one sentence in the docs — it is the first thing a reader will try.
 
 ---
 
