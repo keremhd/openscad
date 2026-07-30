@@ -1582,21 +1582,47 @@ empty, with no error and no warning. The `.csg` dump is where it shows: every
 `children()` becomes a bare `group()`. It is the first thing a reader will try, so
 it is worth a sentence in the docs.
 
-What is *not* writable is **sharing** the result. `blended()` is instantiated
-twice and so the fillet tool runs twice, measured at **+14%** on the L bracket
-(77 ms → 88 ms), identical to the cost of crudely duplicating the union
-expression. A C++ node builds the union once and hands the same pointer to both
-consumers; no `.scad` can say that.
+What is *not* writable is **sharing** the result — but that costs far less than it
+looks, and it is worth knowing exactly what gets repeated, because the answer is
+"the cheap half".
+
+`smartCacheInsert` runs from `collectChildren*`, which means a node's geometry
+enters the cache at its **parent's** postfix, once every sibling has been
+traversed. So:
+
+- The `fillet_tool` inside the first `blended()` is inserted when that `union`
+  collects its children, which happens *before* the second `blended()` is
+  traversed. The second one **hits the cache**. The tool is built once.
+- The two `union` nodes are siblings under the `difference`, so they are inserted
+  only at the *difference's* postfix, after both have run. Neither can see the
+  other. The union boolean is the one thing genuinely repeated.
+
+Measured on a boss at `$fn = 128`, where the tool is the expensive part: the tool
+alone is 316 ms, the current composition 744 ms, and the forwarded form 780 ms.
+**+36 ms, not +250** — the tool was reused. On the tiny L bracket the same repeat
+is 77 ms → 88 ms, which is 14% only because everything there is cheap.
+
+A C++ node still wins by handing both consumers the same pointer, so the gap is
+real; it is one boolean, not one blend.
+
+Two general notes fell out of measuring this, both worth remembering before
+optimising anything here. Duplicated **top-level siblings** never dedupe, for the
+postfix reason above — two identical `fillet_tool` calls side by side cost the same
+as two different ones (364 ms vs 361 ms, against 210 ms for one). And whether the
+intermediate is written as a nested module or as a repeated inline expression makes
+**no difference to any of this**: module instantiation is inlined into the node
+tree, so both forms produce the same tree up to `group()` wrappers, the same cache
+keys, and the same time to the millisecond (88 ms each). The submodule is a
+readability choice and nothing more.
 
 So whichever route D12 takes, decide deliberately which of these the docs say:
 
 1. **Quote the forwarded form above.** Honest, runnable, and legible — the
-   duplicated-expression objection is gone. Only caveat is that it is 14% slower
-   than what the node does, because it cannot share the intermediate.
+   duplicated-expression objection is gone, and the cost is one repeated boolean
+   rather than a repeated blend.
 2. **Quote it and note the node computes the shared solid once.** Same snippet,
-   plus one sentence; the equivalence becomes "up to sharing". Preferred, since
-   the gap is real but is an implementation detail rather than a difference in
-   result.
+   plus one sentence; the equivalence becomes "up to sharing". Preferred: the gap
+   is an implementation detail, not a difference in result, and it is small.
 3. **Stop calling it sugar.** Required outright if D12 lands as a selection change
    rather than a composition change, because "round only the creases the other
    pass did not create" is not sayable in `.scad` at any length.
