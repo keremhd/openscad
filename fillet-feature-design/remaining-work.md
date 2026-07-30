@@ -1676,10 +1676,10 @@ meaningful if the cell stands further past a wall than the beads it closes. And
 `RoundSection` carries the overshoot it was built at, which is what a truncated
 end hands its corner.
 
-**What this does not fix is the composition, and the composition is now refused
-for a different reason than it was.** With the noise gone, route A — the round
-pass on the blended solid — no longer tears curved work apart. Measured through
-the node itself at `r = 2`, `$fn = 32`, against the composition as it ships:
+**The composition landed on top of this, once the size gate learned to read a
+blended solid. See the section below.** What follows is what it cost when the
+overshoot was the only thing fixed — kept because it is the measurement that
+identified the gate as the blocker:
 
 | model | as it ships | round pass on the blend |
 |---|---|---|
@@ -1698,10 +1698,67 @@ on the top face where the unblended build has twenty-eight. The gate reads
 the competitor it finds is the base bead's own flank.
 
 So route A needs the size gate to be right about a solid a bead is already in,
-which is the second half of what the provenance commit had to do and is exactly
-the coupling that commit was reverted for. Nothing here is a warning-tuning
-problem: suppressing those six lines would leave the rib silently unrounded.
-The lip is still open.
+which is the second half of what the provenance commit had to do. Nothing there
+is a warning-tuning problem: suppressing those six lines would have left the rib
+silently unrounded.
+
+### The gate, and why it could not read a blended solid — fixed, without provenance
+
+The gate seats every contact by asking for the nearest point of the wall's
+*surface* to the seated ball, and a surface is what `smoothSurfaces` groups:
+everything reachable without crossing a crease. That is what makes a cylinder's
+facets one wall rather than thirty-two, and the question "has the ball run off
+the end of this wall" has to be asked of a wall.
+
+**A blend destroys that grouping, necessarily.** A bead is tangent to both walls
+it touches — that is what a fillet is — so every seam it makes is under the
+threshold and the walk goes straight through it. Measured on the blended rib: the
+near side, both beads, the plate and the far side all come back as **one**
+surface, and both contacts of a crease collapse onto the same point.
+
+Two things fix it, and neither knows anything about which pass built what:
+
+- **The search is local.** It walks out from the triangle the station named,
+  never leaves the surface, and stops at the tool's own reach — the ball centre
+  plus a radius, which is as far as a point it touches can be.
+- **It stops where the wall turns away.** A wall curved enough to matter turns by
+  its sagitta over that reach — 27 degrees for a radius-2 blend on a radius-10
+  boss — while a bead turns by the whole crease angle within a couple of
+  millimetres. The cap is 60 degrees. A right angle is measurably wrong: at 90
+  the walk steps from a rib's side onto the plate its bead lands on, which is at
+  exactly 90, and four creases go again. 30 to 85 all give the same answer.
+
+**Landed with the composition.** Every model in the set at `$fn` 16, 32, 48 and
+64, `r = 1, 2, 3`, against the composition as it shipped:
+
+| model | change |
+|---|---|
+| cube, boss on plate, blind bore, dome on plate | identical to the digit, no warnings |
+| **L bracket** | **the lip gone**: 13292.8286 -> 13286.2607 at `$fn = 32`, and at every other |
+| rib on plate | +0.97, its vertical rounds stopping where their creases stop |
+| pipe tee | same volume; one warning at `$fn` 32 and 64, none at 16 or 48 |
+| two bosses | +0.49; one warning; genus 1 -> 0 at `$fn = 64` |
+
+Genus never gets worse anywhere, and the node is **byte-identical** to the
+written-out composition on every model — so `fillet()` is still sugar, which is
+what the provenance route would have spent.
+
+**What is left is one warning line on curved work**, and it is honest rather than
+spurious: where two beads meet, or where a bead's own cells meet on a
+fast-turning crease, the blend really does carry a convex crease, and `r` really
+does not fit it. It is one line rather than thirty because the size warning now
+reports a count and its worst example. If it is ever to go, the question to
+answer is whether a crease shorter than the bead it would carry should be
+selected at all — which is a question about selection, not about this
+composition.
+
+### Still to do: three copies of the quoted SCAD
+
+`FilletNode.cc` now quotes the forwarded form. `doc-page/fillet.md`, the wiki
+draft and `pr-body/pr.md` still quote the old one, which is no longer what the
+node does — they were being edited elsewhere when this landed and were left
+alone deliberately. The replacement is the comment above `builtin_fillet`,
+verbatim, plus the sentence about `blended() children()` being the whole trick.
 
 ### What the rib says, whichever route is taken
 

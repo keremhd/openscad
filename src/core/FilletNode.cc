@@ -95,19 +95,33 @@ static std::shared_ptr<AbstractNode> builtin_bevel_tool(const ModuleInstantiatio
   return builtin_fillet_impl(inst, std::move(arguments), children, FilletType::BEVEL);
 }
 
-// The composition every fillet is: grow the inner creases, cut back the outer
-// ones. Written out, because the tool nodes are the composable surface and
+// The composition every fillet is: grow the inner creases, THEN cut back the
+// outer ones. Written out, because the tool nodes are the composable surface and
 // anyone wanting a different composition should be able to start from this one:
 //
 //   module fillet(r = 2, inner = true, outer = true, min_angle = undef) {
-//       difference() {
+//       module blended() {
 //           union() {
-//               children(0);
+//               children();
 //               if (inner) fillet_tool(r = r, min_angle = min_angle) children();
 //           }
-//           if (outer) round_tool(r = r, min_angle = min_angle) children();
+//       }
+//       difference() {
+//           blended() children();
+//           if (outer) round_tool(r = r, min_angle = min_angle) blended() children();
 //       }
 //   }
+//
+// This node is exactly that, to the byte, and "then" is the load-bearing word in
+// it. The round pass is measured against the solid the fillet pass left, because
+// a bead that runs out onto a face of the model leaves its end cross-section
+// standing in that face, and a pass that never saw the bead leaves that crescent
+// as a sharp lip over the outline it rounded beside it.
+//
+// `blended() children()` at both call sites is the whole trick and is not
+// optional: children() INSIDE blended() means blended's own children, so writing
+// the calls as a bare blended() and relying on the definition to see the outer
+// ones produces nothing at all, silently.
 //
 // Under $preview the node hands back its child untouched, because the tools cost
 // a mesh analysis and two booleans on every keystroke and the fillets are

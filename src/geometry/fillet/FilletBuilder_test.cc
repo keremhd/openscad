@@ -1559,6 +1559,67 @@ TEST_CASE("size: a contact landing on the edge of its wall is a fit, not a miss"
   CHECK(worst < 1e-9);
 }
 
+TEST_CASE("apply: a bead that runs out onto a face leaves no lip over the round")
+{
+  // The composition fillet() is, both ways round, on the L bracket. The inner
+  // bead runs the reentrant crease and stops flush in the two end faces; the
+  // round pass then cuts those faces back along their outlines. Measured against
+  // the original child it takes nothing off the bead's end, which is left
+  // standing proud of the surface around it as a sharp crescent. Measured
+  // against the blended solid, the end is part of the outline it rounds.
+  const double r = 2.0;
+  const double threshold = derivedThreshold(discretizer(32));
+  const auto model = box(26.0, 30.0, 12.0) + box(10.0, 30.0, 26.0);
+
+  auto roundToolOf = [&](const manifold::Manifold& target) {
+    const MergedMesh tm = mergeMesh(target.GetMeshGL64());
+    const auto tadj = buildEdgeAdjacency(tm.tris);
+    auto chains = buildChains(tm, selectedEdges(tm, tadj, threshold, /*wantConcave=*/false));
+    const auto verdicts =
+      checkChainSizes(tm, tadj, chains, r, /*concave=*/false, /*wedge=*/false, threshold);
+    std::vector<Chain> fitting;
+    for (size_t ci = 0; ci < chains.size(); ++ci)
+      if (verdicts[ci].fault == SizeFault::Fits) fitting.push_back(chains[ci]);
+    CHECK(fitting.size() == chains.size());
+    return buildRoundSolid(tm, tadj, fitting, r, /*concave=*/false, 32, threshold);
+  };
+
+  const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto beads = buildChains(mm, selectedEdges(mm, adj, threshold, /*wantConcave=*/true));
+  const auto blended = model + buildRoundSolid(mm, adj, beads, r, /*concave=*/true, 32, threshold);
+
+  const auto onChild = blended - roundToolOf(model);
+  const auto onBlend = blended - roundToolOf(blended);
+
+  // Both are one sound solid, and the lip is what separates them: two ends of a
+  // crescent, and nothing else on the part moves.
+  CHECK(onChild.Genus() == 0);
+  CHECK(onBlend.Genus() == 0);
+  CHECK(onChild.Volume() - onBlend.Volume() == Approx(6.568).margin(0.05));
+
+  // The crescent is flush in the end face, so it leaves feature edges lying
+  // exactly in that face's plane; rounded over, there are none. Everything else
+  // the round pass makes there is tangent to the face and stays a seam.
+  auto creasesInEndFace = [&](const manifold::Manifold& solid) {
+    const MergedMesh sm = mergeMesh(solid.GetMeshGL64());
+    const auto sadj = buildEdgeAdjacency(sm.tris);
+    size_t count = 0;
+    for (const auto& [key, tris] : sadj) {
+      if (tris.size() != 2) continue;
+      const Vector3d& p = sm.pos[key.first];
+      const Vector3d& q = sm.pos[key.second];
+      if (std::abs(p.y()) > 1e-9 || std::abs(q.y()) > 1e-9) continue;
+      if (isFeatureAngle(classifyEdge(sm, key, sm.tris[tris[0]], sm.tris[tris[1]]).dihedralDeg,
+                         threshold))
+        ++count;
+    }
+    return count;
+  };
+  CHECK(creasesInEndFace(onChild) > 0);
+  CHECK(creasesInEndFace(onBlend) == 0);
+}
+
 TEST_CASE("size: a bead the target already carries is not a wall in the way")
 {
   // A rib on a plate, blended, and then asked about by the round pass — the

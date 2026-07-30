@@ -1034,20 +1034,25 @@ Response GeometryEvaluator::visit(State& state, const FilletNode& node)
         }
 
         if (node.type == FilletType::APPLY) {
-          // difference(union(child, fillet_tool), round_tool). Both tools are
-          // built from the original target rather than from the running result,
-          // so each is measured against the shape the user wrote.
-          ManifoldGeometry result = *target;
+          // difference(union(child, fillet_tool), round_tool), with the round
+          // tool measured against the solid the fillet pass left rather than
+          // against the original child. "Then" is load-bearing: where an inner
+          // bead runs out onto a face of the model it leaves its end
+          // cross-section standing in that face, and a round pass that never saw
+          // the bead leaves that crescent as a sharp lip over the outline it
+          // rounded beside it.
+          auto blended = target;
           if (node.inner) {
             if (auto tool = ManifoldUtils::createManifoldFromGeometry(
                   buildFilletTool(node, FilletType::FILLET, target, brush));
                 tool && !tool->isEmpty()) {
-              result = result + *tool;
+              blended = std::make_shared<ManifoldGeometry>(*blended + *tool);
             }
           }
+          ManifoldGeometry result = *blended;
           if (node.outer) {
             if (auto tool = ManifoldUtils::createManifoldFromGeometry(
-                  buildFilletTool(node, FilletType::ROUND, target, brush));
+                  buildFilletTool(node, FilletType::ROUND, blended, brush));
                 tool && !tool->isEmpty()) {
               result = result - *tool;
             }
