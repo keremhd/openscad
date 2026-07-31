@@ -499,6 +499,7 @@ std::vector<StationNormals> chainNormals(const MergedMesh& m,
     }
     out[i] = s;
   }
+
   return out;
 }
 
@@ -2221,6 +2222,51 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
 
     sections[ci] = std::move(rebuilt);
     sectionAt[ci] = std::move(rebuiltAt);
+  }
+
+  // Chain ends that land on a vertex another chain also ends at, and that got no
+  // corner cell to close them, stop a hair short of it.
+  //
+  // Something is always refused there or the corner would have been built - a
+  // third crease too small for the size, most often - and the beads that were
+  // built still arrive at the same point. Stopping both on it has them touch
+  // along one line, with the material of each falling away either side, and a
+  // touch is what the caller's union resolves into a flap of zero thickness. The
+  // hair of crease left bare between them is bare either way: it is the corner
+  // the refused crease runs into, which nothing was going to blend.
+  {
+    std::map<int, int> endsAt;
+    for (size_t ci = 0; ci < chains.size(); ++ci) {
+      if (!chainUsable[ci] || chains[ci].closed || chains[ci].verts.size() < 2) continue;
+      ++endsAt[chains[ci].verts.front()];
+      ++endsAt[chains[ci].verts.back()];
+    }
+
+    for (size_t ci = 0; ci < chains.size(); ++ci) {
+      if (!chainUsable[ci] || chains[ci].closed) continue;
+      for (const bool front : {true, false}) {
+        std::vector<RoundSection>& sec = sections[ci];
+        if (sec.size() < 2) break;
+        const int vert = front ? chains[ci].verts.front() : chains[ci].verts.back();
+        if (endsAt[vert] < 2) continue;             // nothing else ends here
+        if (junctionAt.count(vert) != 0) continue;  // a corner already answers for it
+
+        const size_t endIdx = front ? 0 : sec.size() - 1;
+        const size_t nbrIdx = front ? 1 : sec.size() - 2;
+        const double step = (sec[endIdx].v - sec[nbrIdx].v).norm();
+        if (step < 1e-12) continue;
+        // The hair, or a twentieth of the last segment where that is shorter: a
+        // crease whose stations are the intersection curve of two curved walls
+        // has segments a fraction of the hair long, and taking the hair off one
+        // of those is taking off the whole cell.
+        const double back = std::min(eps / step, 0.05);
+        const RoundSection stop = lerpSection(sec[nbrIdx], sec[endIdx], 1.0 - back);
+        if (!stop.valid) continue;
+
+        sec[endIdx] = stop;
+        sectionAt[ci][endIdx] -= (sectionAt[ci][endIdx] - sectionAt[ci][nbrIdx]) * back;
+      }
+    }
   }
 
   // Read the selection against where the sections ended up. Everything from here

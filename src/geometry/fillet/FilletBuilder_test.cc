@@ -2217,4 +2217,55 @@ TEST_CASE("curved crease: the bead comes back whole at every tessellation")
   }
 }
 
+TEST_CASE("junction: two beads left by a refused crease do not touch")
+{
+  // A pipe running out of a boss on a plate. Three creases meet where the two
+  // cylinders cross the plate, and the short one between them is refused for
+  // size - so no corner is built there, and the two beads that were built still
+  // arrive at the same point. Stopping both on it leaves them touching along one
+  // line, which the caller's union resolves into a flap of zero thickness in its
+  // result: the tool alone is sound, and only the union shows it.
+  //
+  // Genus does not see a flap, so the mesh is asked directly. The bare crease
+  // between the two beads is bare either way - it is the refused crease's own
+  // corner, which nothing was going to blend.
+  const double r = 0.5;
+  const int fn = 32;
+  const double threshold = derivedThreshold(discretizer(fn));
+  const auto model = box(60.0, 40.0, 6.0) +
+                     manifold::Manifold::Cylinder(16.0, 8.0, 8.0, fn, false)
+                       .Translate(manifold::vec3(20.0, 20.0, 6.0)) +
+                     manifold::Manifold::Cylinder(30.0, 5.0, 5.0, fn, false)
+                       .Rotate(0, 90, 0)
+                       .Translate(manifold::vec3(20.0, 20.0, 10.0));
+  const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  auto chains = buildChains(mm, selectedEdges(mm, adj, threshold, /*wantConcave=*/true));
+  const auto verdicts =
+    checkChainSizes(mm, adj, chains, r, /*concave=*/true, /*wedge=*/false, threshold);
+
+  // The case is only itself while one crease is refused and the others are not.
+  size_t refused = 0;
+  std::vector<Chain> fitting;
+  for (size_t ci = 0; ci < chains.size(); ++ci) {
+    if (verdicts[ci].fault == SizeFault::Fits) fitting.push_back(chains[ci]);
+    else ++refused;
+  }
+  REQUIRE(refused == 1);
+  REQUIRE(fitting.size() == 2);
+
+  const auto tool = buildRoundSolid(mm, adj, fitting, r, /*concave=*/true, 32, threshold);
+  REQUIRE_FALSE(tool.IsEmpty());
+
+  auto selfTouching = [](const manifold::Manifold& solid) {
+    const MergedMesh sm = mergeMesh(solid.GetMeshGL64());
+    size_t count = 0;
+    for (const auto& [key, tris] : buildEdgeAdjacency(sm.tris))
+      if (tris.size() != 2) ++count;
+    return count;
+  };
+  CHECK(selfTouching(tool) == 0);
+  CHECK(selfTouching(model + tool) == 0);
+}
+
 #endif  // ENABLE_MANIFOLD

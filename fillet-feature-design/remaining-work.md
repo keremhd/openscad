@@ -76,15 +76,21 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
    [`log-2026-07-31-d14.md`](log-2026-07-31-d14.md), which also records why a
    Manifold cannot be taken apart and put back together through its own mesh
    format.
-15. **D15** — the seams that are left are where a bead ends at a junction, which
-   is the one place the cover has not been applied. See below.
-16. **REVIEW** — an outside read of what ships, in
+15. **D15** — **done in part.** Not a seam: a crease refused for size leaves two
+   beads stopping on the same vertex with no corner between them. Stopping them a
+   hair short takes the sweep from 19 self-touching configurations to 7. What is
+   left is the same corner seen from the other side — two beads' flanks
+   overlapping where nothing was built to resolve them. See below.
+16. **D16** — the scalloped bead, carried over from D13. The route this file
+   proposed for it is measured and wrong; see below for the numbers and for the
+   one that works on the wobble but costs tangency.
+17. **REVIEW** — an outside read of what ships, in
    [`pr-review.md`](pr-review.md). Four blocking items left — R1, R2, R5 and R7;
    R3 and R4 are closed with D13. Kept
    out of this file because it judges the branch rather than the feature. R7,
    the comment register, is decided rather than proposed: the LLM voice does not
    ship, and the rewrite is required before the PR opens.
-17. **DOC**, then **CLEAN**.
+18. **DOC**, then **CLEAN**.
 
 ---
 
@@ -1926,16 +1932,12 @@ severed-bead configuration `FilletBuilder_test.cc` used to sweep around builds.
 The sweep test now checks self-touching as well as genus, since neither sees the
 other.
 
-### Related, and probably a different defect
+### Related, and a different defect — now D16
 
-The pipe tee — `wiki-page/fig-curved`'s left panel — is not holed, but its weld
-bead is visibly scalloped at `$fn = 48` and clean at `$fn = 96`. Station normals
-are the face normals of the two triangles adjacent to the crease, averaged over
-the station's two incident chain edges. On a seam between two curved walls those
-triangles are slivers whose face normals are a poor stand-in for the surface
-normal, so `TA` and `TB` jitter from station to station and the bead's boundary
-comes out sawtoothed. An angle- or area-weighted normal over the whole fan on
-each wall is the obvious thing to measure against.
+The pipe tee's weld bead is visibly scalloped at `$fn = 48` and clean at
+`$fn = 96`. Measured and written up as D16 below, along with what the obvious
+answer — the angle-weighted fan normal this section used to propose — actually
+does, which is make it worse.
 
 ---
 
@@ -2059,26 +2061,101 @@ a bridging cell to cover.
 
 ---
 
-## D15 — the last seams are at a junction
+## D15 — beads left by a refused crease — **DONE in part, and it was not a seam**
 
-The seam covers reach every station of a chain and no further, so where a bead
-ends at a corner the cell it hands over to — the corner cell, and the corner ball
-inside it — still meets it on the plane of that end section. It is the same
-defect in the one place the same fix has not been applied.
+Written as "the last seams are at a junction", on the reasoning that the cover
+reaches every station of a chain and no further. Measured, that is not what the
+19 configurations left were about, and the difference is worth keeping: **the
+tool alone is sound in every one of them.** Only its union with the model touches
+itself, so nothing inside the tool's own construction is coincident, and the
+handover from a bead to a corner cell — which is what "the last seams" meant —
+was ruled out directly by widening it twenty-fold and measuring no change.
 
-Measured on the sweep above: every self-touching configuration left is the pipe
-tee, which is the only shape in it with a junction, and each carries one or two
-such edges against the 96 the same model carried before. Neither genus nor the
-regression baselines see them; the sweep and a convex decomposition do.
+What it is: a vertex where three creases meet, one of them **refused for size**.
+The refusal leaves two selected chain ends on that vertex and no third, so no
+junction is found and no corner is built, and the two beads that were built stop
+on the same point. Each falls away either side of the line they share, and a
+touch is what the boolean resolves into a flap.
 
-**Do:** cover the seam between a truncated end section and the corner cell the
-same way, with the corner's own ball centre as the anchor on that side. Watch
-that a valence-3 junction has three of these meeting at one solid rather than
-two, which the chain covers never see.
+**Landed:** an end that lands on a vertex another chain also ends at, and that
+got no corner, stops a hair short of it — the hair, or a twentieth of the last
+segment where that is shorter, since a crease whose stations are the intersection
+curve of two curved walls has segments a fraction of the hair long. The stretch
+left bare is bare either way: it is the refused crease's own corner.
+
+| over the 360-configuration sweep | configurations | edges | worst |
+|---|---|---|---|
+| seams covered (previous commit) | 19 | 21 | 2 |
+| ends stopped short | **7** | **17** | 4 |
+
+Two routes were tried against the same sweep and are **not** kept:
+
+- **Running the ends a hair *past* the vertex**, so the two cross instead of
+  touching: 12 configurations and 58 edges. It closes the ones that touch at the
+  vertex and opens others at the extremes of tessellation, which is a coin flip
+  traded for a coin flip rather than a fix.
+- **Letting a corner form where two ends meet** — `chainJunctions` accepting two
+  ends instead of three, the ball being solved against every wall at the vertex
+  either way: the repro goes from two flaps to four. The relaxation alone is not
+  enough; the truncation and coverage rules around it assume three.
+
+### What is left, and it is a different thing again
+
+The 7 remaining are all the pipe tee, and at the fine end they are **not** at the
+vertex: at `$fn = 96` they sit a third of a millimetre away from it, on the plate,
+where the two beads' flanks overlap. That is the crowding the size gate exempts
+creases meeting at a junction from — because a corner cell resolves it — asked of
+a corner that was never built. Closing it means either building that corner (the
+second route above, done properly) or having the gate refuse the neighbours of a
+crease it refuses. Both are about the corner, and neither is about a seam.
 
 **Acceptance:** the sweep comes back with no self-touching configuration on any
-of its three shapes, `case_pipe_tee_equal` dilates and matches, and the 21
-baselines and every unit assertion are unchanged.
+of its three shapes, and `case_pipe_tee_equal` dilates and matches.
+
+---
+
+## D16 — the scalloped bead — **open, and the route this file proposed is wrong**
+
+Carried over from D13's "related, and probably a different defect": the pipe
+tee's weld bead is visibly scalloped at `$fn = 48` and clean at `$fn = 96`.
+Station normals are the face normals of the two triangles adjacent to the crease,
+and on a seam between two curved walls those are slivers, so `TA` and `TB` jitter
+from station to station.
+
+**Measured, on a 6 mm pipe through a 10 mm one at `r = 2`.** The setback varies
+smoothly along a real seam, so the wobble is the mean second difference of
+`|TA - v|` along the chain, as a fraction of the setback:
+
+| | `$fn` = 24 | 48 | 96 |
+|---|---|---|---|
+| as it ships | 3.90 % | 1.35 % | 0.57 % |
+| angle-weighted fan normal | 5.15 % | 1.89 % | 0.91 % |
+| smoothed along the crease, `1 2 1` | 2.94 % | 0.81 % | 0.30 % |
+| smoothed along the crease, `1 6 1` | 3.36 % | 1.07 % | 0.44 % |
+
+**The fan normal is what this file proposed, and it is worse.** Averaging the
+whole fan of a wall's triangles at the vertex, weighted by the angle each
+subtends and bounded by the creases around it, was built and measured: the fan's
+own shape varies from vertex to vertex, so it adds jitter of its own on top of
+the slivers'. Do not rebuild it.
+
+**Smoothing along the crease is better at the wobble and costs tangency.** The
+jitter is along the crease, so a `1 2 1` pass over the stations either side —
+only where the walls turn by less than the threshold, so a crease turning from
+one wall onto the next is not rounded — takes out 40 % of it. But a smoothed
+normal is not the wall's normal, and the bead no longer meets the wall
+tangentially: the pipe tee's blend comes back with a convex edge of 91.7 degrees
+where every rim of the model is square, which is exactly the crease
+`FilletBuilder_test.cc` guards against having invented. Backing the kernel off to
+`1 6 1` keeps that guard green and takes out a fifth of the wobble, with the
+weight chosen against the guard's tolerance rather than from anything about the
+geometry. That is not a fix, it is a tuned constant, and it is not kept.
+
+**What is left to try** is a normal that is a better estimate without being a
+smoothed one — a plane fit over the wall's 1-ring at the vertex, say — with the
+tangency guard above as the acceptance rather than the wobble alone. The wobble
+figures and the guard are both cheap to run; the harness for the first is six
+lines around `spineFrames`.
 
 ---
 
