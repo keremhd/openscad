@@ -81,9 +81,9 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
    hair short takes the sweep from 19 self-touching configurations to 7. What is
    left is the same corner seen from the other side — two beads' flanks
    overlapping where nothing was built to resolve them. See below.
-16. **D16** — the scalloped bead, carried over from D13. The route this file
-   proposed for it is measured and wrong; see below for the numbers and for the
-   one that works on the wobble but costs tangency.
+16. **D16** — the scalloped bead, carried over from D13. Three routes measured,
+   none shipped, and the metric itself corrected: most of this wobble is not the
+   noise the routes were aimed at. See below.
 17. **REVIEW** — an outside read of what ships, in
    [`pr-review.md`](pr-review.md). Four blocking items left — R1, R2, R5 and R7;
    R3 and R4 are closed with D13. Kept
@@ -2103,59 +2103,89 @@ Two routes were tried against the same sweep and are **not** kept:
 
 The 7 remaining are all the pipe tee, and at the fine end they are **not** at the
 vertex: at `$fn = 96` they sit a third of a millimetre away from it, on the plate,
-where the two beads' flanks overlap. That is the crowding the size gate exempts
-creases meeting at a junction from — because a corner cell resolves it — asked of
-a corner that was never built. Closing it means either building that corner (the
-second route above, done properly) or having the gate refuse the neighbours of a
-crease it refuses. Both are about the corner, and neither is about a seam.
+where the two beads' flanks overlap — both tangent to the plate, so where their
+footprints cross they meet on it. That is the crowding the size gate exempts
+creases meeting at a junction from, because a corner cell resolves it, asked of a
+corner that was never built.
+
+**Building that corner does close it, and it opens something else.** With
+`chainJunctions` taking two ends instead of three, the `$fn = 96` case comes back
+clean — the corner fills the valley the two flanks make. But the tool itself then
+self-touches where it did not before: 7 such edges on the `$fn = 32` repro, all
+of them in the plane of a truncated end section, which is the corner cell's
+handover to the bead it closes. Over the sweep it is 10 configurations and 52
+edges against the 7 and 17 that ship.
+
+**It is not the handover depth.** The corner cell already reaches back past the
+section the bead stops at; taking that reach from `2 x` the nudge to `20 x`
+changes nothing. So a two-profile corner cell coincides with its beads for some
+other reason — the obvious candidate is that with only two profiles the hull has
+one of them for a face, where three make it interior — and that is what the next
+attempt has to establish before relaxing the rule.
 
 **Acceptance:** the sweep comes back with no self-touching configuration on any
-of its three shapes, and `case_pipe_tee_equal` dilates and matches.
+of its three shapes, the tool alone stays clean everywhere, and
+`case_pipe_tee_equal` dilates and matches.
 
 ---
 
-## D16 — the scalloped bead — **open, and the route this file proposed is wrong**
+## D16 — the scalloped bead — **open; three routes measured and none ships**
 
 Carried over from D13's "related, and probably a different defect": the pipe
 tee's weld bead is visibly scalloped at `$fn = 48` and clean at `$fn = 96`.
 Station normals are the face normals of the two triangles adjacent to the crease,
-and on a seam between two curved walls those are slivers, so `TA` and `TB` jitter
-from station to station.
+and on a seam between two curved walls those are slivers.
 
-**Measured, on a 6 mm pipe through a 10 mm one at `r = 2`.** The setback varies
-smoothly along a real seam, so the wobble is the mean second difference of
-`|TA - v|` along the chain, as a fraction of the setback:
+### The metric, and the first version of it was wrong
+
+The setback `|TA - v|` is what a scallop is a wobble in, so the measure is how far
+each station's setback sits from what its neighbours say it should be. **Taken as
+a plain second difference it is confounded by station spacing**, which on the
+intersection curve of two cylinders is not uniform: a smooth setback sampled
+unevenly reads as wobble. Interpolating the neighbours by arc length instead
+removes that, and the control says the corrected one is sound — a boss on a plate,
+whose crease is a circle with evenly spaced stations, comes back at **1e-13** of
+its setback, which is to say exactly uniform, at every tessellation. That
+invariant is now pinned in `FilletBuilder_test.cc`; it is the cheapest guard
+there is against a change to the normals.
+
+Corrected, on a 6 mm pipe through a 10 mm one at `r = 2`:
 
 | | `$fn` = 24 | 48 | 96 |
 |---|---|---|---|
-| as it ships | 3.90 % | 1.35 % | 0.57 % |
-| angle-weighted fan normal | 5.15 % | 1.89 % | 0.91 % |
-| smoothed along the crease, `1 2 1` | 2.94 % | 0.81 % | 0.30 % |
-| smoothed along the crease, `1 6 1` | 3.36 % | 1.07 % | 0.44 % |
+| as it ships | 5.41 % | 1.70 % | 1.08 % |
+| smoothed along the crease, `1 2 1` | 4.80 % | 1.41 % | 0.91 % |
 
-**The fan normal is what this file proposed, and it is worse.** Averaging the
-whole fan of a wall's triangles at the vertex, weighted by the angle each
-subtends and bounded by the creases around it, was built and measured: the fan's
-own shape varies from vertex to vertex, so it adds jitter of its own on top of
-the slivers'. Do not rebuild it.
+### What was tried
 
-**Smoothing along the crease is better at the wobble and costs tangency.** The
-jitter is along the crease, so a `1 2 1` pass over the stations either side —
-only where the walls turn by less than the threshold, so a crease turning from
-one wall onto the next is not rounded — takes out 40 % of it. But a smoothed
-normal is not the wall's normal, and the bead no longer meets the wall
-tangentially: the pipe tee's blend comes back with a convex edge of 91.7 degrees
-where every rim of the model is square, which is exactly the crease
-`FilletBuilder_test.cc` guards against having invented. Backing the kernel off to
-`1 6 1` keeps that guard green and takes out a fifth of the wobble, with the
-weight chosen against the guard's tolerance rather than from anything about the
-geometry. That is not a fix, it is a tuned constant, and it is not kept.
+- **An angle-weighted normal over the whole fan of a wall's triangles at the
+  vertex**, bounded by the creases around it — which is what D13 proposed. Built,
+  and **worse**: 3.90 / 1.35 / 0.57 % became 5.15 / 1.89 / 0.91 % on the
+  uncorrected metric. The fan's own shape varies from vertex to vertex, so it
+  adds jitter of its own on top of the slivers'. Do not rebuild it.
+- **Squaring the normals to the crease** — a wall the crease runs along contains
+  it, so its normal there is perpendicular to the crease's direction, and a
+  sliver's is not. Exact in the continuum and free. It moves the wobble by
+  **3e-5 of a percent**: the error in these normals is not a lean along the
+  crease but a tilt within the section plane, which is the component the setback
+  is made of.
+- **Smoothing along the crease, `1 2 1`.** The table above: 11 to 17 % off the
+  wobble, and it costs tangency — the tee's blend comes back with a convex edge
+  of 91.7 degrees where every rim of the model is square, which is exactly the
+  crease `FilletBuilder_test.cc` guards against having invented. Backing the
+  kernel off to `1 6 1` keeps that guard green and takes correspondingly less,
+  with the weight chosen against the guard's tolerance rather than from anything
+  about the geometry. Neither is kept.
 
-**What is left to try** is a normal that is a better estimate without being a
-smoothed one — a plane fit over the wall's 1-ring at the vertex, say — with the
-tangency guard above as the acceptance rather than the wobble alone. The wobble
-figures and the guard are both cheap to run; the harness for the first is six
-lines around `spineFrames`.
+### What that says about the next attempt
+
+The corrected numbers are the useful part: a filter that takes out most of the
+high-frequency noise takes out **an eighth** of this wobble, so the wobble is
+mostly not high-frequency noise. Most of it is the setback genuinely varying
+station to station, because the walls do — which means the next attempt should
+first establish how much of it is error at all, by comparing against the seam of
+two cylinders solved analytically rather than against the mesh's own neighbours.
+Reaching for a better normal before that is what the two routes above did.
 
 ---
 

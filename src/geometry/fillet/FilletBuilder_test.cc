@@ -2268,4 +2268,47 @@ TEST_CASE("junction: two beads left by a refused crease do not touch")
   CHECK(selfTouching(model + tool) == 0);
 }
 
+TEST_CASE("curved crease: a uniform seam gives a uniform setback")
+{
+  // Where a cylinder stands on a plate the crease is a circle, every station on
+  // it is the same station turned, and the setback the tool takes along each
+  // wall is therefore one number for the whole ring. Anything read off the mesh
+  // that varies from station to station - a wall normal taken off the triangles
+  // carrying the crease, above all - shows up here as a setback that wobbles,
+  // and a wobbling setback is a bead with a scalloped edge.
+  //
+  // Measured against the arc-length interpolation of each station's neighbours,
+  // so that uneven spacing is not read as wobble. It is not the metric that
+  // makes this exact: the ring is evenly spaced. A seam between two curved walls
+  // is neither, which is where the wobble that is still open lives.
+  const double r = 2.0;
+  for (const int fn : {24, 48, 96}) {
+    const double threshold = derivedThreshold(discretizer(fn));
+    const auto model = box(60.0, 40.0, 6.0) +
+                       manifold::Manifold::Cylinder(16.0, 10.0, 10.0, fn, false)
+                         .Translate(manifold::vec3(25.0, 20.0, 6.0));
+    const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+    const auto adj = buildEdgeAdjacency(mm.tris);
+    const auto chains = buildChains(mm, selectedEdges(mm, adj, threshold, /*wantConcave=*/true));
+    REQUIRE(chains.size() == 1);
+
+    const auto frames = spineFrames(mm, adj, chains[0], r, /*concave=*/true);
+    std::vector<double> back;
+    for (const auto& f : frames)
+      if (f.valid) back.push_back((f.TA - f.v).norm());
+    REQUIRE(back.size() == static_cast<size_t>(fn));
+
+    double mean = 0.0, worst = 0.0;
+    for (const double b : back) mean += b;
+    mean /= static_cast<double>(back.size());
+    for (size_t i = 0; i < back.size(); ++i) {
+      const double before = back[(i + back.size() - 1) % back.size()];
+      const double after = back[(i + 1) % back.size()];
+      worst = std::max(worst, std::abs(back[i] - 0.5 * (before + after)));
+    }
+    CAPTURE(fn, mean);
+    CHECK(worst < 1e-9 * mean);
+  }
+}
+
 #endif  // ENABLE_MANIFOLD
