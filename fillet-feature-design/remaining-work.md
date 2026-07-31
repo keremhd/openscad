@@ -1854,9 +1854,20 @@ the *same* planes for the subtraction to resolve. Which way it falls is a matter
 of arithmetic, which is what makes the answer move with `$fn`, with `r` and with
 where the boss stands.
 
-Four ways of closing it are priced in the log. Two of them work; both cost
-something, and the log says what, along with what would have to change for
-neither to.
+**Closed** by dropping the seated ball itself at every seam: two cells that met
+on a flat face now overlap in a solid, so there is no face left for the wedges'
+seam to coincide with, and nothing is approximated — the ball at a station is in
+the swept volume by definition and the cells are hulls of polygons inscribed in
+it. On plain models with no junction near them, a boss on a plate goes from 28 of
+378 configurations holed to 2, a cylinder with both rims rounded from 34 of 198
+to none, and the repro above is genus 0 at every `dx` and both tessellations. The
+blend's mesh comes back smaller than today's rather than larger, which is what
+the four routes priced in the log all failed at.
+
+What is left is one different defect: at 64 facets and `r = 1` the bead is about
+as thick as one facet of the wall it sits on, and the ring comes back *severed*
+at a station rather than holed — genus 0, one piece, no warning, in the baseline
+too. `FilletBuilder_test.cc` sweeps around it and names it.
 
 **Acceptance:** the repro comes back genus 0 at `$fn = 48` and `$fn = 96` and at
 `dx = 12`, `16` and `19`; the tool's volume is monotone in `r` and continuous in
