@@ -45,48 +45,60 @@ Two parts:
 
 *Read from the source; not reproduced, as there is no CGAL-only build here.*
 
-### R3 — the round pass cannot tell a bead's tangency from a crease
+### R3 — the blend folds back on itself, and D12 is not closed
 
-**The composition is not the bug and must not be changed.** `fillet()` measures
-its outer half against `blended` — the target with the inner tool unioned in —
-and that is deliberate: D12 is why, and the inner apex of an L is the case that
-needs it. The reflex bead terminates on the end face whose outline is being
-rounded, and a round pass that cannot see the bead has nothing to blend the two
-into each other. An earlier draft of this entry proposed keeping the fillet
-pass's surfaces out of the classifier; that would break exactly this and is
-withdrawn.
+**Not a new defect, and not a review finding — a second repro for D12.** It is
+here because a fold that leaves the output self-touching is not something to open
+a public PR on, whoever owns the fix.
 
-What is wrong is narrower: **a bead meets both its walls tangentially, and the
-classifier reads a feature edge along that contact anyway.**
+**The composition is correct and must not be changed.** `fillet()` measures its
+outer half against `blended`, and that is deliberate: the inner apex of an L is
+exactly the case that needs it, where the reflex bead terminates on the very face
+whose outline is being rounded. Two earlier drafts of this entry proposed keeping
+the fillet pass's surfaces out of the classifier, and then excluding the bead's
+tangency curves. Both are withdrawn, and D12 already contains the measurements
+that kill them:
 
-A plate with a 6 x 6 grid of bosses, `$fn = 32`, `r = 1`, every boss well inside
-the plate. This model is the discriminator, because **every concave chain on it
-is a closed ring** — 1152 selected concave edges is 36 bosses x 32 segments
-exactly, so no bead has an end and no bead runs out onto any face. D12's
-mechanism has nothing to do here, and the round pass should therefore see the
-same convex feature set on `blended` as on the model. It does not:
+- The spurious edges split **zero** one-model-face-one-blend-face. They lie
+  wholly inside the blend, so there is no tangency rim to exclude.
+- They are folds, not slivers — 196 of 216 above 150 degrees on the tee. Grouping
+  the bead's facets by tangency continuity cannot join facets 157 degrees apart,
+  which D12 states in as many words.
+- Threading "these surfaces are mine" from `fillet()` into the builder was
+  implemented end to end, worked completely, and was **reverted on an invariant**:
+  `round_tool` must return the same solid however its input was made. That
+  paragraph in D12 is the standing answer and this entry does not reopen it.
 
-| | the user's model | `blended`, which the round pass is given |
-|---|---|---|
-| merged vertices | 2312 | 11686 |
-| triangles | 4620 | 23672 |
-| distinct source ids | 37 | 1193 |
-| non-manifold edges | **0** | **286** |
-| convex feature edges | 1164 | **1302** (+138) |
-| concave feature edges | 1152 | **122** (should be ~0) |
+#### What is new: the landed fix is geometry-dependent
 
-260 feature edges that cannot be D12's: 138 convex ones the model does not have,
-and 122 concave ones on a solid whose concave creases were just filleted away.
-Both sit on the bead's tangency lines, where the dihedral is zero by construction
-and whatever the classifier reads is tessellation noise.
+D12 closed this by flooring the overshoot at the wall's own sagitta, measured on
+its boss and its tee. That holds where it was measured and fails a short distance
+away. Every row `$fn = 32`, a plain boss on a plate, counted on the blended solid:
 
-The distinct-source-id row is *not* a symptom — it is high because the tool is
-batch-unioned from about that many hulls, each carrying its own id. It is in the
-table only because it is on the same echo line. The non-manifold row belongs to
-R4, not here.
+| | features | > 150 deg | 4-face edges |
+|---|---|---|---|
+| D12's boss (r = 5 cyl, 24x24x4 plate), `r = 2` | 44 | **0** | **0** |
+| tighter boss (r = 3 cyl, 40x40x6 plate), `r = 0.5` | 47 | 3 | 4 |
+| the same, `r = 1` | 57 | **13** | **17** |
+| the same, `r = 2` | 55 | 11 | 16 |
 
-The user-visible symptom is a warning naming a crease they never drew, at a
-coordinate they cannot find in their file:
+At `r = 1` the model alone gives 76 features and no folds; the blend gives 13
+folds, and they are the same 13 edges as the spurious features (+4 convex, and 9
+concave on a solid whose 32 concave edges were just filleted away).
+
+**The folds and the non-manifold edges are one defect.** All 17 carry exactly
+four faces — two sheets meeting along a line — at `z` 6.076 to 6.617 and radius
+3.076 to 3.617 from the boss axis: mid-arc on the bead, not at either tangency
+(`z = 6`, radius 3). R4 below is downstream of this, not separate.
+
+On this single boss Manifold still reports genus 0, so the coincidence is
+geometric rather than combinatorial — two sheets whose vertices land on each
+other, which is what our merge-by-position then reads as a 4-face edge. On the
+6 x 6 grid it becomes a real genus -1.
+
+#### Symptom the user sees
+
+A warning naming a crease they never drew, at a coordinate they cannot find:
 
 ```
 WARNING: fillet: radius 1 does not fit 2 of the 110 crease(s) selected;
@@ -94,43 +106,8 @@ the worst is at [103.8, 30.07, 6.444] - another feature 0.709638 away
 needs the same material.
 ```
 
-`z = 6.444` is a height on the bead, not on any surface in the model.
-
-T1 and the DOC section already record that an already-filleted mesh classifies
-with spurious creases of both signs. This is that same effect reached from inside
-a single `fillet()` call, where the user cannot opt out and `min_angle=` is the
-only lever.
-
-#### The route: exclude the tangency curves, which the first pass already has
-
-A fillet meets its walls tangentially — that is what a fillet is — so **no edge
-lying on a bead's contact line is ever a feature edge, at any tessellation**. The
-contact is C1 by construction, and the fillet pass has already computed every one
-of those curves: they are the `TA`/`TB` contact points along each chain, in
-`ChainContact`. A union does not move geometry, so those coordinates are still
-valid in `blended`. Carry them out of the fillet pass, hand them to the round
-pass, and reject any candidate edge whose endpoints lie on one, tested against a
-spatial hash.
-
-It is precise about what it keeps: the runout lip D12 is about is a bead **end
-cap** outline, not a tangency line, so it survives untouched. And it needs no new
-machinery — only plumbing a result the first pass already produces into the
-second.
-
-Alternatives considered, and why they rank below it:
-
-- **Provenance.** `runOriginalID` is already read, and within `fillet()` both
-  operands are ours, so "which faces are the tool's" is free — genuinely
-  different from cancelled M11, which was a general re-fillet rule over arbitrary
-  user input. But it does not fix this case: a spurious tangency edge has one
-  tool face and one model face, so a both-faces-are-tool test skips it.
-  Complementary at best.
-- **Triangle quality.** Already closed by measurement — see Cancelled, where the
-  two populations came out inverted.
-- **Classify the original and add the bead ends explicitly** as extra chains,
-  since the fillet pass knows where each chain terminated. The most surgical
-  reading of what D12 actually needs, but it is real new machinery and has to
-  reconstruct the lip outline rather than read it off the mesh.
+`z = 6.444` is mid-arc on the bead, not on any surface in the model — the same
+band as the folds above.
 
 ### R4 — the composed result is topologically degenerate
 
@@ -146,19 +123,19 @@ Genus -1 over a single component means an Euler characteristic of 4, which no
 closed orientable surface has: two shells meeting at a pinch. Neither half
 produces it alone. Slicers and any Nef conversion downstream will object.
 
-The mechanism is coincident geometry at the bead's tangency: a mesh that came out
-of a Manifold boolean, and is 2-manifold by construction, is read back from
-`blended` with **286 non-manifold edges** where the model had none — so
-`mergeMesh`'s exact-position merge is fusing bead vertices into pinch points the
-source mesh does not have. Whether the pinch is only in our reading or in the
-output too is the first thing to settle: the genus is Manifold's own verdict on
-the *result*, so at least one of the two is real geometry.
+**Downstream of R3, and probably not a separate item.** The mechanism is the
+folds: on the single boss they are two sheets of the bead meeting along a line,
+four faces to an edge, and the blended solid there carries 286 such edges where
+the model carries none. At one boss that stays geometric — Manifold still calls
+it genus 0 — and on the grid it tips over into a genus the surface cannot have.
 
-Note this is **not** fixed by R3's route. Excluding the tangency curves stops the
-classifier inventing creases there; it does not stop the vertices coinciding.
-R3 and R4 share a cause but need separate fixes. Related to D13's family too, but
-D13's repro is two overlapping bosses and this is a plain grid, so confirm
-separately.
+The test is cheap and worth running before anyone treats this as its own defect:
+**fix the folds and re-measure the genus.** If it goes to 0, this entry closes
+with R3 and needs no separate work. If it does not, the residue is a real second
+cause and worth its own repro.
+
+Related to D13's family too, but D13's repro is two overlapping bosses and this
+is a plain grid, so confirm separately.
 
 ### R5 — a scratch test is still in the suite
 
