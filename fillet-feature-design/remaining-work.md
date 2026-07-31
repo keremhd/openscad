@@ -72,8 +72,10 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
    almost none of it is geometry: one cleanup helper is 98% of the run. It is
    independent of everything above and can be taken at any point. See below.
 15. **REVIEW** — an outside read of what ships, in
-   [`pr-review.md`](pr-review.md). Five blocking items, four worth doing. Kept
-   out of this file because it judges the branch rather than the feature.
+   [`pr-review.md`](pr-review.md). Six blocking items, three worth doing. Kept
+   out of this file because it judges the branch rather than the feature. R7,
+   the comment register, is decided rather than proposed: the LLM voice does not
+   ship, and the rewrite is required before the PR opens.
 16. **DOC**, then **CLEAN**.
 
 ---

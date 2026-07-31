@@ -112,31 +112,61 @@ is two overlapping bosses and this is a plain grid, so confirm separately.
 `FilletBuilder_test.cc`, `TEST_CASE("zzdebug rib", "[.]")`. Hidden behind a Catch2
 tag, but it ships. Delete it.
 
+### R7 — the comments are written in LLM register and have to be rewritten
+
+**Decided, not open.** Between a third and two fifths of `FilletBuilder.cc` is
+prose in a voice the rest of the tree does not use, and it does not ship in that
+form.
+
+Length is not the complaint. A dense geometry kernel earns long comments, and
+several of these record a measurement that cost real time to obtain. The
+complaint is the register:
+
+- **It argues with the reader.** "the whole trick and is not optional", "'then'
+  is the load-bearing word in it", "A right angle is exactly the wrong value, and
+  measurably so". A comment states; it does not persuade.
+- **It narrates how the answer was reached** rather than what the code does.
+  Whole paragraphs are the shape of a debugging session — what was tried, what it
+  left behind, what that looked like — with the conclusion at the end.
+- **It restates the line below it in English.** Several comments are longer than
+  the expression they precede and add nothing a reader of the expression lacks.
+- **It addresses the reader in the second person** and asks rhetorical questions.
+
+What to keep, compressed to a line or two each:
+
+- the value of a non-obvious constant and why it is that value, not another
+  (`kWallTurnDeg = 60`, the `1.5x` threshold, the tie margin);
+- the failure a construction exists to avoid, stated as a fact — "a face resting
+  exactly on a wall makes the boolean resolve two coincident surfaces";
+- an invariant a caller must not break;
+- a genuine surprise in the geometry or in Manifold's behaviour.
+
+What to cut outright: rhetorical framing, the narrative of alternatives tried,
+restatements of the code, and second-person address.
+
+**The comment is not the archive.** The long-form reasoning is already preserved
+in the commit messages, which are detailed and stay in history. Note that
+`fillet-feature-design/` does *not* survive CLEAN, so anything worth keeping that
+is too long for a comment belongs in a commit message, not in a doc that is about
+to be deleted.
+
+Target roughly a third of the current comment volume in `FilletBuilder.cc`, and
+the same pass over `FilletBuilder_internal.h`, `FilletNode.cc` and the two test
+files, which share the voice.
+
+Landed commit messages are not being rewritten — that is history and not worth
+the churn. New ones should use a plain descriptive subject line.
+
 ---
 
 ## Worth doing
 
-### R6 — `FilletBuilder.cc` is 2556 lines
+### R6 — `FilletBuilder.cc` is 2518 lines
 
 Roughly six separable pieces: mesh reduction and classification; chains and brush
 selection; the size gate; the wedge tools; the rounded tools; the debug overlay.
 `FilletBuilder_internal.h` already names the boundaries. A reviewer asked to read
 this as one file will decline.
-
-### R7 — the comment voice will not survive review upstream
-
-Between a third and two fifths of `FilletBuilder.cc` is prose, in a register the
-rest of the tree does not use — "the whole trick and is not optional", "'then' is
-the load-bearing word", "a right angle is exactly the wrong value". The content
-is genuinely valuable, and much of it records a measurement that would otherwise
-be lost. The register is the problem, and so is the volume: the reasoning
-survives compression to a third of its length.
-
-The same applies to the commit messages — one-line imperatives in the same voice,
-none referencing an issue.
-
-This is the author's call, not the reviewer's. It should be made deliberately
-before the PR opens rather than discovered in review.
 
 ### R8 — the warnings are essays
 
