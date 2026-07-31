@@ -15,10 +15,13 @@ closed, and the tools are linear in the crease count.
 
 ## Blocking
 
-Four of the five are this review's own: **R1, R2, R5 and R7**. R3 and R4 are one
-open defect with an owner already — D12 — and R4 is downstream of R3 rather than
-separate; they are written up here because a fold that leaves the output
-self-touching is not something to open a public PR on, whoever fixes it.
+**R1, R2, R5 and R7** are what is left. R3 and R4 are closed: they were one
+defect, and it was neither the composition nor the classifier but the seam two
+cells of a tool meet on at a station — the same coincident plane D13 is about,
+at the rim a ball cannot reach. Covering the whole seam takes the swept
+configurations that touch themselves from 318 of 360 to 19, and this review's own
+repro to none. `remaining-work.md` has the route under D13; D15 is the one place
+the cover has not been applied.
 
 ### R1 — a diagnostic line is echoed on every invocation
 
@@ -51,7 +54,7 @@ Two parts:
 
 *Read from the source; not reproduced, as there is no CGAL-only build here.*
 
-### R3 — the blend folds back on itself, and D12 is not closed
+### R3 — the blend folds back on itself — **CLOSED**, and it was the station seam
 
 **Not a new defect, and not a review finding — a second repro for D12.** It is
 here because a fold that leaves the output self-touching is not something to open
@@ -115,7 +118,7 @@ needs the same material.
 `z = 6.444` is mid-arc on the bead, not on any surface in the model — the same
 band as the folds above.
 
-### R4 — the composed result is topologically degenerate
+### R4 — the composed result is topologically degenerate — **CLOSED with R3**
 
 Same 6 x 6 model:
 
@@ -140,12 +143,15 @@ The test is cheap and worth running before anyone treats this as its own defect:
 with R3 and needs no separate work. If it does not, the residue is a real second
 cause and worth its own repro.
 
-**Not D13's family — confirmed by measurement.** D13's fix (a ball at every seam
-between two canal cells, `log-2026-07-31-d13.md`) changes nothing here: the boss
-above gives 24, 35 and 5 four-face edges at `r = 0.5`, `1` and `2` with the fix
-and without it, and the grid is genus -1 either way. So R3 and R4 are one open
-defect and its owner is D12, which leaves R1, R2, R5 and R7 as the blockers that
-are genuinely this review's.
+**It was D13's family after all, and the measurement above is why that was
+missed.** The ball is inscribed in the section, so it covers the middle of the
+seam and never its rim; adding or removing it moves nothing out at the rim, which
+is exactly where these edges are. Both entries close together with the cover that
+does reach it. Measured on the models above: the boss's blended solid carries no
+non-manifold edge and no spurious crease of either sign where it had 14 and 5,
+the grid is genus 0 rather than -1, and `fillet()` on the grid falls from 26.7 s
+and 17.8 GB to 2.6 s and 0.20 GB — the round pass had been blending a mesh full
+of folds.
 
 ### R5 — a scratch test is still in the suite
 

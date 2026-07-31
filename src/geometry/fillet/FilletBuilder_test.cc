@@ -2136,22 +2136,34 @@ TEST_CASE("curved crease: the bead comes back whole at every tessellation")
   // What a bead along a curved crease is topologically, asked of enough
   // configurations that a defect which only shows at some of them cannot hide.
   //
-  // The one that used to hide there is a slit straight through the bead at one
-  // station: consecutive cells of a chain abut on a shared face, that face is
-  // always the plane of a station, and the wedges and the canals are cut at the
-  // same stations - so the subtraction is handed a pair of coincident faces at
-  // every one of them and comes down on the wrong side of the odd one. Nothing
-  // about the *shape* decides which: on a plain boss it moved with the facet
-  // count, with the radius, and with where on the plate the boss was standing,
-  // so no single model pins it and a sweep is the only honest test. Genus is
-  // what it costs to check, and a hole is exactly what genus sees.
+  // The one that used to hide there is the station seam: consecutive cells of a
+  // chain abut on a shared face, that face is always the plane of a station, and
+  // the wedges and the canals are cut at the same stations - so the boolean is
+  // handed a pair of coincident planes at every one of them and comes down on
+  // the wrong side of the odd one. Nothing about the *shape* decides which: on a
+  // plain boss it moved with the facet count, with the radius, and with where on
+  // the plate the boss was standing, so no single model pins it and a sweep is
+  // the only honest test.
   //
-  // A closed ring of bead is a torus, whatever else is right or wrong about it;
-  // a cylinder with both rims rounded is still a ball. Two shapes, both trivial,
-  // and every configuration of each has one answer.
+  // Both of its outcomes are checked, because neither sees the other. A slit
+  // through the bead is a hole, which genus sees: a closed ring of bead is a
+  // torus and a cylinder with both rims rounded is still a ball. A seam left
+  // standing is a flap of zero thickness, which genus does not see at all -
+  // Manifold calls such a solid sound - so the mesh is asked directly whether it
+  // touches itself, which is also what a convex decomposition downstream will
+  // refuse.
+  //
   // The arc is tessellated the way the node does it - off the same $fn the model
   // was built at - rather than at some fixed count, because a bead drawn finer
   // than the wall it sits on is not a configuration the operator can produce.
+  auto selfTouching = [](const manifold::Manifold& solid) {
+    const MergedMesh sm = mergeMesh(solid.GetMeshGL64());
+    size_t count = 0;
+    for (const auto& [key, tris] : buildEdgeAdjacency(sm.tris))
+      if (tris.size() != 2) ++count;
+    return count;
+  };
+
   auto toolFor = [&](const manifold::Manifold& model, double r, bool concave, double threshold,
                      int segs) {
     const MergedMesh mm = mergeMesh(model.GetMeshGL64());
@@ -2169,12 +2181,6 @@ TEST_CASE("curved crease: the bead comes back whole at every tessellation")
         // Where the boss stands is a coordinate and nothing else, so it must not
         // change the answer. It did.
         for (const double at : {20.0, 25.0, 30.0, 33.0, 38.0}) {
-          // Still open, and a different failure: at 64 facets and r = 1 the bead
-          // is about as thick as one facet of the wall it sits on, and the ring
-          // comes back severed at one station rather than holed - genus 0, one
-          // piece, no warning. log-2026-07-31-d13.md has it; the ball that
-          // closes the slit does not close this.
-          if (fn == 64 && r == 1.0 && at == 33.0) continue;
           const auto model =
             box(60.0, 40.0, 6.0) +
             manifold::Manifold::Cylinder(16.0, 10.0, 10.0, fn, false)
@@ -2183,6 +2189,8 @@ TEST_CASE("curved crease: the bead comes back whole at every tessellation")
           CAPTURE(fn, r, at);
           REQUIRE_FALSE(tool.IsEmpty());
           CHECK(tool.Genus() == 1);
+          CHECK(selfTouching(tool) == 0);
+          CHECK(selfTouching(model + tool) == 0);
         }
       }
     }
@@ -2201,6 +2209,8 @@ TEST_CASE("curved crease: the bead comes back whole at every tessellation")
           CAPTURE(fn, r, at);
           REQUIRE_FALSE(tool.IsEmpty());
           CHECK((model - tool).Genus() == 0);
+          CHECK(selfTouching(tool) == 0);
+          CHECK(selfTouching(model - tool) == 0);
         }
       }
     }

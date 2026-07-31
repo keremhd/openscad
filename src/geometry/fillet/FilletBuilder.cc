@@ -1229,6 +1229,178 @@ void appendChainCells(const Chain& chain, const std::vector<Section>& sections,
   }
 }
 
+// The centroid of a section's points, inside it for the convex sections these
+// tools are built from.
+template <typename Points>
+Vector3d sectionAnchor(const Points& pts)
+{
+  Vector3d sum = Vector3d::Zero();
+  for (const Vector3d& p : pts) sum += p;
+  return pts.empty() ? sum : (sum / static_cast<double>(pts.size())).eval();
+}
+
+// The normal of the plane a section lies in, taken from the widest pair of
+// directions in it rather than from the first two, which on a section whose
+// stored order starts with two nearly collinear points would be noise.
+template <typename Points>
+Vector3d sectionNormal(const Points& pts, const Vector3d& anchor)
+{
+  if (pts.size() < 3) return Vector3d::Zero();
+  const Vector3d e1 = (*pts.begin() - anchor).normalized();
+  Vector3d normal = Vector3d::Zero();
+  for (const Vector3d& p : pts) {
+    const Vector3d cross = e1.cross(p - anchor);
+    if (cross.norm() > normal.norm()) normal = cross;
+  }
+  return normal.norm() < 1e-18 ? Vector3d::Zero() : normal.normalized().eval();
+}
+
+// How far a point inside a section is from the section's own outline. The points
+// are walked in the order they come round the anchor rather than the order they
+// are stored in, since a canal section carries two points off its arc; one that
+// falls inside the outline pulls the answer down, which is the safe direction.
+template <typename Points>
+double sectionClearance(const Points& pts, const Vector3d& anchor)
+{
+  const Vector3d normal = sectionNormal(pts, anchor);
+  if (normal.isZero()) return 0.0;
+  const Vector3d e1 = (*pts.begin() - anchor).normalized();
+  const Vector3d e2 = normal.cross(e1);
+
+  std::vector<std::pair<double, Vector3d>> around;
+  around.reserve(pts.size());
+  for (const Vector3d& p : pts) {
+    const Vector3d d = p - anchor;
+    around.emplace_back(std::atan2(d.dot(e2), d.dot(e1)), p);
+  }
+  std::sort(around.begin(), around.end(),
+            [](const auto& a, const auto& b) { return a.first < b.first; });
+
+  double least = std::numeric_limits<double>::infinity();
+  for (size_t k = 0; k < around.size(); ++k) {
+    const Vector3d& a = around[k].second;
+    const Vector3d& b = around[(k + 1) % around.size()].second;
+    const Vector3d ab = b - a;
+    const double len2 = ab.squaredNorm();
+    const double s = len2 > 0 ? std::clamp((anchor - a).dot(ab) / len2, 0.0, 1.0) : 0.0;
+    least = std::min(least, (anchor - (a + s * ab)).norm());
+  }
+  return std::isfinite(least) ? least : 0.0;
+}
+
+// Cover the flat face two consecutive cells of a chain meet on, at every station
+// they meet at.
+//
+// Cells are cut at stations and both of a rounded tool's unions are cut at the
+// same ones, so a station hands the boolean a pair of coincident planes. Which
+// way it resolves them is arithmetic: the seam is left standing as a flap of
+// zero thickness in the finished solid, or cut through as a slit, and the answer
+// moves with the tessellation, the size and where the model stands.
+//
+// The cover is the station's own section hulled with one point inside each
+// neighbouring cell, which straddles the seam. It approximates nothing: the hull
+// of a planar section with a point either side of its plane is the union of two
+// cones, and each cone is the hull of a subset of one cell — the section is that
+// cell's own end face and the apex a point of the axis it is hulled along. So it
+// reaches the rim of the seam, which is the whole of what has to be covered and
+// is what a ball inscribed in the section cannot do: a ball leaves the annulus
+// at the rim, and the flap survives out there.
+//
+// `anchorOf` is a point inside the section, which is where the apexes are taken
+// from: the two of them have to see each other through the section's interior
+// for the two cones to meet.
+template <typename Section, typename PointsOf, typename AnchorOf>
+void appendSeamCovers(const Chain& chain, const std::vector<Section>& sections,
+                      const PointsOf& pointsOf, const AnchorOf& anchorOf,
+                      const std::vector<SpineInterval>& runs,
+                      std::vector<manifold::Manifold>& cells)
+{
+  const size_t n = sections.size();
+  if (n < 3) return;
+
+  for (size_t i = 0; i < n; ++i) {
+    const Section& sec = sections[i];
+    const Section& prev = sections[(i + n - 1) % n];
+    const Section& next = sections[(i + 1) % n];
+    if (!sec.valid || !prev.valid || !next.valid) continue;
+
+    // How much of a segment of cell there is to reach into on each side. A brush
+    // ends its run partway along a segment, and an apex past that is outside the
+    // cell it was meant to be inside.
+    const double at = static_cast<double>(i);
+    double roomBack = 0.0, roomFwd = 0.0;
+    if (runs.empty()) {
+      if (!chain.closed && (i == 0 || i + 1 == n)) continue;
+      roomBack = roomFwd = 1.0;
+    } else {
+      for (const SpineInterval& iv : runs)
+        if (at > iv.first + 1e-12 && at < iv.second - 1e-12) {
+          roomBack = std::min(1.0, at - iv.first);
+          roomFwd = std::min(1.0, iv.second - at);
+          break;
+        }
+      if (!(roomBack > 0.0 && roomFwd > 0.0)) continue;
+    }
+
+    // Only where the two cells meet at an angle. Where three consecutive
+    // sections lie in a line they are two halves of one prism: the seam has the
+    // same outline on both sides, nothing grazes it, and a cover over it is one
+    // more solid for the boolean to reconcile for nothing.
+    {
+      const auto& here = pointsOf(sec);
+      const auto& before = pointsOf(prev);
+      const auto& after = pointsOf(next);
+      const size_t count = std::min(here.size(), std::min(before.size(), after.size()));
+      double off = 0.0, span = 0.0;
+      for (size_t k = 0; k < count; ++k) {
+        off = std::max(off, (0.5 * (before[k] + after[k]) - here[k]).norm());
+        span = std::max(span, (after[k] - before[k]).norm());
+      }
+      if (off <= 1e-9 * span) continue;
+    }
+
+    // How far along the anchors either way the two apexes are taken. An apex may
+    // travel as far as the neighbouring section's own anchor without leaving the
+    // cell, since the whole of that segment is in it. What bounds it instead is
+    // where the segment between the two apexes crosses the section's plane: that
+    // point has to be inside the section, or the hull bridges round the outside
+    // of it and the cover is no longer made of the two cells' own material. The
+    // crossing point leaves the anchor linearly with the reach — scaling both
+    // apexes about the anchor scales the whole figure — so the reach that keeps
+    // it inside is arithmetic rather than a guess. Half the anchor's clearance of
+    // the section's boundary, which leaves the bridge as much room again.
+    const Vector3d here = anchorOf(sec);
+    const Vector3d back = anchorOf(prev) - here;
+    const Vector3d fwd = anchorOf(next) - here;
+
+    const Vector3d normal = sectionNormal(pointsOf(sec), here);
+    if (normal.isZero()) continue;
+    const double behind = normal.dot(back), ahead = normal.dot(fwd);
+    if (!(behind * ahead < 0.0)) continue;  // both neighbours the same side of the seam
+
+    double reach = 0.5;
+    {
+      const double along = behind / (behind - ahead);
+      const double drift = (back + along * (fwd - back)).norm();
+      const double clearance = sectionClearance(pointsOf(sec), here);
+      if (drift > 0.0) reach = std::min(reach, 0.5 * clearance / drift);
+    }
+    reach = std::min(reach, std::min(roomBack, roomFwd));
+    if (!(reach > 0.0)) continue;
+
+    const Vector3d qBack = here + reach * back;
+    const Vector3d qFwd = here + reach * fwd;
+
+    std::vector<manifold::vec3> pts;
+    for (const Vector3d& p : pointsOf(sec)) pts.emplace_back(p.x(), p.y(), p.z());
+    pts.emplace_back(qBack.x(), qBack.y(), qBack.z());
+    pts.emplace_back(qFwd.x(), qFwd.y(), qFwd.z());
+
+    manifold::Manifold cover = manifold::Manifold::Hull(pts);
+    if (!cover.IsEmpty()) cells.push_back(std::move(cover));
+  }
+}
+
 // The canal has a round cap, so ending it where the wedge ends would let that
 // hemisphere bulge back through the cut plane and scoop a dish out of the flat
 // end face. Run it a segment past instead, in both directions: past the wedge's
@@ -1424,11 +1596,16 @@ manifold::Manifold buildWedgeSolid(const MergedMesh& m,
     return out;
   };
 
+  auto pointsOf = [](const WedgeSection& s) -> const std::array<Vector3d, 5>& { return s.p; };
+
   std::vector<manifold::Manifold> cells;
-  for (const Chain& chain : chains)
-    appendChainCells(chain, wedgeSections(m, adj, chain, t, concave, thresholdDeg),
-                     [](const WedgeSection& s) -> const std::array<Vector3d, 5>& { return s.p; },
-                     lerpWedge, chain.keep, cells);
+  for (const Chain& chain : chains) {
+    const std::vector<WedgeSection> sections =
+      wedgeSections(m, adj, chain, t, concave, thresholdDeg);
+    appendChainCells(chain, sections, pointsOf, lerpWedge, chain.keep, cells);
+    appendSeamCovers(chain, sections, pointsOf,
+                     [](const WedgeSection& s) { return sectionAnchor(s.p); }, chain.keep, cells);
+  }
 
   return unionCells(cells);
 }
@@ -2076,69 +2253,16 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
                      [](const RoundSection& s) -> const std::vector<Vector3d>& { return s.u; },
                      lerpSection, overhang(keepOf[ci], segments), canalCells);
 
-    // A ball at every station the canal runs through, which is what the canal is
-    // the sweep of. Two cells meeting at a station share a flat face; a ball
-    // sitting on it overlaps both of them in a solid instead, so there is no
-    // face there for the wedges' own seam to be coincident with. It is not an
-    // approximation of anything either: the seated ball at a station is in the
-    // swept volume by definition, and the cells are hulls of polygons inscribed
-    // in it, so this only ever cuts nearer the true blend.
-    const std::vector<SpineInterval> canalRuns = overhang(keepOf[ci], segments);
-    for (size_t i = 0; i < n; ++i) {
-      const RoundSection& sec = sections[ci][i];
-      if (!sec.valid || sec.u.empty()) continue;
-      const double radius = (sec.u.front() - sec.C).norm();
-      if (!(radius > 0)) continue;
-      const double at = static_cast<double>(i);
-      bool inside = false;
-      if (canalRuns.empty()) {
-        inside = chains[ci].closed || (i > 0 && i + 1 < n);
-      } else {
-        for (const SpineInterval& iv : canalRuns)
-          if (at > iv.first + 1e-12 && at < iv.second - 1e-12) { inside = true; break; }
-      }
-      if (!inside) continue;
-
-      // Only where the two cells actually cut into each other at an angle. Where
-      // three consecutive sections lie in a line they are two halves of one
-      // prism: the seam between them has the same outline on both sides, nothing
-      // grazes it, and a ball dropped on it is one more solid for the boolean to
-      // reconcile for nothing.
-      {
-        const RoundSection& before = sections[ci][(i + n - 1) % n];
-        const RoundSection& after = sections[ci][(i + 1) % n];
-        if (!before.valid || !after.valid) continue;
-        const size_t count = std::min(sec.u.size(), std::min(before.u.size(), after.u.size()));
-        double off = 0.0, span = 0.0;
-        for (size_t k = 0; k < count; ++k) {
-          off = std::max(off, (0.5 * (before.u[k] + after.u[k]) - sec.u[k]).norm());
-          span = std::max(span, (after.u[k] - before.u[k]).norm());
-        }
-        if (off <= 1e-9 * span) continue;
-      }
-      // As big as fits in the two cells it sits between. Their walls there are
-      // the quads the hull rules between this arc and the neighbouring one, so
-      // the ball is bounded by the nearest of those planes — which on a straight
-      // run is just the arc's own flats, and on a crease whose section swings
-      // hard from station to station is a good deal less. Kept off them by the
-      // same hair as everything else, so it crosses nothing tangentially.
-      double ballR = radius * std::cos(M_PI / segs) - eps;
-      const size_t arcs = std::min(static_cast<size_t>(segs), sec.u.size());
-      for (const size_t j : {(i + n - 1) % n, (i + 1) % n}) {
-        const RoundSection& nb = sections[ci][j];
-        if (!nb.valid) continue;
-        const size_t count = std::min(arcs, nb.u.size());
-        for (size_t k = 0; k + 1 < count; ++k) {
-          const Vector3d& a = sec.u[k];
-          const Vector3d nrm = (sec.u[k + 1] - a).cross(nb.u[k] - a);
-          if (nrm.norm() < 1e-18) continue;
-          ballR = std::min(ballR, std::abs((sec.C - a).dot(nrm.normalized())) - eps);
-        }
-      }
-      if (!(ballR > 0)) continue;
-      canalCells.push_back(manifold::Manifold::Sphere(ballR, segs)
-                             .Translate(manifold::vec3(sec.C.x(), sec.C.y(), sec.C.z())));
-    }
+    // Both unions are cut at the same stations, so every one of them hands the
+    // subtraction a pair of coincident planes. Cover the seams of each.
+    appendSeamCovers(chains[ci], sections[ci],
+                     [](const RoundSection& s) -> const std::array<Vector3d, 5>& { return s.w; },
+                     [](const RoundSection& s) { return sectionAnchor(s.w); }, keepOf[ci],
+                     wedgeCells);
+    appendSeamCovers(chains[ci], sections[ci],
+                     [](const RoundSection& s) -> const std::vector<Vector3d>& { return s.u; },
+                     [](const RoundSection& s) { return s.C; },
+                     overhang(keepOf[ci], segments), canalCells);
   }
 
   // The corner ball as a point set, so the hull below can take it together with

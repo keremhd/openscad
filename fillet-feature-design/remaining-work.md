@@ -56,18 +56,19 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
    bracket's reflex crease was never refused; what `4.4e-16` dropped was the
    convex chain running the end face's outline, where the spine turns from one
    wall onto the next. See below.
-12. **D12** — a concave bead that runs out to an open face leaves its end
-   cross-section standing as a sharp lip over the rounded outline beside it,
-   because both tools are built from the same original child. The obvious
-   composition fix — run the round tool on the already-filleted solid — is
-   strictly better on polyhedral models and destroys every curved one, and
-   `min_angle` does not separate the two cases. What made it destroy them is
-   fixed — the overshoot is measured against the wall it stands past instead of
-   being a fixed hair — but the lip itself is still there, and the composition
-   that closes it is still to be chosen. See below, including what it costs the
-   quoted SCAD equivalent.
-13. **D13** — two overlapping bosses come back with a hole where their seam
-   meets the plate, and the genus moves with the tessellation. See below.
+12. ~~**D12**~~ — **done.** The lip closed by composition: the round pass is
+   measured against the solid the fillet pass left, once the size gate learned to
+   read a blended solid and the overshoot was measured against the wall rather
+   than fixed. The node stays byte-identical to a composition a reader can write.
+   What it appeared to leave behind — folds inside the blend, `pr-review.md`'s R3
+   and R4 — was not D12's but the station seam, and is closed with D13.
+13. ~~**D13**~~ — **done, in two parts.** The hole was cells meeting on a
+   coincident plane at a station; a ball covered the middle of that seam and left
+   its rim, where the same coincidence stood a flap of zero thickness instead —
+   the defect `pr-review.md` calls R3 and R4. Both are closed by covering the
+   whole seam, on the wedge unions as well: 318 of 360 swept configurations
+   self-touching becomes 19, all of them the one shape with a junction in it. See
+   below, and D15 for what is left.
 14. ~~**D14**~~ — **done, and by neither route it named.** The cells are unioned
    in a tree and each pair is swept as it is made, so the helper is handed two
    components a step instead of one per cell. 100 bosses: 112 s / 17.2 GB to
@@ -75,12 +76,15 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
    [`log-2026-07-31-d14.md`](log-2026-07-31-d14.md), which also records why a
    Manifold cannot be taken apart and put back together through its own mesh
    format.
-15. **REVIEW** — an outside read of what ships, in
-   [`pr-review.md`](pr-review.md). Six blocking items, three worth doing. Kept
+15. **D15** — the seams that are left are where a bead ends at a junction, which
+   is the one place the cover has not been applied. See below.
+16. **REVIEW** — an outside read of what ships, in
+   [`pr-review.md`](pr-review.md). Four blocking items left — R1, R2, R5 and R7;
+   R3 and R4 are closed with D13. Kept
    out of this file because it judges the branch rather than the feature. R7,
    the comment register, is decided rather than proposed: the LLM voice does not
    ship, and the rewrite is required before the PR opens.
-16. **DOC**, then **CLEAN**.
+17. **DOC**, then **CLEAN**.
 
 ---
 
@@ -1491,7 +1495,7 @@ case checks are unchanged.
 
 ---
 
-## D12 — a bead that ends on an outer face leaves a sharp lip over the round
+## D12 — a bead that ends on an outer face leaves a sharp lip over the round — **DONE**
 
 **Where the inner blend meets the outer one, the outer one does not know the
 inner one happened.** `fillet()` builds both tools from the *same* original child:
@@ -1782,7 +1786,7 @@ lands has to expect the rib to move.
 
 ---
 
-## D13 — two bosses that overlap leave a hole where their seam meets the plate
+## D13 — two bosses that overlap leave a hole where their seam meets the plate — **DONE**
 
 **A model with no holes comes back with one.** Two overlapping cylinders on a
 plate, filleted at `r = 2`:
@@ -1877,6 +1881,50 @@ too. `FilletBuilder_test.cc` sweeps around it and names it.
 `dx = 12`, `16` and `19`; the tool's volume is monotone in `r` and continuous in
 `dx`; no new warnings anywhere; the 21 regression baselines and every case in
 `FilletBuilder_test.cc` and `FilletCompare_test.cc` unchanged.
+
+### The ball is replaced by a cover, and R3/R4 go with it — **DONE**
+
+The ball closed the slit and left the other half of the same defect standing: it
+is inscribed in the section, so it never reaches the rim, and in that annulus the
+two cells still met on a coincident plane. What the boolean left there was a flap
+of zero thickness rather than a hole — which genus does not see, so nothing in
+the suite was looking at it. It is what `pr-review.md` reported as R3 and R4, and
+what made a convex decomposition downstream refuse the result.
+
+Covered instead: the station's own section hulled with one point a little way
+into each neighbouring cell. That reaches the rim, no face of it lies in the seam
+plane, and it approximates nothing — the hull of a planar section with a point
+either side of its plane is two cones, each the hull of a subset of one cell. How
+far the apexes reach is arithmetic rather than a constant: the crossing point of
+the segment between them leaves the anchor linearly with the reach, so the reach
+is set from the anchor's own clearance of the section's outline. A guessed 0.5
+puts that crossing outside the section on a bend, where the cover leaves the two
+cells and the hull bridges round the outside of them.
+
+Both unions are cut at the same stations, so both are covered — the wedge tools
+get it too, and `chamfer_tool` was carrying the same flaps.
+
+Swept over 360 configurations, three shapes x six tessellations x four radii x
+five positions, counting edges of the applied result with more than two faces:
+
+| | configurations self-touching | such edges | worst one |
+|---|---|---|---|
+| ball at the seam | **318 of 360** | 17600 | 233 |
+| seam covered | **19 of 360** | 21 | 2 |
+
+A boss on a plate goes 102 of 120 to none, a cylinder with both rims rounded 112
+of 120 to none, and every one of the 19 left is the pipe tee — see D15. R3's own
+repro is clean: the blended solid a tighter boss gives the round pass carries no
+non-manifold edge and no spurious crease of either sign, where it had 14 and 5,
+and R4's grid is genus 0 rather than -1. The composed `fillet()` on that grid
+falls from 26.7 s and 17.8 GB to 2.6 s and 0.20 GB, because the round pass was
+being handed a mesh full of folds to blend.
+
+The suite says the same from the other side: `case_two_bosses` and both sizes of
+`case_dome_on_plate` now dilate and match, where CGAL had refused them, and the
+severed-bead configuration `FilletBuilder_test.cc` used to sweep around builds.
+The sweep test now checks self-touching as well as genus, since neither sees the
+other.
 
 ### Related, and probably a different defect
 
@@ -2008,6 +2056,29 @@ cell per seam — roughly half again as many. Whatever is done here wants
 re-measuring after that lands, and the first bullet above would close both at
 once: a cell that already overlaps its neighbour has no coincident face left for
 a bridging cell to cover.
+
+---
+
+## D15 — the last seams are at a junction
+
+The seam covers reach every station of a chain and no further, so where a bead
+ends at a corner the cell it hands over to — the corner cell, and the corner ball
+inside it — still meets it on the plane of that end section. It is the same
+defect in the one place the same fix has not been applied.
+
+Measured on the sweep above: every self-touching configuration left is the pipe
+tee, which is the only shape in it with a junction, and each carries one or two
+such edges against the 96 the same model carried before. Neither genus nor the
+regression baselines see them; the sweep and a convex decomposition do.
+
+**Do:** cover the seam between a truncated end section and the corner cell the
+same way, with the corner's own ball centre as the anchor on that side. Watch
+that a valence-3 junction has three of these meeting at one solid rather than
+two, which the chain covers never see.
+
+**Acceptance:** the sweep comes back with no self-touching configuration on any
+of its three shapes, `case_pipe_tee_equal` dilates and matches, and the 21
+baselines and every unit assertion are unchanged.
 
 ---
 

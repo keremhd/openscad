@@ -119,34 +119,13 @@ case_junction_flat_apex     small  sandwich  FAIL
 # case keeps the orientation whose picture is legible.
 case_pipe_tee_equal     small  sandwich  FAIL
 
-# The two curved-crease cases added for the last case queue are red the same
-# way, and both were measured before being written down rather than assumed to
-# be the tee's problem again.
-#
-# The two bosses build correctly. The chains, the two valence-3 junctions and
-# their corner solves are pinned exactly in FilletBuilder_test.cc, the tool is
-# one connected piece of the genus its topology demands, and the applied result
-# is a clean solid that Manifold reports as NoError, genus 0. Only the dilation
-# refuses it, and the ceiling is how much filleted curved surface the Nef
-# conversion has to swallow rather than anything about a junction: ONE boss on
-# the same plate dilates at $fn = 24 and refuses at 48, with no junction in it
-# either way, and the two bosses dilate at $fn = 12. Radius makes no difference
-# — 1, 2, 3 and 4 all refuse — and neither does the clip, whole model or a box
-# around one junction alone.
-#
-# The dome is the same story with one wall doubly curved instead of singly. It
-# refuses at every sphere tessellation down to $fn = 16, which is coarser than
-# the shape is about, so there is no version of this case that keeps its
-# question and passes. Its oversize variant is unaffected: an empty tool leaves
-# "sandwich" comparing the model with itself, and it passes.
-#
-# Both are the harness gap next-cases.md already names — "sandwich" cannot see a
-# tangency, because CGAL will not dilate a result whose surfaces meet
-# tangentially, and a fillet meeting its wall IS that. Neither line is about the
-# solid underneath it.
-case_two_bosses         small  sandwich  FAIL
-case_dome_on_plate      small  sandwich  FAIL
-case_dome_on_plate      large  sandwich  FAIL
+# Nothing is listed for the two curved-crease cases any more, and what closed
+# them was not the harness. Both were red because CGAL would not dilate their
+# applied result, and the reason was in the solid: the tool's cells are cut at
+# stations and met there on a coincident face, which the boolean resolved into a
+# flap of zero thickness. A dilation goes through a convex decomposition, and a
+# decomposition will not take a solid that touches itself. With the seams covered
+# the two bosses and the dome at both sizes dilate and match.
 
 # Nothing is listed for the brush case any more. The tool clips its spine
 # against the brush and caps the bead flat and square to the crease, which is
