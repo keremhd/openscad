@@ -14,6 +14,11 @@ time and memory; that has a repro and an acceptance test, so it is
 
 ## Blocking
 
+Four of the five are this review's own: **R1, R2, R5 and R7**. R3 and R4 are one
+open defect with an owner already — D12 — and R4 is downstream of R3 rather than
+separate; they are written up here because a fold that leaves the output
+self-touching is not something to open a public PR on, whoever fixes it.
+
 ### R1 — a diagnostic line is echoed on every invocation
 
 The `message_group::Echo` mesh-statistics line at the top of `buildFilletTool`
@@ -134,8 +139,12 @@ The test is cheap and worth running before anyone treats this as its own defect:
 with R3 and needs no separate work. If it does not, the residue is a real second
 cause and worth its own repro.
 
-Related to D13's family too, but D13's repro is two overlapping bosses and this
-is a plain grid, so confirm separately.
+**Not D13's family — confirmed by measurement.** D13's fix (a ball at every seam
+between two canal cells, `log-2026-07-31-d13.md`) changes nothing here: the boss
+above gives 24, 35 and 5 four-face edges at `r = 0.5`, `1` and `2` with the fix
+and without it, and the grid is genus -1 either way. So R3 and R4 are one open
+defect and its owner is D12, which leaves R1, R2, R5 and R7 as the blockers that
+are genuinely this review's.
 
 ### R5 — a scratch test is still in the suite
 
