@@ -6,9 +6,10 @@ and are judged only where CLEAN already asks a question about them.
 
 Measured against `7b18d5aec` with a build made from a clean tree at that commit.
 
-**Performance is not in this document.** The rounded tools are superquadratic in
-time and memory; that has a repro and an acceptance test, so it is
-[D14](remaining-work.md) — a defect — rather than a review comment.
+**Performance is not in this document.** The rounded tools were superquadratic in
+time and memory; that had a repro and an acceptance test, so it was
+[D14](remaining-work.md) — a defect — rather than a review comment. D14 is now
+closed, and the tools are linear in the crease count.
 
 ---
 

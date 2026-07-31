@@ -68,9 +68,13 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
    quoted SCAD equivalent.
 13. **D13** — two overlapping bosses come back with a hole where their seam
    meets the plate, and the genus moves with the tessellation. See below.
-14. **D14** — the rounded tools are superquadratic in time and memory, and
-   almost none of it is geometry: one cleanup helper is 98% of the run. It is
-   independent of everything above and can be taken at any point. See below.
+14. ~~**D14**~~ — **done, and by neither route it named.** The cells are unioned
+   in a tree and each pair is swept as it is made, so the helper is handed two
+   components a step instead of one per cell. 100 bosses: 112 s / 17.2 GB to
+   7.8 s / 2.5 GB, linear. See below, and
+   [`log-2026-07-31-d14.md`](log-2026-07-31-d14.md), which also records why a
+   Manifold cannot be taken apart and put back together through its own mesh
+   format.
 15. **REVIEW** — an outside read of what ships, in
    [`pr-review.md`](pr-review.md). Six blocking items, three worth doing. Kept
    out of this file because it judges the branch rather than the feature. R7,
@@ -1887,7 +1891,28 @@ each wall is the obvious thing to measure against.
 
 ---
 
-## D14 — the sweep that tidies up after the cells costs more than everything else together
+## D14 — the sweep that tidies up after the cells costs more than everything else together — **DONE, and by neither route below**
+
+Done. The sweep is still `Decompose()`; what changed is when it is asked. The
+cells are unioned in a tree and each pair is swept as it is made, so the helper
+never sees more than the two components a single pair can produce, and its cost
+becomes the mesh rather than (components x mesh). The 100-boss grid goes from
+112 s / 17.2 GB to 7.8 s / 2.5 GB and is linear in the boss count; `chamfer_tool`
+does not regress; the 21 baselines and all 1175 assertions pass.
+
+Two things below are struck rather than left open, both measured:
+
+- **The union-find route was built and is rejected.** Its labelling is exactly
+  right, and the rebuild is fatal: `Manifold(MeshGL64)` re-runs `CleanupTopology`
+  and `RemoveDegenerates`, which on a self-touching tool solid resolves the
+  four-face sheets differently from however they arrived. A round trip through
+  the mesh format loses volume on its own and opens a hole — genus 1 becomes 2.
+  A component cannot be removed from outside Manifold.
+- **The first bullet's `kCanalOverlap` does not exist**, and never did. D13's log
+  struck it already.
+
+See [`log-2026-07-31-d14.md`](log-2026-07-31-d14.md) for the tables. What follows
+is the item as it was written.
 
 **The rounded tools are superquadratic in what they build, and the geometry is
 not where the time goes.** A plate carrying an N x N grid of bosses,

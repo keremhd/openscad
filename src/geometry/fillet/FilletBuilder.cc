@@ -1157,11 +1157,26 @@ manifold::Manifold dropVolumelessParts(manifold::Manifold solid)
   return manifold::Manifold::BatchBoolean(solidParts, manifold::OpType::Add);
 }
 
+// Union in a tree, sweeping each pair as it is made. Decompose() materialises a
+// mesh of its own per component, so the sweep costs (components x mesh size),
+// and a tool carries one shell per cell contact: sweeping the finished union
+// instead is quadratic, and cost 112 s and 17 GB on a plate of a hundred bosses.
+// A pair can leave only the one shell between its two members, so the tree hands
+// Decompose two components a step whatever the tool's size.
 manifold::Manifold unionCells(std::vector<manifold::Manifold>& cells)
 {
   if (cells.empty()) return {};
-  if (cells.size() == 1) return cells.front();
-  return dropVolumelessParts(manifold::Manifold::BatchBoolean(cells, manifold::OpType::Add));
+
+  std::vector<manifold::Manifold> merged;
+  while (cells.size() > 1) {
+    merged.clear();
+    merged.reserve((cells.size() + 1) / 2);
+    for (size_t i = 0; i + 1 < cells.size(); i += 2)
+      merged.push_back(dropVolumelessParts(cells[i] + cells[i + 1]));
+    if (cells.size() % 2) merged.push_back(cells.back());
+    cells.swap(merged);
+  }
+  return cells.front();
 }
 
 // Hull each consecutive pair of cross-sections along a chain, appending one cell
