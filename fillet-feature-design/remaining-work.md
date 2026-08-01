@@ -88,12 +88,16 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
    Measured and dead: the count of ends alone breaks the documented thin-slab
    idiom, and no threshold on the opening angle separates the cases — 90 degrees
    comes back clean while 75 and 105 do not. See below.
-16. **D16** — the scalloped bead, written up under D13 and independent of it and
-   of D15. Three routes measured, none shipped, and the metric itself corrected:
-   most of this wobble is not the noise the routes were aimed at. D15's control
-   settles the one link a reader would guess, since both defects show on the pipe
-   tee: the cusp appears on a crease whose setback is uniform to 1e-13, so the
-   wobble is not what causes it. See below.
+16. ~~**D16**~~ — **closed, and nothing ships.** Five rules were built and each
+   was broken by a shape a modeller would draw. What came out is a congruence: a
+   flat land between two chamfers presents the same facet, the same seams and the
+   same normals beyond them as one facet of a coarse cylinder, so no rule reading
+   a bounded neighbourhood of the crease can separate them, and every rule must
+   choose which one to be wrong about. The cylinder's error goes to zero as the
+   model is refined and the land's does not, so declining is right — and
+   declining is what ships already does. The scallop converges: visible at
+   `$fn = 48`, clean at 96. Independent of D15, whose control settles the one
+   link a reader would guess. See below, and do not build a sixth rule.
 17. **D17** — the two configurations still self-touching after D13 and D15, both
    the pipe tee and neither at a corner. One is a station seam whose cover does
    not reach the rim, and predates both; the other is neither union but their
@@ -2356,63 +2360,158 @@ configuration on any of its three shapes, tool alone and applied both.
 
 ---
 
-## D16 — the scalloped bead — **open; three routes measured and none ships**
+## D16 — the scalloped bead — **closed: the tessellation cannot be read for what it stands for, and declining is right**
 
-Carried over from D13's "related, and probably a different defect": the pipe
-tee's weld bead is visibly scalloped at `$fn = 48` and clean at `$fn = 96`.
-Station normals are the face normals of the two triangles adjacent to the crease,
-and on a seam between two curved walls those are slivers.
+The pipe tee's weld bead is visibly scalloped at `$fn = 48` and clean at `$fn = 96`.
+Five rules were built and measured against it. None ships. What came out instead
+is a statement about the problem: the information the operator would need is not
+in the mesh, and shipping's behaviour is the correct one of the two available
+answers. The scallop converges, so it meets the standard as it stands.
 
-### The metric, and the first version of it was wrong
+### The mechanism, which is established
 
-The setback `|TA - v|` is what a scallop is a wobble in, so the measure is how far
-each station's setback sits from what its neighbours say it should be. **Taken as
-a plain second difference it is confounded by station spacing**, which on the
-intersection curve of two cylinders is not uniform: a smooth setback sampled
-unevenly reads as wobble. Interpolating the neighbours by arc length instead
-removes that, and the control says the corrected one is sound — a boss on a plate,
-whose crease is a circle with evenly spaced stations, comes back at **1e-13** of
-its setback, which is to say exactly uniform, at every tessellation. That
-invariant is now pinned in `FilletBuilder_test.cc`; it is the cheapest guard
-there is against a change to the normals.
+Station normals are the face normals of the triangles carrying the crease, and
+they are exact — out-of-plane components measure 1e-16, so nothing here is
+sliver noise. The trouble is that stations fall into two families:
 
-Corrected, on a 6 mm pipe through a 10 mm one at `r = 2`:
+- where the crease **crosses a seam** of a wall, the two incident chain edges lie
+  in different facets and their average is the smooth wall's normal there
+  **exactly**, because a point on the boundary between two chords has the
+  direction the surface has there;
+- where the other wall's tessellation drops a station **inside a facet**, both
+  incident edges carry the same facet, and its normal is off the wall's by up to
+  half the facet angle — 3.147 degrees measured at `$fn = 48`, against a half
+  facet of 3.75.
 
-| | `$fn` = 24 | 48 | 96 |
-|---|---|---|---|
-| as it ships | 5.41 % | 1.70 % | 1.08 % |
-| smoothed along the crease, `1 2 1` | 4.80 % | 1.41 % | 0.91 % |
+On a seam between two curved walls the two families alternate, so the setback
+steps back and forth between them. That alternation is the staircase that reads
+as a scallop. It is also why a cylinder standing on a plate is exactly uniform:
+every station there is a seam crossing, and there is no second family to
+alternate with.
 
-### What was tried
+### The measure, and the first two were wrong
 
-- **An angle-weighted normal over the whole fan of a wall's triangles at the
-  vertex**, bounded by the creases around it — which is what D13 proposed. Built,
-  and **worse**: 3.90 / 1.35 / 0.57 % became 5.15 / 1.89 / 0.91 % on the
-  uncorrected metric. The fan's own shape varies from vertex to vertex, so it
-  adds jitter of its own on top of the slivers'. Do not rebuild it.
-- **Squaring the normals to the crease** — a wall the crease runs along contains
-  it, so its normal there is perpendicular to the crease's direction, and a
-  sliver's is not. Exact in the continuum and free. It moves the wobble by
-  **3e-5 of a percent**: the error in these normals is not a lean along the
-  crease but a tilt within the section plane, which is the component the setback
-  is made of.
-- **Smoothing along the crease, `1 2 1`.** The table above: 11 to 17 % off the
-  wobble, and it costs tangency — the tee's blend comes back with a convex edge
-  of 91.7 degrees where every rim of the model is square, which is exactly the
-  crease `FilletBuilder_test.cc` guards against having invented. Backing the
-  kernel off to `1 6 1` keeps that guard green and takes correspondingly less,
-  with the weight chosen against the guard's tolerance rather than from anything
-  about the geometry. Neither is kept.
+**The first was confounded by spacing.** A plain second difference of the setback
+reads a smooth setback sampled unevenly as wobble. Interpolating the neighbours
+by arc length removes it, and the boss-on-a-plate control comes back at 1e-13.
 
-### What that says about the next attempt
+**The second was circular, and it was quoted as a result before it was checked.**
+`spineFrames` sets `C = v + (r/cos(phi/2))·bis` and `TA = C − r·nA`, so
+`|TA − v| ≡ r·tan(phi/2)` identically, for any two normals whatever. A test of
+the setback against `r·tan(phi_exact/2)` is therefore a test of the angle between
+the two normals written in setback units. It can say nothing about the ball, the
+arc or the tangency, and "machine zero against analytic truth" was retracted.
 
-The corrected numbers are the useful part: a filter that takes out most of the
-high-frequency noise takes out **an eighth** of this wobble, so the wobble is
-mostly not high-frequency noise. Most of it is the setback genuinely varying
-station to station, because the walls do — which means the next attempt should
-first establish how much of it is error at all, by comparing against the seam of
-two cylinders solved analytically rather than against the mesh's own neighbours.
-Reaching for a better normal before that is what the two routes above did.
+The measure that does look at what was built is the exact rolling-ball envelope:
+for every bead vertex outside the model, `min_u |p − C(u)| − r` over the exact
+centre locus. For a boss on a plate that locus is the circle of radius
+`bossR + r` at height `r`; for the tee it is the intersection of the two offset
+cylinders. It reads 1e-15 on the plate case, where the planar corner the frame is
+built from is exact, so the measure is sound.
+
+### The congruence, which is the finding
+
+Take a flat land of width `w` bounded by two chamfers that turn by `delta` each
+way. Its normal is `(0, 0, 1)` and the two walls across its seams are
+`(sin delta, 0, cos delta)` and `(−sin delta, 0, cos delta)`.
+
+Now take one facet of a prism approximating a cylinder of radius
+`w / (2 sin(delta/2))`, tessellated at facet angle `delta`. Its normal is
+`(0, 0, 1)` and the two facets across its seams are `(sin delta, 0, cos delta)`
+and `(−sin delta, 0, cos delta)`.
+
+The facet, both bounding seams, both normals beyond them, and the record of what
+the crease crossed to enter and to leave are **the same in both**. The correct
+answers are not: on the land the wall is exactly that plane, and on the cylinder
+it is a curve whose normal at the station is up to half a facet away from it.
+
+The congruence extends as far as one likes. Add concentric chamfer steps, each
+turning by `delta`: the two models agree out to any chosen number of facets and
+differ only where the stepping stops. So **no rule that reads a bounded
+neighbourhood of the crease can separate them**, and every rule must choose which
+of the two to be wrong about.
+
+The convergence criterion settles the choice. The cylinder's error is half a
+facet angle, which goes to zero as the model is refined. The land's error does
+not: `delta` is a modelled feature and stays where the modeller put it. Being
+wrong about the cylinder is therefore the error that disappears and being wrong
+about the land is the error that does not — so declining is correct, and
+declining is what ships already does.
+
+Declining only in the ambiguous case is not available either. On a cylinder the
+crease enters a facet over one seam and leaves over the opposite one, which is
+exactly the configuration the congruence makes ambiguous, so a rule that declines
+there declines everything it exists for.
+
+Doing better needs the surface the tessellation stands for, before it was
+tessellated. That is outside what this operator is given.
+
+### The five rules, and what each broke
+
+Each was built, measured, and broken by a shape a modeller would draw. Recorded
+so that none is rediscovered.
+
+| rule | what it did | what broke it |
+|---|---|---|
+| **Per-patch identity** | flooded the coplanar patch and blended a station inside it toward the two nearest bounding seams | a flat wall whose rim is rounded or chamfered: the rim's seams fall under the crease threshold, and the bead lifted **0.089** off a face the model states is flat |
+| **Far-patch reach** | a seam speaks only as far as the wall behind it is deep | silences a rim of many narrow facets and not one of a single wide facet: a 2.6 degree chamfer 22 mm wide broke it, **~7800x** worse than shipping (6.2e-6 to 4.8e-2) |
+| **Per-station two seams** | blend only between the seam the crease crossed to get in and the one it crosses to get out, and only if they are two different walls | a turned plate: a lathed rim is not one plane, so the crease leaves over one facet of the cone and returns over another. Off by **0.118** at 7.8 degrees, 0.0446 at 2.6 |
+| **One uniform convention** | drop the averaging entirely and give every station the face normal it arrives on, so nothing alternates | worse than shipping at every tessellation — 6.43 against 5.81 % rms at `$fn = 24` — because averaging **halves** the step between adjacent facets and the raw face normal restores it in full. The alternation goes and a bigger staircase replaces it |
+| **Betweenness** | blend only where the facet's own normal lies between what the two seams say and in their plane, so a wall that turns is told from one that does not | a flat land spanning **two opposite** chamfers: their normals are `(±sin delta, 0, cos delta)`, so the arc between the two seam normals passes exactly through the vertical and every condition passes. Off by **0.0150** symmetric at 2.6 degrees and **0.0515** asymmetric at 2.6/7.8, and refining from `$fn = 24` to 384 makes it worse and then flat |
+
+The fourth is worth keeping in mind for its own sake: the scallop is not an
+artefact of mixing two conventions. It is the error in the inside-facet normals,
+and a uniform convention makes it larger.
+
+Betweenness was the best of the five and is the one the congruence explains. It
+is small, angular, uses no scale, fixed everything the three before it broke, and
+its tee residual converges faster than shipping's. It still had to choose, and it
+chose to blend.
+
+### What the numbers were
+
+Setback error against the closed form on a 6 mm branch through a 10 mm run at
+`r = 2`, as a percentage of the setback, rms. Two independent extractions
+disagree on the absolute figures while agreeing on the direction and the slope,
+so both are recorded:
+
+| | `$fn` = 24 | 48 | 96 | 192 |
+|---|---|---|---|---|
+| shipping — review's extraction | 3.71 | 2.05 | 1.02 | 0.490 |
+| betweenness — review's extraction | 2.90 | 1.62 | 0.504 | 0.186 |
+| shipping — branch's extraction | 5.81 | 2.00 | 1.40 | 0.678 |
+| betweenness — branch's extraction | 4.11 | 1.03 | 0.265 | 0.145 |
+
+Both say the same two things: shipping's scallop **converges**, and betweenness
+converges faster — 2.6x better at `$fn = 192` and still improving. On the built
+surface, against the exact envelope, the tee's worst went 0.0701 to 0.0558 at
+`$fn = 48`.
+
+### What ships, and why that is acceptable
+
+Nothing. The operator keeps the face normals it has.
+
+The scallop is real and it converges: visible at `$fn = 48`, clean at 96, and
+falling with every refinement. It is the tessellation showing through a bead
+drawn on a tessellated wall, and the modeller's own control — the facet count —
+removes it. Under the standard that the error must converge and must not be
+made worse, shipping already passes.
+
+Not to be confused with D18, which is the other error on the same bead: the frame
+seats the ball by the planar rule, `r·tan(phi/2)`, which two curved walls do not
+obey. That one is a smooth offset along the seam rather than a ripple, it is 1 to
+2 per cent of `r`, and it does **not** converge. It is why `$fn = 96` looks clean
+while measuring no better.
+
+### What is on the branch
+
+The D16 worktree branch is the record rather than a change to merge. It carries
+the surface measure against the exact centre locus, a guard that pins the
+per-station contract on the tee, a flat-wall guard over 25 rim configurations
+(square, rounded, four chamfer widths and angles, a turned rim and a plate
+chamfered on four sides, each with the boss centred and against the rim), and
+before/after/facet-only renders of the tee bead at `$fn = 48`. Anyone reopening
+this should start from the congruence above and the renders, not from a new rule.
 
 ---
 
