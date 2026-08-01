@@ -1469,18 +1469,26 @@ SpineInterval endWindow(const MergedMesh& m, const Chain& chain, bool front, dou
 // from it: `reach` of crease measured back from the end vertex, which is where
 // the bead is truncated and the corner takes over.
 //
-// A junction is built only where every chain meeting there covers it. Two
-// reasons, and the second is why touching the vertex is not enough. A corner
-// cell closing three beads when only two of them exist is a lump sitting on the
-// model rather than a corner. And the cell is a fixed size — it is hulled from
-// the seated ball and the sections the beads stop at, and there is no
-// perpendicular to clip it against in three directions at once — so a brush that
-// reaches a corner by a fraction of the setback still gets the whole of it,
-// which is the brush contract broken by however much was missing. Along an edge
-// the same brush is honoured to the micron. The decision is therefore binary at
-// the setback: cover it and get a corner, fall inside it and get none — and the
+// A junction is built only where every chain arriving there covers it, and why
+// touching the vertex is not enough is that the cell is a fixed size — it is
+// hulled from the seated ball and the sections the beads stop at, and there is no
+// perpendicular to clip it against in three directions at once. So a brush that
+// reaches a corner by a fraction of `reach` still gets the whole of it, which is
+// the brush contract broken by however much was missing, while along an edge the
+// same brush is honoured to the micron. The decision is therefore binary at
+// `reach`: cover it and get a corner, fall inside it and get none — and the
 // stretch that fell inside is dropped with the corner rather than built as a stub
 // meeting nothing, which is what dropUncoveredCorners does to it.
+//
+// `reach` is the tool's own size, which is what every caller passes: r for a
+// rounded tool, and not the trigonometric setback r * tan(phi/2) the
+// cross-section works in. The two agree only at a right angle.
+//
+// A crease that was never selected is a different thing and does not stop a
+// corner. Two beads that were built still meet at the vertex whether the third
+// crease was refused for size, turned the other way or fell below the threshold,
+// and they cusp there if nothing closes it. What this rule protects is the corner
+// the caller reached for and did not cover.
 bool endAnchored(const MergedMesh& m, const Chain& chain, bool front, double reach)
 {
   if (chain.keep.empty()) return true;
@@ -1709,8 +1717,18 @@ std::vector<RoundSection> roundSections(const MergedMesh& m,
   return out;
 }
 
-std::vector<int> dropUncoveredCorners(const MergedMesh& m, std::vector<Chain>& chains, double r)
+std::vector<int> dropUncoveredCorners(const MergedMesh& m, std::vector<Chain>& chains,
+                                      const std::vector<Chain>& candidates, double r,
+                                      std::set<int> *uncoveredOut)
 {
+  // How many creases the corner has, asked of the selection before the brush.
+  std::map<int, int> arms;
+  for (const Chain& chain : candidates) {
+    if (chain.closed || chain.verts.size() < 2) continue;
+    ++arms[chain.verts.front()];
+    ++arms[chain.verts.back()];
+  }
+
   std::map<int, int> touching, covering;
   for (const Chain& chain : chains) {
     if (chain.closed || chain.verts.size() < 2) continue;
@@ -1722,12 +1740,31 @@ std::vector<int> dropUncoveredCorners(const MergedMesh& m, std::vector<Chain>& c
     }
   }
 
-  // Three ends is what makes a vertex a corner, and three covered ends is what
-  // builds one; a vertex over the first and short of the second is a corner that
-  // cannot be had, and everything cut short at it goes.
+  // Three creases is what makes a corner, and covering every one of them for `r`
+  // back from the vertex is what lets it be built; a vertex over the first and
+  // short of the second is a corner that cannot be had, and everything cut short
+  // at it goes — the stubs here, and the cell itself through the set handed back.
+  //
+  // Both counts have to be of the same arms or the rule inverts. Measured against
+  // the arms that survived the brush, a corner appeared as the brush shrank: an
+  // arm covered by less than the debounce leaves the selection outright, so two
+  // arms remained where three arrived, the vertex was never marked, and the cell
+  // came back at full size. Less of the brush bought more material, and the
+  // switch sat at a hundredth of the size rather than at the size.
+  //
+  // A vertex fewer than three creases arrive at is not this rule's business: two
+  // that meet because the third was never a candidate — refused for size, turned
+  // the other way, too shallow — is a corner chainJunctions closes on its own,
+  // and no brush asked otherwise.
+  // Arriving at all is what makes it this rule's business rather than the
+  // model's. A corner the brush is nowhere near has no end covering its vertex,
+  // so nothing is dropped there and no cell was going to be built there either —
+  // marking it would be inert, and it would stop the set meaning what its name
+  // says.
   std::set<int> uncovered;
-  for (const auto& [v, count] : touching)
-    if (count >= 3 && covering[v] < 3) uncovered.insert(v);
+  for (const auto& [v, count] : arms)
+    if (count >= 3 && touching[v] > 0 && covering[v] < count) uncovered.insert(v);
+  if (uncoveredOut != nullptr) *uncoveredOut = uncovered;
   if (uncovered.empty()) return {};
 
   // Of those, the ones worth telling the caller about are where nothing at all
@@ -1739,7 +1776,7 @@ std::vector<int> dropUncoveredCorners(const MergedMesh& m, std::vector<Chain>& c
   // taken already reports it, and a warning would fire on every use of it.
   std::vector<int> out;
   for (const int v : uncovered)
-    if (covering[v] == 0) out.push_back(v);
+    if (covering[v] == 0 && touching[v] >= 3) out.push_back(v);
 
   // Every stretch running into an uncovered corner, cut short of the cell it
   // would have met, goes with it. A stretch is short at one end at most — one
@@ -1774,17 +1811,34 @@ std::vector<int> dropUncoveredCorners(const MergedMesh& m, std::vector<Chain>& c
 
 std::vector<Junction> chainJunctions(const MergedMesh& m,
                                      const std::map<EdgeKey, std::vector<int>>& adj,
-                                     const std::vector<Chain>& chains, double r, bool concave)
+                                     const std::vector<Chain>& chains, double r, bool concave,
+                                     const std::set<int>& noCorner)
 {
   // Chains are cut at every vertex whose crease degree is not two, so the number
   // of chain ends landing on a vertex is that degree. A closed ring has no ends
   // and never contributes.
   //
-  // An end the brushes cut short of the setback does not count: the corner cell
-  // is the full seated ball whatever is selected, so building one for a brush
-  // that covers part of the stretch it occupies puts material outside the brush
-  // — and one that closes three beads that are not all present is a lump sitting
-  // on the model rather than a corner.
+  // An end the brushes cut short of r does not count: the corner cell is the full
+  // seated ball whatever is selected, so building one for a brush that covers part
+  // of the stretch it occupies puts material outside what was asked for. That is
+  // the whole of `noCorner`, which the brush pass hands over — the same vertices
+  // it drops the arriving stubs at, so that the cell and the stubs go together
+  // rather than one of them surviving the other.
+  //
+  // Two ends is enough anywhere else. Three is the valence of a vertex where
+  // three creases meet, but only some of them need be selected: one refused for
+  // size, or turning the other way, or too shallow, leaves two ends on a vertex
+  // that is still a corner of the model. The two beads that were built arrive
+  // there together, tangent to the wall they share, and their footprints on it
+  // cross about a radius out — where the two surfaces meet at no angle at all.
+  // That is a cusp, which a boolean can only resolve into a flap, and measured
+  // over the opening angle of a plain two-wall corner it is what happens at 60,
+  // 75, 105 and 120 degrees. Ninety comes back clean, because there the two beads
+  // are mirror images and their intersection lands on the symmetry plane; that is
+  // a property of the mesh and not of the shape, so it is not a rule. The corner
+  // cell fills the valley, and it is solved against every wall at the vertex
+  // either way, so the wall of the crease that is missing is already one of the
+  // ball's constraints.
   std::map<int, std::vector<int>> ends;  // vertex -> the next station along each end
   for (const Chain& chain : chains) {
     if (chain.closed || chain.verts.size() < 2) continue;
@@ -1804,7 +1858,7 @@ std::vector<Junction> chainJunctions(const MergedMesh& m,
 
   std::vector<Junction> out;
   for (const auto& [v, nbrs] : ends) {
-    if (nbrs.size() < 3) continue;
+    if (nbrs.size() < 2 || noCorner.count(v) != 0) continue;
 
     Junction j;
     j.vert = v;
@@ -2029,7 +2083,8 @@ manifold::Manifold cornerCell(const Junction& j, const Vector3d& vj,
 manifold::Manifold buildRoundSolid(const MergedMesh& m,
                                    const std::map<EdgeKey, std::vector<int>>& adj,
                                    const std::vector<Chain>& chains, double r, bool concave,
-                                   int arcSegments, double thresholdDeg)
+                                   int arcSegments, double thresholdDeg,
+                                   const std::set<int>& noCorner)
 {
   if (!(r > 0)) return {};
 
@@ -2037,7 +2092,7 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   const double eps = std::max(1e-3 * r, 1e-9);
   const int segs = std::max(arcSegments, 3);
 
-  const std::vector<Junction> junctions = chainJunctions(m, adj, chains, r, concave);
+  const std::vector<Junction> junctions = chainJunctions(m, adj, chains, r, concave, noCorner);
   std::map<int, const Junction *> junctionAt;
   for (const Junction& j : junctions) junctionAt[j.vert] = &j;
 
@@ -2108,6 +2163,52 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
       // inside the corner cell, which the corner ball removes anyway.
       const double step = (b.C - a.C).norm();
       const double nudge = step > 1e-12 ? 1e-3 * r / step : 0.0;
+
+      // Zero means the ball is already blocked at the neighbour station, so the
+      // whole of the last segment is inside the corner and there is no point
+      // along it for the bead to stop at. Where a crease runs into a junction its
+      // stations crowd — on a pipe through a boss they are a fifth of the radius
+      // apart there against a whole radius further along — so this is ordinary
+      // rather than exceptional. Nudged off zero it leaves a cell the width of
+      // the nudge, a sliver a thousandth of a radius long whose end faces and
+      // seam cover are both degenerate. Drop it and let the bead end at the
+      // neighbour station, which is the first station outside the corner anyway.
+      //
+      // Three stations with both ends dropped is the one case here that is
+      // reasoned about rather than measured. It would leave only the middle
+      // section valid, so every cell has an invalid end and the bead vanishes
+      // without saying so, with the two corner cells nearly meeting on that
+      // station. Reaching it needs a crease shorter than about two radii running
+      // between two junctions, which is what the size gate refuses as crowded, so
+      // it is unreachable through the node and only a direct caller could build
+      // it. Nothing here is written for it: over the whole test suite and a
+      // 540-configuration sweep the shortest chain this branch was ever taken on
+      // had seventeen stations.
+      if (s <= 0.0) {
+        // Two stations and nothing left between them is no bead at all.
+        if (n == 2) {
+          chainUsable[ci] = false;
+          continue;
+        }
+        trimmed[endIdx].valid = false;
+        // Nothing is built out here now, so the entry says the station the bead
+        // ends at rather than the one this section used to sit on.
+        sectionAt[ci][endIdx] = static_cast<double>(nbrIdx);
+        // The corner cell still has to overlap the bead in a slab rather than
+        // meet it on the neighbour station's plane, so it reaches a hair past
+        // that station into the segment beyond. That is a different segment from
+        // the one `nudge` was measured on, and they are not the same length: a
+        // fraction of a segment is only a distance once the segment it is a
+        // fraction of is named. Capped, since a segment shorter than the hair
+        // itself would otherwise ask for a fraction past the far end of it.
+        const RoundSection& in = sec[front ? 2 : n - 3];
+        const double back = (a.C - in.C).norm();
+        const double hair = back > 1e-12 ? std::min(1e-3 * r / back, 0.05) : 0.05;
+        const RoundSection reach = lerpSection(in, a, 1.0 - 2.0 * hair);
+        if (reach.valid) endSections[j.vert].push_back(reach);
+        continue;
+      }
+
       if (s < 1.0) s = std::min(1.0, s + nudge);
       consumed += 1.0 - s;
       trimmed[endIdx] = lerpSection(a, b, s);
@@ -2603,6 +2704,9 @@ std::shared_ptr<const Geometry> buildFilletTool(
   // — with a warning naming a crease the user never picked out — is refusing
   // work nobody asked for.
   std::vector<Chain> usable = chains;
+  // The corners a brush reached without covering. They get no cell, the same way
+  // they get none of the stretches that ran into them.
+  std::set<int> noCorner;
   if (brush && !brush->isEmpty()) {
     const BrushVolume volume(brush->getManifold().GetMeshGL64());
     // A brush face nearly tangent to the spine crosses it twice a hair apart.
@@ -2642,7 +2746,8 @@ std::shared_ptr<const Geometry> buildFilletTool(
     // same way and are silent, since that is the rule working. The wedge tools
     // build no corner cell, so nothing there overshoots and nothing is dropped.
     const std::vector<int> uncovered =
-      isWedgeOnly ? std::vector<int>{} : dropUncoveredCorners(m, selected, node.size);
+      isWedgeOnly ? std::vector<int>{}
+                  : dropUncoveredCorners(m, selected, chains, node.size, &noCorner);
     for (const int v : uncovered)
       LOG(message_group::Warning, node.modinst->location(), "",
           "%1$s: the brush covers less than the radius %2$g of the creases meeting at the corner "
@@ -2744,7 +2849,7 @@ std::shared_ptr<const Geometry> buildFilletTool(
   // fade out to the sharp vertex instead. Say so: the shape is valid but it is
   // not the constant-radius blend that was asked for.
   if (!isWedgeOnly)
-    for (const Junction& j : chainJunctions(m, adj, usable, node.size, wantConcave))
+    for (const Junction& j : chainJunctions(m, adj, usable, node.size, wantConcave, noCorner))
       if (j.ballCentres.empty())
         LOG(message_group::Warning, node.modinst->location(), "",
             "%1$s: no ball of radius %2$g is seated in the corner at [%3$.4g, %4$.4g, %5$.4g]; "
@@ -2759,7 +2864,8 @@ std::shared_ptr<const Geometry> buildFilletTool(
     tool = buildWedgeSolid(m, adj, usable, node.size, wantConcave, thresholdDeg);
   } else {
     const int arcSegments = node.discretizer.getCircularSegmentCount(node.size).value_or(0);
-    tool = buildRoundSolid(m, adj, usable, node.size, wantConcave, arcSegments, thresholdDeg);
+    tool = buildRoundSolid(m, adj, usable, node.size, wantConcave, arcSegments, thresholdDeg,
+                           noCorner);
   }
 
   if (tool.IsEmpty()) return nullptr;

@@ -455,7 +455,7 @@ TEST_CASE("curved wall: the blend leaves no crease the model does not have")
   const MergedMesh mm = mergeMesh(model.GetMeshGL64());
   const auto adj = buildEdgeAdjacency(mm.tris);
   const auto chains = buildChains(mm, selectedEdges(mm, adj, threshold, /*wantConcave=*/true));
-  const auto tool = buildRoundSolid(mm, adj, chains, r, /*concave=*/true, 32, threshold);
+  const auto tool = buildRoundSolid(mm, adj, chains, r, /*concave=*/true, 32, threshold, {});
   REQUIRE_FALSE(tool.IsEmpty());
 
   const manifold::Manifold blended = model + tool;
@@ -607,7 +607,7 @@ TEST_CASE("threshold: a solid with no crease in it selects nothing and builds no
                                                     /*wantConcave=*/false));
   CHECK(chains.empty());
   CHECK(buildRoundSolid(mm, adj, chains, 1.0, /*concave=*/false, 24,
-                        derivedThreshold(discretizer(32)))
+                        derivedThreshold(discretizer(32)), {})
           .IsEmpty());
 }
 
@@ -635,7 +635,7 @@ TEST_CASE("refillet: a rounded solid re-read carries creases its shape does not 
   const MergedMesh mm = mergeMesh(model.GetMeshGL64());
   const auto adj = buildEdgeAdjacency(mm.tris);
   const auto chains = buildChains(mm, selectedEdges(mm, adj, 18.0, /*wantConcave=*/false));
-  const auto rounded = model - buildRoundSolid(mm, adj, chains, r, /*concave=*/false, 24, 18.0);
+  const auto rounded = model - buildRoundSolid(mm, adj, chains, r, /*concave=*/false, 24, 18.0, {});
   REQUIRE_FALSE(rounded.IsEmpty());
   CHECK(rounded.Genus() == 0);
 
@@ -781,7 +781,7 @@ TEST_CASE("chains: two curved creases and a straight one meet at a real junction
   // Both crossings are junctions, at every size the case is drawn at, and both
   // are solved rather than run out to the sharp vertex.
   for (const double r : {1.0, 2.0, 4.0}) {
-    const auto junctions = chainJunctions(mm, adj, chains, r, /*concave=*/true);
+    const auto junctions = chainJunctions(mm, adj, chains, r, /*concave=*/true, {});
     REQUIRE(junctions.size() == 2);
     for (const auto& j : junctions) {
       CHECK(j.faceNormals.size() == 3);
@@ -824,7 +824,7 @@ TEST_CASE("non-manifold input: shared edges are counted and nothing crashes")
     const MergedMesh mm = mergeMesh(model.GetMeshGL64());
     const auto adj = buildEdgeAdjacency(mm.tris);
     const auto chains = buildChains(mm, selectedEdges(mm, adj, 18.0, /*wantConcave=*/false));
-    CHECK_FALSE(buildRoundSolid(mm, adj, chains, 1.0, /*concave=*/false, 24, 18.0).IsEmpty());
+    CHECK_FALSE(buildRoundSolid(mm, adj, chains, 1.0, /*concave=*/false, 24, 18.0, {}).IsEmpty());
   }
 }
 
@@ -898,10 +898,11 @@ std::vector<Chain> selection(const MergedMesh& mm, const std::vector<Chain>& cha
 // And the whole of what the node does with a brush: the selection above, with
 // the stretches that arrive at a corner without covering it dropped.
 std::vector<Chain> brushed(const MergedMesh& mm, const std::vector<Chain>& chains,
-                           const manifold::Manifold& brush, double size)
+                           const manifold::Manifold& brush, double size,
+                           std::set<int> *noCorner = nullptr)
 {
   std::vector<Chain> out = selection(mm, chains, brush, size);
-  dropUncoveredCorners(mm, out, size);
+  dropUncoveredCorners(mm, out, chains, size, noCorner);
   return out;
 }
 
@@ -1109,8 +1110,8 @@ TEST_CASE("brush: a crease selected end to end is kept however short it is")
   // the unbrushed path is in, and the reason the two build the same thing.
   CHECK(selected[0].keep.empty());
 
-  const auto bare = buildRoundSolid(mm, adj, chains, r, /*concave=*/true, 24, 45.0);
-  const auto brushedTool = buildRoundSolid(mm, adj, selected, r, /*concave=*/true, 24, 45.0);
+  const auto bare = buildRoundSolid(mm, adj, chains, r, /*concave=*/true, 24, 45.0, {});
+  const auto brushedTool = buildRoundSolid(mm, adj, selected, r, /*concave=*/true, 24, 45.0, {});
   REQUIRE_FALSE(bare.IsEmpty());
   CHECK(brushedTool.Volume() == Approx(bare.Volume()));
 }
@@ -1131,8 +1132,8 @@ TEST_CASE("brush: the clipped bead is the whole bead cut by the brush")
 
   const auto brush = box(20.0, 5.0, 20.0).Translate(manifold::vec3(-5.0, -1.0, -5.0));
   const auto clipped =
-    buildRoundSolid(mm, adj, brushed(mm, chains, brush, r), r, /*concave=*/true, 24, 45.0);
-  const auto expected = buildRoundSolid(mm, adj, chains, r, /*concave=*/true, 24, 45.0) ^ brush;
+    buildRoundSolid(mm, adj, brushed(mm, chains, brush, r), r, /*concave=*/true, 24, 45.0, {});
+  const auto expected = buildRoundSolid(mm, adj, chains, r, /*concave=*/true, 24, 45.0, {}) ^ brush;
   REQUIRE_FALSE(clipped.IsEmpty());
   REQUIRE_FALSE(expected.IsEmpty());
 
@@ -1170,9 +1171,9 @@ TEST_CASE("brush: a slanted brush face still caps square to the crease")
                        .Rotate(20.0, 0.0, 35.0)
                        .Translate(manifold::vec3(1.0, 4.0, 1.0));
 
-  const auto unclipped = buildRoundSolid(mm, adj, chains, r, /*concave=*/true, 24, 45.0);
+  const auto unclipped = buildRoundSolid(mm, adj, chains, r, /*concave=*/true, 24, 45.0, {});
   const auto clipped =
-    buildRoundSolid(mm, adj, brushed(mm, chains, brush, r), r, /*concave=*/true, 24, 45.0);
+    buildRoundSolid(mm, adj, brushed(mm, chains, brush, r), r, /*concave=*/true, 24, 45.0, {});
   REQUIRE_FALSE(clipped.IsEmpty());
 
   // What it must equal: the bead cut by the plane PERPENDICULAR to the crease
@@ -1214,12 +1215,12 @@ TEST_CASE("brush: a corner every crease still reaches keeps its corner cell")
   // Only the three edges at the origin corner meet the brush.
   REQUIRE(selected.size() == 3);
 
-  const auto junctions = chainJunctions(mm, adj, selected, r, /*concave=*/false);
+  const auto junctions = chainJunctions(mm, adj, selected, r, /*concave=*/false, {});
   REQUIRE(junctions.size() == 1);
   CHECK(mm.pos[junctions[0].vert].isApprox(Vector3d::Zero()));
   CHECK(junctions[0].ballCentres.size() == 1);
 
-  const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24, 45.0);
+  const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24, 45.0, {});
   REQUIRE_FALSE(tool.IsEmpty());
   // The three beads stop at the brush, a little past it where the corner cell
   // reaches; nothing runs on to the far corners ten away.
@@ -1236,27 +1237,131 @@ TEST_CASE("brush: a corner every crease still reaches keeps its corner cell")
 
 TEST_CASE("brush: a corner one crease is cut short of gets no corner cell")
 {
-  // The other half of the rule. The brush covers two of the three edges at the
-  // corner and stops short of the third, so the corner is not built: a cell
-  // closing three beads when only two arrive is a lump on the model, not a
-  // corner. The two that are there are capped flat, like any other clip.
+  // The other half of the rule, and the two-of-three case its own comment used to
+  // claim while testing one. The brush takes 5 mm of each of the two edges in the
+  // z = 0 plane and only h of the vertical one, so below h = r the corner is not
+  // built: the cell is the full size of the seated ball whatever is selected, and
+  // one built here is material the brush never asked for, in an amount that does
+  // not move with h - the same lump for a brush that reached a fifth of the way
+  // to the radius as for one that reached nine tenths. The stretch that fell
+  // short goes with the corner it cannot have, so what is left is two beads
+  // capped flat, like any other clip.
+  //
+  // r rather than the setback throughout, because r is what the code measures:
+  // every caller of endAnchored passes the tool's own size, and the trigonometric
+  // setback r * tan(phi/2) appears only in the cross-section. The two coincide at
+  // 90 degrees, which is the only angle a cube offers.
+  //
+  // Two anchored ends arrive at that vertex, which is also what a crease refused
+  // for size leaves behind, and nothing in the chains that are left tells the two
+  // apart. So the volume below is a guard on more than the brush: a corner cell
+  // built from the count of ends alone shows up here as a third more material.
   const double r = 1.0;
   const auto cube = box(10.0, 10.0, 10.0);
   const MergedMesh mm = mergeMesh(cube.GetMeshGL64());
   const auto adj = buildEdgeAdjacency(mm.tris);
   const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/false));
 
-  // Lifted off z = 0, so the two edges in that plane are missed entirely and the
-  // vertical one is taken over z = 2 .. 7.
-  const auto brush = box(5.0, 5.0, 5.0).Translate(manifold::vec3(-1.0, -1.0, 2.0));
-  const auto selected = brushed(mm, chains, brush, r);
-  REQUIRE(selected.size() == 1);
-  CHECK(chainJunctions(mm, adj, selected, r, /*concave=*/false).empty());
+  auto toolFor = [&](double h, size_t& chainsLeft, size_t& junctions) {
+    const auto brush = box(6.0, 6.0, h + 1.0).Translate(manifold::vec3(-1.0, -1.0, -1.0));
+    std::set<int> noCorner;
+    const auto selected = brushed(mm, chains, brush, r, &noCorner);
+    chainsLeft = selected.size();
+    junctions = chainJunctions(mm, adj, selected, r, /*concave=*/false, noCorner).size();
+    return buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24, 45.0, noCorner);
+  };
 
-  const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24, 45.0);
-  REQUIRE_FALSE(tool.IsEmpty());
-  CHECK(tool.BoundingBox().min[2] == Approx(2.0).margin(1e-9));
-  CHECK(tool.BoundingBox().max[2] == Approx(7.0).margin(1e-9));
+  // Down to well below `0.01 * r`, where the brush pass debounces the vertical
+  // stretch out of the selection altogether rather than leaving it short. Both
+  // are the same answer, and a rule keyed on the arms that survived gave the
+  // corner cell to the smaller brush.
+  double shortVolume = 0.0;
+  for (const double h : {0.005, 0.009, 0.011, 0.2, 0.5, 0.9, 0.999}) {
+    size_t chainsLeft = 0, junctions = 0;
+    const auto tool = toolFor(h, chainsLeft, junctions);
+    CAPTURE(h);
+    // Two chains are left, and neither of them is the vertical one.
+    CHECK(chainsLeft == 2);
+    CHECK(junctions == 0);
+    REQUIRE_FALSE(tool.IsEmpty());
+    // Nothing runs up the vertical edge: the two beads stand one radius off the
+    // z = 0 plane and that is the whole of the tool's height.
+    CHECK(tool.BoundingBox().max[2] < 1.001 * r);
+    if (shortVolume == 0.0) shortVolume = tool.Volume();
+    else CHECK(tool.Volume() == Approx(shortVolume));
+  }
+  CHECK(shortVolume == Approx(1.6632).margin(1e-3));
+
+  // Past r the same brush gets the corner, and the third bead with it.
+  size_t chainsLeft = 0, junctions = 0;
+  const auto tool = toolFor(1.2, chainsLeft, junctions);
+  CHECK(chainsLeft == 3);
+  CHECK(junctions == 1);
+  CHECK(tool.Volume() > shortVolume);
+}
+
+TEST_CASE("brush: a slab over the top face rounds its edges and leaves the corners square")
+{
+  // The documented way to round a top surface and nothing else: brush a slab
+  // less than r tall over the top face. The four top edges are covered end to
+  // end, so they carry full beads; each vertical edge is caught only over the
+  // slab's height, which is short of r, so it is not anchored at the corner it
+  // runs into and goes with the corner it cannot have. What comes back is the
+  // hull of four vertical cylinders - surface rounding - and not the hull of
+  // eight spheres, which is what a corner cell at each of the four top vertices
+  // would give. The two are different shapes and the user picks between them
+  // with the depth of the brush, so the depth has to decide it.
+  //
+  // Slab heights spanning four orders of magnitude, since what matters is only
+  // that they are short of r: the answer must not move with how far short. The
+  // small ones are the ones that matter. Below `0.01 * size` the brush pass
+  // debounces a stretch away entirely, so the vertical arms leave the selection
+  // rather than staying in it uncovered — and a rule that counted the arms which
+  // survived saw two where three arrived, built the corner, and turned this into
+  // the eight-sphere shape. Less brush, more material, with the switch at a
+  // hundredth of the radius.
+  const double r = 2.0;
+  const auto cube = box(10.0, 10.0, 10.0);
+  const MergedMesh mm = mergeMesh(cube.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/false));
+  REQUIRE(chains.size() == 12);
+
+  double first = 0.0;
+  for (const double slab : {0.001, 0.01, 0.019, 0.021, 0.5, 1.0, 1.5, 1.999}) {
+    const auto brush =
+      box(12.0, 12.0, slab + 1.0).Translate(manifold::vec3(-1.0, -1.0, 10.0 - slab));
+    std::set<int> noCorner;
+    const auto selected = brushed(mm, chains, brush, r, &noCorner);
+    CAPTURE(slab);
+    // The four top edges, and only those: the vertical stubs are dropped with
+    // the corners they arrive at without covering, and those corners are named
+    // so that no cell is built at them either.
+    REQUIRE(selected.size() == 4);
+    CHECK(noCorner.size() == 4);
+    CHECK(chainJunctions(mm, adj, selected, r, /*concave=*/false, noCorner).empty());
+
+    const auto tool =
+      buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 32, 45.0, noCorner);
+    REQUIRE_FALSE(tool.IsEmpty());
+    // Nothing reaches further than one radius down the sides, whatever the slab.
+    CHECK(tool.BoundingBox().min[2] > 10.0 - r - 1e-6);
+
+    const auto rounded = cube - tool;
+    REQUIRE_FALSE(rounded.IsEmpty());
+    CHECK(rounded.Genus() == 0);
+    // The vertical edge is square where the beads do not reach it.
+    const auto probe = box(0.2, 0.2, 0.2).Translate(manifold::vec3(9.8, 9.8, 10.0 - 2.0 * r));
+    CHECK((probe - rounded).IsEmpty());
+    // And the whole solid is the same one at every slab height short of r.
+    if (first == 0.0) first = rounded.Volume();
+    else CHECK(rounded.Volume() == Approx(first));
+  }
+
+  // Pinned against the shape it must not be. Building a corner cell at each of
+  // the four top vertices instead gives 967.4 here, so the two answers are 16
+  // cubic millimetres apart and this number tells them apart.
+  CHECK(first == Approx(983.36).margin(0.05));
 }
 
 TEST_CASE("brush: a corner the brush reaches but does not cover is not built")
@@ -1284,9 +1389,11 @@ TEST_CASE("brush: a corner the brush reaches but does not cover is not built")
     auto selected = selection(mm, chains, brush, r);
     REQUIRE(selected.size() == 3);
 
-    const auto uncovered = dropUncoveredCorners(mm, selected, r);
-    const auto junctions = chainJunctions(mm, adj, selected, r, /*concave=*/false);
-    const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24, 45.0);
+    std::set<int> noCorner;
+    const auto uncovered = dropUncoveredCorners(mm, selected, chains, r, &noCorner);
+    const auto junctions = chainJunctions(mm, adj, selected, r, /*concave=*/false, noCorner);
+    const auto tool =
+      buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24, 45.0, noCorner);
 
     if (D < r) {
       REQUIRE(uncovered.size() == 1);
@@ -1334,7 +1441,7 @@ TEST_CASE("brush: width selects the crease and does not shape the blend")
     const auto brush = manifold::Manifold(column(w, 5.0, 15.0));
     const auto selected = brushed(mm, chains, brush, r);
     REQUIRE(selected.size() == 1);
-    const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24, 45.0);
+    const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24, 45.0, {});
     REQUIRE_FALSE(tool.IsEmpty());
     // Square-capped at the brush at both ends, so the volume is the section area
     // times the 10 mm selected, whichever brush cut it.
@@ -1370,14 +1477,14 @@ TEST_CASE("brush: one whole edge and only that edge is a brush a model can draw"
     // brush was aimed along the fifth crease, which is the rule doing its job
     // and not a corner anyone was denied. The count of edges taken says the
     // rest.
-    CHECK(dropUncoveredCorners(mm, selected, r).empty());
+    CHECK(dropUncoveredCorners(mm, selected, chains, r).empty());
     if (w < 2.0 * r) {
       CHECK(takenEdges(selected) == 1);
       REQUIRE(selected.size() == 1);
       // And the one edge is blended over the whole of its height, since the brush
       // never cut it: no corner cell at either end, so the blend runs out to both
       // sharp vertices.
-      const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24, 45.0);
+      const auto tool = buildRoundSolid(mm, adj, selected, r, /*concave=*/false, 24, 45.0, {});
       REQUIRE_FALSE(tool.IsEmpty());
       CHECK(tool.BoundingBox().min[2] == Approx(0.0).margin(1e-6));
       CHECK(tool.BoundingBox().max[2] == Approx(20.0).margin(1e-6));
@@ -1385,7 +1492,7 @@ TEST_CASE("brush: one whole edge and only that edge is a brush a model can draw"
       // Wide enough and the four stubs cover the radius, so they are what the
       // brush asked for: five edges, and a corner cell at each end of the one.
       CHECK(takenEdges(selected) == 5);
-      CHECK(chainJunctions(mm, adj, selected, r, /*concave=*/false).size() == 2);
+      CHECK(chainJunctions(mm, adj, selected, r, /*concave=*/false, {}).size() == 2);
     }
   }
 }
@@ -1480,7 +1587,8 @@ TEST_CASE("size: two beads sharing a face fit until their tangency lines meet")
   const double side = 5.0, r = 2.0;
   const SizeRun run = sizeRun(box(side, side, side), r, /*concave=*/false);
   const auto rounded = box(side, side, side) -
-                       buildRoundSolid(run.mm, run.adj, run.chains, r, /*concave=*/false, 64, 20.0);
+                       buildRoundSolid(run.mm, run.adj, run.chains, r, /*concave=*/false, 64,
+                                       20.0, {});
   REQUIRE_FALSE(rounded.IsEmpty());
   CHECK(rounded.Genus() == 0);
 
@@ -1581,13 +1689,14 @@ TEST_CASE("apply: a bead that runs out onto a face leaves no lip over the round"
     for (size_t ci = 0; ci < chains.size(); ++ci)
       if (verdicts[ci].fault == SizeFault::Fits) fitting.push_back(chains[ci]);
     CHECK(fitting.size() == chains.size());
-    return buildRoundSolid(tm, tadj, fitting, r, /*concave=*/false, 32, threshold);
+    return buildRoundSolid(tm, tadj, fitting, r, /*concave=*/false, 32, threshold, {});
   };
 
   const MergedMesh mm = mergeMesh(model.GetMeshGL64());
   const auto adj = buildEdgeAdjacency(mm.tris);
   const auto beads = buildChains(mm, selectedEdges(mm, adj, threshold, /*wantConcave=*/true));
-  const auto blended = model + buildRoundSolid(mm, adj, beads, r, /*concave=*/true, 32, threshold);
+  const auto blended =
+    model + buildRoundSolid(mm, adj, beads, r, /*concave=*/true, 32, threshold, {});
 
   const auto onChild = blended - roundToolOf(model);
   const auto onBlend = blended - roundToolOf(blended);
@@ -1638,7 +1747,8 @@ TEST_CASE("size: a bead the target already carries is not a wall in the way")
   const MergedMesh pm = mergeMesh(model.GetMeshGL64());
   const auto padj = buildEdgeAdjacency(pm.tris);
   const auto beads = buildChains(pm, selectedEdges(pm, padj, threshold, /*wantConcave=*/true));
-  const auto blend = model + buildRoundSolid(pm, padj, beads, r, /*concave=*/true, 32, threshold);
+  const auto blend =
+    model + buildRoundSolid(pm, padj, beads, r, /*concave=*/true, 32, threshold, {});
 
   const MergedMesh mm = mergeMesh(blend.GetMeshGL64());
   const auto adj = buildEdgeAdjacency(mm.tris);
@@ -1860,14 +1970,14 @@ TEST_CASE("runout: a corner with no seated ball fades the blend out to the verte
   const auto adj = buildEdgeAdjacency(mm.tris);
   const auto chains = buildChains(mm, selectedEdges(mm, adj, 20.0, /*wantConcave=*/false));
 
-  const auto junctions = chainJunctions(mm, adj, chains, r, /*concave=*/false);
+  const auto junctions = chainJunctions(mm, adj, chains, r, /*concave=*/false, {});
   const Junction *apex = nullptr;
   for (const auto& j : junctions)
     if (mm.pos[j.vert].z() > 119.0) apex = &j;
   REQUIRE(apex != nullptr);
   CHECK(apex->ballCentres.empty());
 
-  const auto tool = buildRoundSolid(mm, adj, chains, r, /*concave=*/false, 24, 20.0);
+  const auto tool = buildRoundSolid(mm, adj, chains, r, /*concave=*/false, 24, 20.0, {});
   REQUIRE_FALSE(tool.IsEmpty());
   CHECK(tool.BoundingBox().max[2] == Approx(120.0).margin(1e-6));
 
@@ -1937,7 +2047,7 @@ TEST_CASE("junctions: a cube corner solves to the one ball seated in all three w
   const auto adj = buildEdgeAdjacency(mm.tris);
   const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/false));
 
-  const auto junctions = chainJunctions(mm, adj, chains, r, /*concave=*/false);
+  const auto junctions = chainJunctions(mm, adj, chains, r, /*concave=*/false, {});
   REQUIRE(junctions.size() == 8);
   for (const auto& j : junctions) {
     CHECK(j.faceNormals.size() == 3);
@@ -1962,7 +2072,7 @@ TEST_CASE("junctions: four walls meeting on an axis keep the one centre they sha
   const auto adj = buildEdgeAdjacency(mm.tris);
   const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/false));
 
-  const auto junctions = chainJunctions(mm, adj, chains, r, /*concave=*/false);
+  const auto junctions = chainJunctions(mm, adj, chains, r, /*concave=*/false, {});
   // The apex plus the four base corners.
   REQUIRE(junctions.size() == 5);
 
@@ -1993,7 +2103,7 @@ TEST_CASE("junctions: walls that cannot pin a point down produce no corner")
   const auto adj = buildEdgeAdjacency(mm.tris);
   const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/true));
 
-  for (const auto& j : chainJunctions(mm, adj, chains, 1.0, /*concave=*/true))
+  for (const auto& j : chainJunctions(mm, adj, chains, 1.0, /*concave=*/true, {}))
     for (const Vector3d& P : j.ballCentres) {
       CHECK(std::isfinite(P.norm()));
       CHECK((P - mm.pos[j.vert]).norm() <= 10.0);
@@ -2169,7 +2279,7 @@ TEST_CASE("curved crease: the bead comes back whole at every tessellation")
     const MergedMesh mm = mergeMesh(model.GetMeshGL64());
     const auto adj = buildEdgeAdjacency(mm.tris);
     const auto chains = buildChains(mm, selectedEdges(mm, adj, threshold, concave));
-    return buildRoundSolid(mm, adj, chains, r, concave, segs, threshold);
+    return buildRoundSolid(mm, adj, chains, r, concave, segs, threshold, {});
   };
 
   SECTION("a boss on a plate: the base fillet is one closed ring")
@@ -2229,34 +2339,6 @@ TEST_CASE("junction: two beads left by a refused crease do not touch")
   // Genus does not see a flap, so the mesh is asked directly. The bare crease
   // between the two beads is bare either way - it is the refused crease's own
   // corner, which nothing was going to blend.
-  const double r = 0.5;
-  const int fn = 32;
-  const double threshold = derivedThreshold(discretizer(fn));
-  const auto model = box(60.0, 40.0, 6.0) +
-                     manifold::Manifold::Cylinder(16.0, 8.0, 8.0, fn, false)
-                       .Translate(manifold::vec3(20.0, 20.0, 6.0)) +
-                     manifold::Manifold::Cylinder(30.0, 5.0, 5.0, fn, false)
-                       .Rotate(0, 90, 0)
-                       .Translate(manifold::vec3(20.0, 20.0, 10.0));
-  const MergedMesh mm = mergeMesh(model.GetMeshGL64());
-  const auto adj = buildEdgeAdjacency(mm.tris);
-  auto chains = buildChains(mm, selectedEdges(mm, adj, threshold, /*wantConcave=*/true));
-  const auto verdicts =
-    checkChainSizes(mm, adj, chains, r, /*concave=*/true, /*wedge=*/false, threshold);
-
-  // The case is only itself while one crease is refused and the others are not.
-  size_t refused = 0;
-  std::vector<Chain> fitting;
-  for (size_t ci = 0; ci < chains.size(); ++ci) {
-    if (verdicts[ci].fault == SizeFault::Fits) fitting.push_back(chains[ci]);
-    else ++refused;
-  }
-  REQUIRE(refused == 1);
-  REQUIRE(fitting.size() == 2);
-
-  const auto tool = buildRoundSolid(mm, adj, fitting, r, /*concave=*/true, 32, threshold);
-  REQUIRE_FALSE(tool.IsEmpty());
-
   auto selfTouching = [](const manifold::Manifold& solid) {
     const MergedMesh sm = mergeMesh(solid.GetMeshGL64());
     size_t count = 0;
@@ -2264,8 +2346,95 @@ TEST_CASE("junction: two beads left by a refused crease do not touch")
       if (tris.size() != 2) ++count;
     return count;
   };
-  CHECK(selfTouching(tool) == 0);
-  CHECK(selfTouching(model + tool) == 0);
+
+  for (const int fn : {24, 32}) {
+    const double threshold = derivedThreshold(discretizer(fn));
+    for (const double r : {0.5, 0.6, 0.9, 1.0}) {
+      for (const double at : {20.0, 33.0, 38.0}) {
+        const auto model = box(60.0, 40.0, 6.0) +
+                           manifold::Manifold::Cylinder(16.0, 8.0, 8.0, fn, false)
+                             .Translate(manifold::vec3(at, 20.0, 6.0)) +
+                           manifold::Manifold::Cylinder(30.0, 5.0, 5.0, fn, false)
+                             .Rotate(0, 90, 0)
+                             .Translate(manifold::vec3(at, 20.0, 10.0));
+        const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+        const auto adj = buildEdgeAdjacency(mm.tris);
+        auto chains = buildChains(mm, selectedEdges(mm, adj, threshold, /*wantConcave=*/true));
+        const auto verdicts =
+          checkChainSizes(mm, adj, chains, r, /*concave=*/true, /*wedge=*/false, threshold);
+
+        // The case is only itself while one crease is refused and the others are
+        // not.
+        size_t refused = 0;
+        std::vector<Chain> fitting;
+        for (size_t ci = 0; ci < chains.size(); ++ci) {
+          if (verdicts[ci].fault == SizeFault::Fits) fitting.push_back(chains[ci]);
+          else ++refused;
+        }
+        CAPTURE(fn, r, at);
+        REQUIRE(refused == 1);
+        REQUIRE(fitting.size() == 2);
+
+        const int segs = discretizer(fn).getCircularSegmentCount(r).value_or(32);
+        const auto tool =
+          buildRoundSolid(mm, adj, fitting, r, /*concave=*/true, segs, threshold, {});
+        REQUIRE_FALSE(tool.IsEmpty());
+        CHECK(selfTouching(tool) == 0);
+        CHECK(selfTouching(model + tool) == 0);
+      }
+    }
+  }
+}
+
+TEST_CASE("junction: a corner two creases still reach is closed at every opening angle")
+{
+  // The same defect on the plainest shape that has it, and the measurement that
+  // says it is generic rather than a property of the pipe tee. Two flat bars on a
+  // plate meeting at a settable angle: three concave creases arrive at the inner
+  // vertex, and dropping the vertical one leaves the two the plate carries
+  // arriving together, the way a crease refused for size leaves them.
+  //
+  // Both beads are tangent to the plate, so their footprints on it cross about a
+  // radius out from the vertex and the two surfaces meet there at no angle at
+  // all. Measured with the corner left unbuilt, that shows up at 60, 75, 105 and
+  // 120 degrees. Ninety comes back clean on its own, because there the two beads
+  // are mirror images and their intersection lands on the symmetry plane - which
+  // is a property of the mesh rather than of the shape, and the reason the rule
+  // is not an angle.
+  auto selfTouching = [](const manifold::Manifold& solid) {
+    const MergedMesh sm = mergeMesh(solid.GetMeshGL64());
+    size_t count = 0;
+    for (const auto& [key, tris] : buildEdgeAdjacency(sm.tris))
+      if (tris.size() != 2) ++count;
+    return count;
+  };
+
+  for (const double theta : {60.0, 75.0, 90.0, 105.0, 120.0}) {
+    for (const double r : {0.5, 1.0, 2.0}) {
+      const auto plate = box(80.0, 80.0, 4.0).Translate(manifold::vec3(-40.0, -40.0, 0.0));
+      const auto bar = box(30.0, 4.0, 12.0).Translate(manifold::vec3(0.0, -2.0, 4.0));
+      const auto model = plate + bar + bar.Rotate(0, 0, theta);
+      const MergedMesh mm = mergeMesh(model.GetMeshGL64());
+      const auto adj = buildEdgeAdjacency(mm.tris);
+      const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/true));
+
+      // Everything but the vertical reflex edge, which stands in for the crease
+      // a size gate would have dropped.
+      std::vector<Chain> flat;
+      for (const Chain& c : chains) {
+        if (c.closed || c.verts.size() < 2) continue;
+        if (std::abs(mm.pos[c.verts.front()].z() - mm.pos[c.verts.back()].z()) > 1.0) continue;
+        flat.push_back(c);
+      }
+      CAPTURE(theta, r);
+      REQUIRE(flat.size() == 2);
+
+      const auto tool = buildRoundSolid(mm, adj, flat, r, /*concave=*/true, 32, 45.0, {});
+      REQUIRE_FALSE(tool.IsEmpty());
+      CHECK(selfTouching(tool) == 0);
+      CHECK(selfTouching(model + tool) == 0);
+    }
+  }
 }
 
 TEST_CASE("curved crease: a uniform seam gives a uniform setback")

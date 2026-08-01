@@ -182,7 +182,7 @@ Manifold roundToolFor(const Manifold& target, double r, bool concave, int arcSeg
   const MergedMesh mm = mergeMesh(target.GetMeshGL64());
   const auto adj = buildEdgeAdjacency(mm.tris);
   const auto chains = buildChains(mm, selectedEdges(mm, adj, thresholdDeg, concave));
-  return buildRoundSolid(mm, adj, chains, r, concave, arcSegments, thresholdDeg);
+  return buildRoundSolid(mm, adj, chains, r, concave, arcSegments, thresholdDeg, {});
 }
 
 Manifold box(double sx, double sy, double sz) { return Manifold::Cube(vec3(sx, sy, sz), false); }
@@ -667,7 +667,7 @@ TEST_CASE("round_tool: asymmetric junctions of valence four, five and six")
     const auto adj = buildEdgeAdjacency(mm.tris);
     const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*concave=*/false));
     size_t apexCentres = 0;
-    for (const auto& j : chainJunctions(mm, adj, chains, r, /*concave=*/false))
+    for (const auto& j : chainJunctions(mm, adj, chains, r, /*concave=*/false, {}))
       if (j.faceNormals.size() == static_cast<size_t>(sides)) apexCentres = j.ballCentres.size();
     CHECK(apexCentres == static_cast<size_t>(sides - 2));
 

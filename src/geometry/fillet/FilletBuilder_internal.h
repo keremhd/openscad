@@ -417,24 +417,38 @@ struct Junction
   std::vector<Vector3d> ballCentres;
 };
 
-// Find the junctions among a chain set: vertices where three or more open-chain
-// ends land. A centre is kept only if it clears every wall it was not solved
+// Find the junctions among a chain set: vertices two or more open-chain ends
+// land on. A centre is kept only if it clears every wall it was not solved
 // against — a solution tangent to its own three walls but buried in a fourth
 // would gouge the fillet back from that fourth wall, so it is discarded rather
 // than clamped. Near-singular solves and centres absurdly far from the vertex
 // are rejected too, since both produce coordinates a hull will either choke on
 // or blow up around; a junction with no centre left simply gets no corner.
+//
+// `noCorner` are the vertices a brush arrived at without covering, as
+// dropUncoveredCorners marks them. Two chain ends at a vertex is enough to build
+// one — a crease left out of the selection does not stop the two that were kept
+// from meeting there — but a corner the brush was cut short of is one the caller
+// asked not to have, and the two rules have to be the same rule.
 std::vector<Junction> chainJunctions(const MergedMesh& m,
                                      const std::map<EdgeKey, std::vector<int>>& adj,
-                                     const std::vector<Chain>& chains, double r, bool concave);
+                                     const std::vector<Chain>& chains, double r, bool concave,
+                                     const std::set<int>& noCorner);
 
 // Drop the selections that arrive at a corner without covering it. A corner is a
-// vertex three or more chain ends land on; it is covered when three of them are
-// selected for `r` of crease back from it, which is the stretch the corner cell
-// occupies. Short of that no cell is built, and a bead that stops inside the
-// stretch one would have filled is a stub meeting nothing at a sharp vertex — so
-// the stretch is dropped too, and what the brush asked for at that corner is
-// answered with nothing rather than with half of it.
+// vertex three or more chain ends land on in `candidates`, the selection as it
+// stood before any brush touched it; it is covered when every one of those ends
+// is selected for `r` of crease back from it in `chains`, which is the stretch
+// the corner cell occupies. Short of that no cell is built, and a bead that stops
+// inside the stretch one would have filled is a stub meeting nothing at a sharp
+// vertex — so the stretch is dropped too, and what the brush asked for at that
+// corner is answered with nothing rather than with half of it.
+//
+// The valence has to come from `candidates` rather than from `chains`, because a
+// brush can remove an arm from `chains` altogether — by covering less of it than
+// the debounce keeps, or by covering only its far end — and an arm that is not
+// there is indistinguishable from one the model never had. Counting the arms
+// that survived is what made a corner appear as the brush shrank.
 //
 // Returns only the corners where *nothing* was covered, which are the ones a
 // brush was drawn around and gets nothing at. A corner some crease through it
@@ -445,7 +459,14 @@ std::vector<Junction> chainJunctions(const MergedMesh& m,
 // since an empty `Chain::keep` reads as the whole chain. Selections that reach a
 // chain end no corner stands at are untouched: nothing is being closed there, so
 // there is no stretch a cell has a claim on.
-std::vector<int> dropUncoveredCorners(const MergedMesh& m, std::vector<Chain>& chains, double r);
+//
+// `uncovered`, when given, receives every corner that could not be had, which is
+// more than the return value: the return is only the ones where nothing at all
+// was covered and the caller has something to say. chainJunctions needs the
+// whole set, since a corner cell at any of them is material the brush excluded.
+std::vector<int> dropUncoveredCorners(const MergedMesh& m, std::vector<Chain>& chains,
+                                      const std::vector<Chain>& candidates, double r,
+                                      std::set<int> *uncoveredOut = nullptr);
 
 // Build the fillet/round tool solid: the wedge W hulled from consecutive
 // sections along every chain, plus a corner cell at each junction, minus the
@@ -457,7 +478,8 @@ std::vector<int> dropUncoveredCorners(const MergedMesh& m, std::vector<Chain>& c
 manifold::Manifold buildRoundSolid(const MergedMesh& m,
                                    const std::map<EdgeKey, std::vector<int>>& adj,
                                    const std::vector<Chain>& chains, double r, bool concave,
-                                   int arcSegments, double thresholdDeg);
+                                   int arcSegments, double thresholdDeg,
+                                   const std::set<int>& noCorner);
 
 // Build a colored debug solid: a thin box marker straddling each real edge,
 // colored by class — concave feature (red), convex feature (green), rejected

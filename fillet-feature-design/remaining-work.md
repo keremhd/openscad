@@ -68,7 +68,9 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
    the defect `pr-review.md` calls R3 and R4. Both are closed by covering the
    whole seam, on the wedge unions as well: 318 of 360 swept configurations
    self-touching becomes 19, all of them the one shape with a junction in it. See
-   below, and D15 for what is left.
+   below, D15 for the junction those 19 turned out to be, and D17 for the two
+   configurations of this family that are still open — the fix landed and this
+   claim stands, but it did not reach every seam.
 14. ~~**D14**~~ — **done, and by neither route it named.** The cells are unioned
    in a tree and each pair is swept as it is made, so the helper is handed two
    components a step instead of one per cell. 100 bosses: 112 s / 17.2 GB to
@@ -76,21 +78,33 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
    [`log-2026-07-31-d14.md`](log-2026-07-31-d14.md), which also records why a
    Manifold cannot be taken apart and put back together through its own mesh
    format.
-15. **D15** — **done in part.** Not a seam: a crease refused for size leaves two
-   beads stopping on the same vertex with no corner between them. Stopping them a
-   hair short takes the sweep from 19 self-touching configurations to 7. What is
-   left is the same corner seen from the other side — two beads' flanks
-   overlapping where nothing was built to resolve them. See below.
-16. **D16** — the scalloped bead, carried over from D13. Three routes measured,
-   none shipped, and the metric itself corrected: most of this wobble is not the
-   noise the routes were aimed at. See below.
-17. **REVIEW** — an outside read of what ships, in
+15. ~~**D15**~~ — **done.** Not a seam: a vertex two selected creases still reach
+   while a third is missing gets no corner, and the two beads that were built
+   cusp where their footprints cross on the wall they share. `chainJunctions` now
+   builds a corner at two chain ends rather than three, excepting the vertices a
+   brush arrived at without covering — which is the set `dropUncoveredCorners`
+   already computes, so the cell and the stubs go together. 9 self-touching
+   configurations of 540 become 2, and both survivors are D17 rather than this.
+   Measured and dead: the count of ends alone breaks the documented thin-slab
+   idiom, and no threshold on the opening angle separates the cases — 90 degrees
+   comes back clean while 75 and 105 do not. See below.
+16. **D16** — the scalloped bead, written up under D13 and independent of it and
+   of D15. Three routes measured, none shipped, and the metric itself corrected:
+   most of this wobble is not the noise the routes were aimed at. D15's control
+   settles the one link a reader would guess, since both defects show on the pipe
+   tee: the cusp appears on a crease whose setback is uniform to 1e-13, so the
+   wobble is not what causes it. See below.
+17. **D17** — the two configurations still self-touching after D13 and D15, both
+   the pipe tee and neither at a corner. One is a station seam whose cover does
+   not reach the rim, and predates both; the other is neither union but their
+   difference. See below.
+18. **REVIEW** — an outside read of what ships, in
    [`pr-review.md`](pr-review.md). Four blocking items left — R1, R2, R5 and R7;
    R3 and R4 are closed with D13. Kept
    out of this file because it judges the branch rather than the feature. R7,
    the comment register, is decided rather than proposed: the LLM voice does not
    ship, and the rewrite is required before the PR opens.
-18. **DOC**, then **CLEAN**.
+19. **DOC**, then **CLEAN**.
 
 ---
 
@@ -2061,7 +2075,7 @@ a bridging cell to cover.
 
 ---
 
-## D15 — beads left by a refused crease — **DONE in part, and it was not a seam**
+## D15 — beads left by a refused crease — **DONE**
 
 Written as "the last seams are at a junction", on the reasoning that the cover
 reaches every station of a chain and no further. Measured, that is not what the
@@ -2099,33 +2113,246 @@ Two routes were tried against the same sweep and are **not** kept:
   either way: the repro goes from two flaps to four. The relaxation alone is not
   enough; the truncation and coverage rules around it assume three.
 
-### What is left, and it is a different thing again
+### What was left, and what it turned out to be
 
-The 7 remaining are all the pipe tee, and at the fine end they are **not** at the
-vertex: at `$fn = 96` they sit a third of a millimetre away from it, on the plate,
-where the two beads' flanks overlap — both tangent to the plate, so where their
-footprints cross they meet on it. That is the crowding the size gate exempts
+The 7 remaining were all the pipe tee, and at the fine end they were **not** at
+the vertex: at `$fn = 96` they sat a third of a millimetre away from it, on the
+plate, where the two beads' flanks overlap — both tangent to the plate, so where
+their footprints cross they meet on it. That is the crowding the size gate exempts
 creases meeting at a junction from, because a corner cell resolves it, asked of a
 corner that was never built.
 
-**Building that corner does close it, and it opens something else.** With
-`chainJunctions` taking two ends instead of three, the `$fn = 96` case comes back
-clean — the corner fills the valley the two flanks make. But the tool itself then
-self-touches where it did not before: 7 such edges on the `$fn = 32` repro, all
-of them in the plane of a truncated end section, which is the corner cell's
-handover to the bead it closes. Over the sweep it is 10 configurations and 52
-edges against the 7 and 17 that ship.
+**It is generic, not a property of the tee.** Two flat bars on a plate meeting at
+a settable angle give the same three creases at an inner vertex. Dropping the
+vertical one and measuring the applied result, over five opening angles and three
+radii:
 
-**It is not the handover depth.** The corner cell already reaches back past the
-section the bead stops at; taking that reach from `2 x` the nudge to `20 x`
-changes nothing. So a two-profile corner cell coincides with its beads for some
-other reason — the obvious candidate is that with only two profiles the hull has
-one of them for a face, where three make it interior — and that is what the next
-attempt has to establish before relaxing the rule.
+| opening angle | 60 | 75 | 90 | 105 | 120 |
+|---|---|---|---|---|---|
+| configurations self-touching, of 3 | 1 | 2 | **0** | 2 | 1 |
 
-**Acceptance:** the sweep comes back with no self-touching configuration on any
-of its three shapes, the tool alone stays clean everywhere, and
-`case_pipe_tee_equal` dilates and matches.
+Flat walls, exact normals, no curvature and no tessellation seam anywhere near
+it. **Ninety degrees is the only clean column**, and it is clean for a reason that
+is about the mesh rather than the shape: there the two beads are mirror images, so
+their intersection curve lands on the symmetry plane and the boolean resolves it.
+Every other angle leaves a flap. Building the corner closes all fifteen.
+
+That also settles the metric question the two open defects share: the boss/plate
+crease this shows up on has a setback uniform to **1.3e-13 %**, and a purpose-built
+control of two overlapping bosses — where *both* creases are circles on a flat
+wall and both read 1e-13 — self-touches at 10 of 30 configurations before the fix
+and none after. **D15 is not D16.** The cusp is real geometry, and the wobble only
+moves where the mesh lands on it.
+
+### The rule, and why it is not the count of ends and not the angle
+
+`chainJunctions` now builds a corner where **two** open-chain ends land, not three
+— except at a vertex the brush pass marked as one that could not be covered.
+
+The exception is the whole of it. A brush that covers two of three creases at a
+corner and stops inside `r` on the third leaves two anchored ends as well, and a
+corner cell there is material the caller excluded — most sharply for the
+documented thin-slab idiom, where a brush less than `r` tall over a cube's top
+rounds the four top edges and is supposed to leave the corners square. Under the
+plain two-end rule each of those four vertices gets a seated ball and the result
+silently becomes the hull of eight spheres instead of four cylinders, which is the
+other idiom. `dropUncoveredCorners` already computes exactly that set of vertices
+in order to drop the stubs arriving at them; it now hands the set on, so the cell
+and the stubs go together instead of one surviving the other. Both halves are
+pinned: `brush: a slab over the top face rounds its edges and leaves the corners
+square` and `brush: a corner one crease is cut short of gets no corner cell`, the
+second of which used to claim the two-of-three case in its comment while testing
+one crease.
+
+**Which arms the corner has must be counted before the brush, not after.** The
+first version of this asked `dropUncoveredCorners` for the arms that survived the
+brush and compared them against three, and that inverts under a small brush: an
+arm covered by less than the `0.01 * size` debounce leaves the selection
+altogether, so two arms remained where three had arrived, the vertex was never
+marked, and the cell came back at full size. Less brush bought more material, with
+the switch at a hundredth of the size instead of at the size — the thin slab gave
+the eight-sphere solid below `slab = 0.02` and the four-cylinder one above it. The
+valence now comes from the selection as it stood before any brush touched it and
+is compared against itself, so an arm that left the selection and an arm that
+stayed and fell short read the same. That also closes an older hole of the same
+shape, since the comparison is against the vertex's own valence rather than
+against three: a valence-four vertex with three arms covered and one short was let
+through before. Measured on a square pyramidal pit, whose apex is a genuine
+valence-four reflex vertex — `arms = 4, touching = 4, covering = 3` marks now and
+did not before, and the switch sits exactly at `r`.
+
+**The rule leaves one case open, and it is a defect rather than a trade.** Where
+the brush covers two of three arms and the third would *also* have been refused
+for size, the vertex is marked, no cell is built, and the two surviving beads cusp
+— this defect, under a brush. It was first written up here as a considered
+compromise, on the reading that what the user loses is a smooth corner. That is
+the wrong reading. **A visible line where two roundings meet is the correct
+result** and nobody objects to it; what a cusp produces is not a line but a flap
+of zero thickness, because two surfaces meeting at no angle give the boolean
+nothing to resolve. The output is a degenerate solid, and no acceptable amount of
+brush honouring buys that.
+
+So the corner cell is not the only thing that could answer it, and here it is the
+one thing that cannot: a cell is hulled from the seated ball and the sections the
+beads stop at, with no perpendicular to clip it against in three directions at
+once, so it always stands outside what the caller selected. What is wanted instead
+is for the two beads to **cross** rather than graze — overlapping where their
+footprints meet on the shared wall, about a radius out from the vertex, so their
+surfaces meet at a real angle. That leaves the visible line, adds material only
+inside the beads' own footprints, needs no cell, and therefore touches neither the
+thin-slab idiom nor the brush contract. It is tracked in D17 and is not the
+"running the ends a hair past the vertex" route already rejected above: that one
+extended the ends *along the crease* through the vertex, which is a different
+place from where the flanks actually cross.
+
+No case pins any of this today; it wants one, and the shape to write it on is the
+flat two-bar corner below with a brush over both plate creases.
+
+**The angle does not work and was measured, not assumed.** The obvious rule — a
+cell only where the two ends leave nearly parallel, since a cube corner miters
+cleanly at 90 degrees — fails on the table above: 75 and 105 degrees both cusp
+while 90 does not, so no threshold separates them. A triangular prism's top corner
+and the two-bosses control both measure **60.000 degrees** and come back on
+opposite sides. Do not rebuild it.
+
+### The two-profile corner cell, and what was wrong with it
+
+The hypothesis this section used to end on — that with two profiles the hull has
+one of them for a face where three make it interior — is **refuted**. Measured on
+the hull directly, at a healthy three-end cube corner every profile plane *is* a
+supporting plane of the hull; at the tee's two-end vertex neither is, and the hull
+straddles both by 1.5 units. Profile-as-face tracks the angle between the chains,
+not their count.
+
+What was actually wrong is one number. The corner cell's intersection with the
+end bead cell it hands over to is 0.02 % of that bead at a cube corner and
+**98.6 %** at the tee — the cell swallowed the bead instead of overlapping it in a
+slab. The cause is upstream: `truncationParam` returns **exactly zero** there,
+because the ball is already blocked at the neighbour station and the whole of the
+last segment is inside the corner. Where a crease runs into a junction its
+stations crowd — on the tee they are a fifth of a radius apart against a whole
+radius further along. Nudged off zero that left a cell the width of the nudge, a
+sliver a thousandth of a radius long whose end faces and seam cover are both
+degenerate. The bead now ends at the neighbour station instead, and the corner
+cell reaches a hair past it into the segment beyond — measured on *that* segment,
+since a fraction is only a distance once the segment it is a fraction of is named.
+
+Swept the way D13's table was, widened to hold the tee at radii fine enough to
+show this: three shapes x six tessellations x radii x five positions, 120
+configurations each of a boss on a plate and a cylinder with both rims rounded and
+300 of the pipe tee, counting edges of the result with more than two faces.
+
+| over the 540-configuration sweep | configurations | edges |
+|---|---|---|
+| ends stopped short (previous commit) | 9 | 15 |
+| corner built, brush-marked corners excepted | **2** | **5** |
+
+Boss on a plate and cylinder are 0 of 120 on both sides, before and after.
+
+### What is still open, and it is not this
+
+The two survivors are both the pipe tee and neither is at a corner. One is a
+station seam whose cover does not reach the rim, on a crease between two curved
+walls, and it predates this change; the other is neither union but their
+difference. Both want the seam cover and the subtraction looked at rather than
+the corner, so they are **D17** below and not this item.
+
+**Acceptance:** met for the corner. `case_pipe_tee_equal` still fails its
+dilation, unchanged, and that line should move: the case's own header records
+that the equal radii make the seam tangent so the chains come back as four open
+arcs, and **it contains no junction at all** — its failure is CGAL quantising
+near-tangent slivers, orientation-dependent, and nothing in D15 reaches it.
+
+---
+
+## D17 — the last two self-touching configurations, and neither is a corner — **open**
+
+What D13 and D15 left. The 540-configuration sweep — three shapes x six
+tessellations x radii x five positions, counting edges of the result with more
+than two faces — comes back with **2 configurations and 5 edges**, both of them
+the pipe tee. A boss on a plate and a cylinder with both rims rounded are 0 of
+120 each, on the tool alone and on its union with the model.
+
+The shape is the sweep's tee: a 60 x 40 x 6 plate, a 16-tall boss of radius 8
+standing on it at `(20 + dx, 20, 6)`, and a 30-long pipe of radius 5 laid along
+x through it at `(20 + dx, 20, 10)`. Both survivors were split by returning the
+wedge union and the canal union separately instead of their difference, which is
+what says which of the three they live in. They are not the same defect and the
+split is what says so.
+
+### The station seam that predates all of this
+
+`$fn = 64`, `r = 0.5`, `dx = 13`. Two four-face edges in the tool and two in its
+union with the model, around `(41.427, 20.876, 14.918)` — on the pipe's surface
+where it emerges from the boss, **nine millimetres** from the nearest
+refused-crease vertex and nowhere near a junction.
+
+The **canal union self-touches on its own**: 3 edges before the subtraction,
+against 0 in the wedge union. Probing each canal cell with a small ball at that
+point, only one chain's cells are there at all — two consecutive cells of it and
+one seam cover, and the cover does not reach the point the two cells meet at. So
+this is D13's defect on a crease between two curved walls: the cover is built,
+and its reach falls short of the rim.
+
+**It predates D15's change.** The shipped builder fails the same way on the same
+crease at a neighbouring configuration, `$fn = 96, r = 0.6`, which the change
+happens to close. Which tessellation it bites at moves; that it bites does not.
+
+The next attempt should look at how far `appendSeamCovers` lets its apexes travel.
+The reach is bounded by the anchor's clearance of the section outline so that the
+segment between the two apexes stays inside the section — arithmetic rather than a
+guess, and the right shape of answer. What is not established is whether that
+bound is tight enough at the rim when consecutive sections differ a lot, which is
+what a seam between two curved walls gives it. Measure the cover against the seam
+it is meant to span before changing the constant.
+
+### The one that is in neither union
+
+`$fn = 16`, `r = 1.75`, `dx = 0`. One four-face edge at
+`(28.999, 23.728, 5.998)`, just under the plate's top face and 1.80 mm from the
+vertex, which at this radius is one radius out. **In the tool alone**: the union
+with the model comes back clean, so this one reaches a caller through
+`fillet_tool` used by itself rather than through a composed `fillet()`.
+
+**Neither union self-touches** — the wedge union is clean, the canal union is
+clean, and only `wedge - canal` is not. So there is no coincident face in
+anything that was built; the canal cuts the wedge tangentially and the boolean
+resolves the grazing into a knife edge. It is the coarsest tessellation the sweep
+runs with the largest radius this shape accepts, which is the corner of the
+parameter space where the ball's own facets are largest relative to the feature.
+
+Nothing here is a seam or a cell, so the seam cover cannot help it. The question
+to answer first is whether the grazing is genuine — whether the canal is tangent
+to the wedge boundary there in the continuum, in which case the answer is to make
+the canal cut through rather than along, the way the arc's two overshoot points
+and the corner ball's horns already do elsewhere — or whether it is the ball's
+tessellation putting a facet flat against a wedge face at that one size.
+
+### The one a brush still leaves cusped
+
+Not found by the sweep, which uses no brushes. Where a brush covers two of three
+arms at a vertex and the third would also have been refused for size, D15's rule
+marks the vertex, no cell is built, and the two beads that remain meet at zero
+angle — a flap, and an invalid solid. D15 states why a corner cell cannot be the
+answer there and what the alternative is: make the two beads overlap where their
+footprints cross on the wall they share, so the surfaces meet at an angle and the
+boolean resolves them into the visible line that a corner without a ball is
+supposed to have. Measure it on this case first, and then ask whether it would
+also have served for the refused-crease case D15 closed with a cell — not to
+replace what ships, which is verified, but because a route that needs no cell at
+all would simplify everything downstream of it.
+
+### A known gap in the tests rather than in the tool
+
+Several brush cases call the `brushed` helper and then hand `{}` to
+`buildRoundSolid` and `chainJunctions` instead of the set it filled. Each is
+harmless as written — the set is provably empty or immaterial in every one of them
+— but none of them would catch a regression in how `noCorner` is carried, which is
+the part of D15's rule with the least margin. Worth threading the real set through
+them the next time this area is touched.
+
+**Acceptance:** the 540-configuration sweep comes back with no self-touching
+configuration on any of its three shapes, tool alone and applied both.
 
 ---
 
