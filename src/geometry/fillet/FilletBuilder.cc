@@ -24,15 +24,11 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
-#include <cstdio>
-#include <cstdlib>
 #include <limits>
 #include <functional>
-#include <locale>
 #include <map>
 #include <memory>
 #include <set>
-#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -1168,7 +1164,7 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
     // evidence that was thrown away is all there is, and it is used.
     const size_t last = contacts[ci].empty() ? 0 : contacts[ci].size() - 1;
     int nExempt = 0, nTested = 0;
-    double offExempt = 0.0, offTested = 0.0;
+    double offExempt = 0.0;
     double coordMag = 0.0;
     Vector3d exemptAt = Vector3d::Zero();
     for (size_t i = 0; i < contacts[ci].size(); ++i) {
@@ -1190,7 +1186,6 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
         continue;
       }
       ++nTested;
-      offTested = std::max(offTested, c.offFace);
       // A miss of zero is not a miss. Where the contact lands exactly on the
       // wall's boundary the blend stops precisely at the edge of the wall it is
       // meant to meet, which is a fit — and the two are told apart by a double's
@@ -2746,9 +2741,13 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   // overlap over a region at every opening angle and every tessellation measured,
   // and short enough to stay well inside the wall it runs into where there is a
   // wall to stay inside of — where there is less room than that, seamRoom below
-  // takes what there is instead. Longer than about twice this the overrun is
-  // longer than the corner it is repairing and starts writing over the beads
-  // either side of it, so there is no room above to move into either.
+  // takes what there is instead. Below about 0.08 the floor goes ragged and
+  // non-monotone; a sweep over opening angle, radius, tessellation and this
+  // coefficient found no upper edge short of 2.0, so what is measured here is a
+  // floor and not a ceiling. Raising it is nonetheless not indicated: over the
+  // model corpus 0, 0.05, 0.15, 0.2 and 0.3 give 10, 10, 12, 13 and 12 badly
+  // tessellated models against this value's 9 — worse in both directions, and
+  // non-monotone, so the coefficient is not a lever worth pulling.
   constexpr double seamOver = 0.10;
 
   std::map<int, const Junction *> junctionAt;
@@ -2760,8 +2759,9 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
     // junction at the corners it shortened; this is the same withholding at the
     // corners a crease is missing from for any other reason.
     //
-    // Not gated on the overrun: the vertex gets no ball whatever the overrun is,
-    // and truncating into a corner that nothing then fills is a hole either way.
+    // The withholding is unconditional, and stands on its own: truncating the
+    // spines into a corner that nothing then fills is a hole however far the two
+    // beads afterwards run past the vertex.
     if (seamVertex(j.vert)) continue;
     junctionAt[j.vert] = &j;
   }
@@ -3179,8 +3179,8 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   }
   // Whether a chain is kept apart is asked of the chain, not of the model. A
   // model can carry a served corner in one place and a withheld one in another,
-  // and one flag for the whole call gives the served corner's answer to every
-  // withheld one: their chains meet at a vertex that emits no junction, so
+  // and one answer for the whole call would give the served corner's answer to
+  // every withheld one: their chains meet at a vertex that emits no junction, so
   // nothing links them and each subtracts alone — the split with none of the
   // seam it exists to make.
   //

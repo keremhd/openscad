@@ -269,3 +269,93 @@ cases. **No image or dump baseline needed re-pinning**, which is what the scope
   an `arrivesStraight` pass over every chain; its cost was not timed.
 * **`SEAT` / `WALLFACE`** — confirmed absent by grep only; D19 is parked and not
   built here.
+
+---
+
+# Follow-up pass — F1–F4 from the adversarial review (2026-08-04)
+
+Non-behavioural cleanup of the four code findings in
+`reviews/2026-08-04-env-var-removal-review.md`. F5 (evidence-quality note on the
+shell suite) and F6 (`boss`/`ctrl1` duplicate) were out of scope and are
+untouched. `arrivesStraight`, `seamRoom` and the retreat fallback were not
+touched.
+
+## F1 — the seam-overrun comment, rewritten onto the data
+
+The landed comment claimed a ceiling at "about twice" 0.10, i.e. 0.20·r. That
+number appears in no measurement. What the records actually contain:
+
+| source | rows taken |
+|---|---|
+| `handoff-2026-08-02.md:178-183` — the 2976-render sweep, θ ∈ {30…150} × r ∈ {1,2,3} × `$fn` ∈ {16,32,64,128} × c ∈ {0…200 %}, two purpose-built families | clean basin **c = 0.08 → c = 2.0·r**, no tessellation dependence of the threshold; below 0.08 the floor is ragged and non-monotone |
+| `git show fix-blockers:work/BLOCKERS-AB.md`, "Retuning the overrun coefficient" (D17.3), restated in `removal-scope.md:13` | `SEAMOVER` 0.05 / 0.15 / 0.2 / 0.3 → **10 / 12 / 13 / 12** bad tessellations against the default's **9**; and `SEAMOVER=0` → **10** |
+
+So the sweep pins a *floor* near 0.08 and finds no upper edge short of 2.0 — the
+old `kSeamOverMax = 2.0` was the top of the swept range, not a measured failure
+boundary — while the corpus sweep says every other value tried, in both
+directions, is worse than 0.10 and the response is non-monotone. The new comment
+says exactly that and nothing more. Shipped wording:
+
+> How far a bead arriving at a seam vertex runs past it, as a fraction of the
+> radius. A tenth is the measured floor: it is far enough that the two beads
+> overlap over a region at every opening angle and every tessellation measured,
+> and short enough to stay well inside the wall it runs into where there is a
+> wall to stay inside of — where there is less room than that, seamRoom below
+> takes what there is instead. Below about 0.08 the floor goes ragged and
+> non-monotone; a sweep over opening angle, radius, tessellation and this
+> coefficient found no upper edge short of 2.0, so what is measured here is a
+> floor and not a ceiling. Raising it is nonetheless not indicated: over the
+> model corpus 0, 0.05, 0.15, 0.2 and 0.3 give 10, 10, 12, 13 and 12 badly
+> tessellated models against this value's 9 — worse in both directions, and
+> non-monotone, so the coefficient is not a lever worth pulling.
+
+Every number in it is a row from the table above. The "no room above" claim is
+gone; it was never measured.
+
+## F2 — `offTested`
+
+`double offExempt = 0.0, offTested = 0.0;` → `double offExempt = 0.0;`, and the
+`offTested = std::max(offTested, c.offFace);` line deleted. `grep offTested` now
+returns nothing. Same fold as `redivided`. `nTested` (the counter the tally below
+still reads) is untouched.
+
+## F3 — includes
+
+`<cstdio>`, `<cstdlib>`, `<locale>` and `<sstream>` removed. Each was checked in
+the file itself rather than taken from the review: word-boundary grep for
+`fputs fputc printf fprintf sprintf snprintf FILE stdout stderr puts getenv
+setenv atoi atof atol strtod strtol malloc free exit abort qsort rand srand
+locale imbue ostringstream istringstream stringstream stringbuf` gives hits only
+inside English prose in comments ("puts it there", "is free", "free software")
+and on the `#include <locale>` line itself. `size_t` (110 uses) comes from
+`<cstddef>`, which stays; `std::abs` on doubles from `<cmath>`, which stays.
+The file compiles with no warning of its own after the removal. Nothing was kept
+back — no fifth include was in doubt.
+
+## F4 — two comments that still described the flag
+
+* At the junction-map skip: *"Not gated on the overrun: the vertex gets no ball
+  whatever the overrun is…"* → *"The withholding is unconditional, and stands on
+  its own: truncating the spines into a corner that nothing then fills is a hole
+  however far the two beads afterwards run past the vertex."*
+* In the grouping paragraph: *"and one flag for the whole call gives…"* → *"and
+  one answer for the whole call would give…"*. The reasoning is unchanged; only
+  its subject moved from the deleted variable to the design alternative it stands
+  against.
+
+## Verification
+
+Build provenance, by `stat` and not by "Built target": source `02:05:24`,
+`FilletBuilder.cc.o` `02:05:35`, `OpenSCAD` `02:05:36`, `OpenSCADUnitTests`
+`02:05:59`. Both binaries strictly newer than the last source edit.
+
+* **Suite: All tests passed (1709 assertions in 85 test cases)** — the number
+  held.
+* **`ctest -R fillet`: 100 % tests passed out of 21**, 11.9 s.
+* **Byte identity.** Seven models exported with a pre-cleanup binary rebuilt from
+  the same tree, then with the post-cleanup binary, all five variables explicitly
+  unset. The instrument was validated first: the pre-cleanup column reproduced
+  the review's §1.3 md5s exactly (`slab b0d8059c`, `corner c3d3a98c`,
+  `pocket fc13e94c`, `rhomb b723db2f`, `ctrl2 f51c531d`, `ctrl5 ae43dfd5`,
+  `grid c5f36622`). Post-cleanup: **`cmp` identical on all seven, 7 of 7**,
+  including the four that moved under the flag flip. Not one byte moved.
