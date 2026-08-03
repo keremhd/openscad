@@ -48,30 +48,6 @@ manifold::Manifold box(double sx, double sy, double sz)
   return manifold::Manifold::Cube(manifold::vec3(sx, sy, sz), false);
 }
 
-// Turn the seam rule on for the body of a test and put the environment back
-// afterwards, so a test that pins its shape does so whatever the caller's
-// environment says. Only the tests whose expected shape the rule changes need it;
-// everything else runs on the default path.
-struct SeamRule
-{
-  // Every variable the rule reads is saved and restored, not only the one that
-  // turns it on: a developer with the overrun exported in their shell would
-  // otherwise get a red suite for no reason of the code's.
-  const bool hadGroup = getenv("OPENSCAD_FILLET_LOCALGROUP") != nullptr;
-  const bool hadOver = getenv("OPENSCAD_FILLET_SEAMOVER") != nullptr;
-  const std::string overWas = hadOver ? std::string(getenv("OPENSCAD_FILLET_SEAMOVER")) : std::string();
-  SeamRule()
-  {
-    setenv("OPENSCAD_FILLET_LOCALGROUP", "1", 1);
-    unsetenv("OPENSCAD_FILLET_SEAMOVER");
-  }
-  ~SeamRule()
-  {
-    if (!hadGroup) unsetenv("OPENSCAD_FILLET_LOCALGROUP");
-    if (hadOver) setenv("OPENSCAD_FILLET_SEAMOVER", overWas.c_str(), 1);
-  }
-};
-
 // A CurveDiscretizer standing in for a given set of tessellation variables, the
 // way the node's factory builds one from the call's $fn/$fa/$fs.
 CurveDiscretizer discretizer(double fn, double fa = 12.0, double fs = 2.0)
@@ -1284,7 +1260,6 @@ TEST_CASE("brush: a corner one crease is cut short of gets no corner cell")
   // the brush left short is a crease of the model that no bead covers, so the two
   // beads that do arrive meet each other along it instead of a ball being built
   // over the top of it.
-  const SeamRule seamRule;
 
   const double r = 1.0;
   const auto cube = box(10.0, 10.0, 10.0);
@@ -1368,7 +1343,6 @@ TEST_CASE("brush: a slab over the top face rounds its edges and leaves the corne
   // hundredth of the radius.
   // Under the seam rule: each vertical edge is a crease of the model that no bead
   // covers, so the top beads meet along it rather than rounding its start away.
-  const SeamRule seamRule;
 
   const double r = 2.0;
   const auto cube = box(10.0, 10.0, 10.0);
@@ -1989,11 +1963,6 @@ TEST_CASE("size: a crease the exemptions cover entirely is still asked about")
   // between the two radii, and the reason to pin the large one is that it is
   // the radius at which the exemptions swallow the whole crease -- a gate that
   // returns Fits there is answering "I could not look" as if it were "it fits".
-  //
-  // The rule is set for this body rather than read from the environment, so
-  // that OPENSCAD_FILLET_SIZEGATE=legacy in a bisecting shell does not turn
-  // this into a failing suite.
-  const ScopedSizeGateRule askBlindCreases(true);
 
   const auto needle = manifold::Manifold::Cylinder(120.0, 3.0, 0.0, 3, false);
   const MergedMesh mm = mergeMesh(needle.GetMeshGL64());
@@ -2032,7 +2001,6 @@ TEST_CASE("size: a crease the exemptions cover is judged the same at any scale")
   // back Fits -- which is not an academic case: `fillet()` on crossing pipes
   // at that scale returned a solid in 19 separate pieces while the same model
   // at unit scale was sound, and the gate made no refusal at all to say so.
-  const ScopedSizeGateRule askBlindCreases(true);
 
   const auto needle = manifold::Manifold::Cylinder(120.0, 3.0, 0.0, 3, false);
   const MergedMesh mm = mergeMesh(needle.GetMeshGL64());

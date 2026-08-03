@@ -446,25 +446,6 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
                                          const std::vector<Chain>& chains, double size,
                                          bool concave, bool wedge, double thresholdDeg);
 
-// Whether a crease on which every sample was exempt is asked about anyway is
-// settable from the environment, so that a shape can be bisected against an
-// older build. A test that pins either answer therefore has to say which one it
-// means; otherwise it reports the ambient environment rather than the code, and
-// whoever is bisecting sees the suite fail for the reason they set. This holds
-// the rule for the body it is declared in and puts back whatever was in force
-// before, environment included. Nothing outside the tests sets it.
-class ScopedSizeGateRule
-{
-public:
-  explicit ScopedSizeGateRule(bool asksBlindCreases);
-  ~ScopedSizeGateRule();
-  ScopedSizeGateRule(const ScopedSizeGateRule&) = delete;
-  ScopedSizeGateRule& operator=(const ScopedSizeGateRule&) = delete;
-
-private:
-  int previous_;
-};
-
 // The chamfer/bevel cross-section at one chain station: the convex pentagon
 // TA, TB, TB', v', TA'. TA and TB are the setback points on the two walls; the
 // primed points are the same corner pushed a hair past the walls (into material

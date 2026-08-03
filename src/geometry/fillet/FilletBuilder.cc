@@ -338,7 +338,6 @@ void resampleChains(const MergedMesh& m, std::vector<Chain>& chains, double frac
 {
   if (!(fraction > 0.0)) return;
 
-  size_t redivided = 0;
   for (Chain& chain : chains) {
     const std::vector<int>& run = chain.rawRun();
     const int n = static_cast<int>(run.size());
@@ -422,17 +421,6 @@ void resampleChains(const MergedMesh& m, std::vector<Chain>& chains, double frac
     chain.at = std::move(at);
     chain.pts = std::move(pts);
     chain.verts = std::move(verts);
-    ++redivided;
-  }
-
-  // How many creases were actually re-divided, so a result that matches the one
-  // before it can be told from a mechanism that never ran. Off unless asked for,
-  // and it changes nothing either way.
-  if (getenv("OPENSCAD_FILLET_RESAMPLE_DEBUG") != nullptr) {
-    std::ostringstream os;
-    os.imbue(std::locale::classic());
-    os << "FILLETRESAMPLE chains " << chains.size() << " redivided " << redivided << "\n";
-    fputs(os.str().c_str(), stdout);
   }
 }
 
@@ -1024,42 +1012,6 @@ double pointTriangleDistance(const Vector3d& p, const Vector3d& a, const Vector3
   return (p - closestPointOnTriangle(p, a, b, c)).norm();
 }
 
-// Whether the size gate falls back to the samples its two exemptions discarded
-// on a crease where they discarded every one of them. On by default: every
-// control measured is byte-identical either way, because a crease that has
-// nothing to test also has nothing to report, and the fallback only fires where
-// the discarded samples miss their wall by millimetres. `legacy` restores the
-// behaviour where such a crease was passed unexamined, which is what bisecting
-// a shape against an older build needs.
-// Negative means the environment decides; 0 and 1 are a ScopedSizeGateRule
-// speaking over it for the duration of its body. Only the tests set it.
-int sizeGateRuleOverride = -1;
-
-bool filletSizeGateAsksBlindCreases()
-{
-  static const bool fromEnv = [] {
-    const char *s = getenv("OPENSCAD_FILLET_SIZEGATE");
-    return !(s && std::string(s) == "legacy");
-  }();
-  return sizeGateRuleOverride < 0 ? fromEnv : sizeGateRuleOverride != 0;
-}
-
-ScopedSizeGateRule::ScopedSizeGateRule(bool asksBlindCreases) : previous_(sizeGateRuleOverride)
-{
-  sizeGateRuleOverride = asksBlindCreases ? 1 : 0;
-}
-
-ScopedSizeGateRule::~ScopedSizeGateRule() { sizeGateRuleOverride = previous_; }
-
-// One line per crease on stdout saying what the size gate was able to look at:
-// how many of its contact samples were testable, how far the testable and the
-// exempt ones missed their walls, and what it concluded. Off unless asked for.
-bool filletGateDiagnostics()
-{
-  static const bool on = getenv("OPENSCAD_FILLET_SIZEGATE_DEBUG") != nullptr;
-  return on;
-}
-
 // The same chain, parameterised by the crease as the mesh has it: one station
 // per crease vertex, and the brushes' intervals carried over to that parameter.
 //
@@ -1288,21 +1240,15 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
     // millimetre would not, and the coordinate term is also what keeps a floor
     // under a very small size, which is the job an absolute one was doing badly.
     const double blindFloor = std::max(1e-4 * size, 1e-7 * coordMag);
-    if (filletSizeGateAsksBlindCreases() && verdict.fault == SizeFault::Fits && nTested == 0 &&
-        nExempt > 0 && offExempt > blindFloor) {
+    // A crease on which the two exemptions discarded every sample is asked about
+    // anyway, from the samples they discarded. A crease that has nothing to test
+    // also has nothing to report, so this is quiet wherever the gate had a
+    // testable sample; it only speaks where every sample was exempt and the
+    // discarded ones miss their wall by more than the floor above. Passing such
+    // a crease unexamined answers "I could not look" as if it were "it fits".
+    if (verdict.fault == SizeFault::Fits && nTested == 0 && nExempt > 0 &&
+        offExempt > blindFloor) {
       verdict = {SizeFault::OffFace, exemptAt, offExempt};
-    }
-
-    if (filletGateDiagnostics()) {
-      std::ostringstream os;
-      os.imbue(std::locale::classic());
-      os << "FILLETGATE chain " << ci << " closed=" << chains[ci].closed
-         << " samples=" << contacts[ci].size() << " tested=" << nTested << " exempt=" << nExempt
-         << " maxOffFace_tested=" << offTested << " maxOffFace_exempt=" << offExempt
-         << " junctions=" << junctionPos.size() << " reach=" << junctionReach
-         << " coordMag=" << coordMag << " blindFloor=" << blindFloor
-         << " verdict=" << static_cast<int>(verdict.fault) << "\n";
-      fputs(os.str().c_str(), stdout);
     }
 
     if (verdict.fault != SizeFault::Fits) continue;
@@ -2767,32 +2713,27 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   const double eps = std::max(1e-3 * r, 1e-9);
   const int segs = std::max(arcSegments, 3);
 
-  // EXPERIMENTAL (env OPENSCAD_FILLET_LOCALGROUP=1). Under the seam rule a
-  // vertex that an unfilleted crease leaves gets no corner cell and no corner
-  // ball: the two beads that do arrive meet each other in a seam along that
-  // crease instead. Nothing else about the vertex changes here — what the rule
-  // does with it is applied further down, where the cell, the ball and the
-  // grouping of the subtraction are decided.
-  const bool localGroup = getenv("OPENSCAD_FILLET_LOCALGROUP") != nullptr;
+  // Under the seam rule a vertex that an unfilleted crease leaves gets no corner
+  // cell and no corner ball: the two beads that do arrive meet each other in a
+  // seam along that crease instead. Nothing else about the vertex changes here —
+  // what the rule does with it is applied further down, where the cell, the ball
+  // and the grouping of the subtraction are decided.
   const std::set<EdgeKey> filleted = filletedEdges(chains);
   const std::vector<Junction> junctions = chainJunctions(m, adj, chains, r, concave, noCorner);
   // Vertices some bead reaches on a curve. The seam rule carries a bead past the
   // vertex along the line its last segment lies on, which is the crease's own
   // continuation only where the crease arrives straight; see arrivesStraight.
   std::set<int> arrivesBent;
-  if (localGroup) {
-    for (const Chain& c : chains) {
-      if (c.closed || c.verts.size() < 2) continue;
-      for (const bool front : {true, false})
-        if (!arrivesStraight(m, c, front))
-          arrivesBent.insert(front ? c.verts.front() : c.verts.back());
-    }
+  for (const Chain& c : chains) {
+    if (c.closed || c.verts.size() < 2) continue;
+    for (const bool front : {true, false})
+      if (!arrivesStraight(m, c, front))
+        arrivesBent.insert(front ? c.verts.front() : c.verts.back());
   }
   // Every use below asks the same question of the same vertex, and answering it
   // walks the edge table, so it is answered once.
   std::map<int, bool> seamCache;
   auto seamVertex = [&](int v) {
-    if (!localGroup) return false;
     const auto it = seamCache.find(v);
     if (it != seamCache.end()) return it->second;
     const bool yes = arrivesBent.count(v) == 0 &&
@@ -2801,40 +2742,14 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
     return yes;
   };
   // How far a bead arriving at a seam vertex runs past it, as a fraction of the
-  // radius, and the largest the override may ask for. The ceiling is the top of
-  // the measured basin: past it the overrun is longer than the corner it is
-  // repairing and starts writing over the beads either side of it.
-  constexpr double kSeamOverDefault = 0.10;
-  constexpr double kSeamOverMax = 2.0;
-  // A tenth is the measured floor: it is far enough that the two beads
+  // radius. A tenth is the measured floor: it is far enough that the two beads
   // overlap over a region at every opening angle and every tessellation measured,
   // and short enough to stay well inside the wall it runs into where there is a
   // wall to stay inside of — where there is less room than that, seamRoom below
-  // takes what there is instead.
-  //
-  // env OPENSCAD_FILLET_SEAMOVER=<fraction of r> overrides it, and overrides
-  // nothing else: at zero the beads stop a hair short of each other again, which
-  // is the whole of the difference, and everything the seam rule does about the
-  // corner cell, the ball and the grouping still happens.
-  const double seamOver = [&]() -> double {
-    if (!localGroup) return 0.0;
-    const char *s = getenv("OPENSCAD_FILLET_SEAMOVER");
-    if (s == nullptr) return kSeamOverDefault;
-    // Not atof or strtod: both read the decimal point of the running locale, and
-    // under a locale that writes it as a comma "0.1" parses as a clean zero —
-    // which is a mode of its own here, not a misreading anyone would notice.
-    std::istringstream in{std::string(s)};
-    in.imbue(std::locale::classic());
-    double v = 0.0;
-    in >> v;
-    if (in.fail() || !in.eof() || !std::isfinite(v) || v < 0.0 || v > kSeamOverMax) {
-      LOG(message_group::Warning, "Ignoring OPENSCAD_FILLET_SEAMOVER=%1$s: expected a fraction of "
-                                  "the radius between 0 and %2$g",
-          s, kSeamOverMax);
-      return kSeamOverDefault;
-    }
-    return v;
-  }();
+  // takes what there is instead. Longer than about twice this the overrun is
+  // longer than the corner it is repairing and starts writing over the beads
+  // either side of it, so there is no room above to move into either.
+  constexpr double seamOver = 0.10;
 
   std::map<int, const Junction *> junctionAt;
   for (const Junction& j : junctions) {
@@ -3129,8 +3044,8 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
         // has segments a fraction of the hair long, and taking the hair off one
         // of those is taking off the whole cell.
         double back = std::min(eps / step, 0.05);
-        // EXPERIMENTAL (env OPENSCAD_FILLET_SEAMOVER=<fraction of r>): at a seam
-        // vertex, run the bead PAST the vertex instead of stopping short of it.
+        // At a seam vertex, run the bead PAST the vertex instead of stopping
+        // short of it.
         //
         // Stopping short leaves the two beads a hair apart with their surfaces
         // parallel across the gap; running exactly to the vertex has them touch.
@@ -3148,7 +3063,7 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
         // says how much of it there is and the overrun takes a share of that
         // instead; a bead that ran past the far side of a thin wall would stand
         // proud of a face nothing was blending.
-        if (seamOver > 0.0 && seamVertex(vert)) {
+        if (seamVertex(vert)) {
           std::vector<Vector3d> swept(sec[endIdx].w.begin(), sec[endIdx].w.end());
           swept.push_back(sec[endIdx].v);
           const Vector3d dir = (sec[endIdx].v - sec[nbrIdx].v) / step;
@@ -3224,8 +3139,8 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
     if (keepOf[ci].empty() && !chains[ci].keep.empty()) chainUsable[ci] = false;
   }
 
-  // EXPERIMENTAL (env OPENSCAD_FILLET_LOCALGROUP=1): group the subtraction by
-  // the chains a corner ball actually ties together, instead of globally.
+  // Group the subtraction by the chains a corner ball actually ties together,
+  // instead of globally.
   //
   // The recorded reason the subtraction is global is that a corner ball has to
   // cut the wedges of every chain meeting at its vertex. That requirement is
@@ -3249,7 +3164,7 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   // grouping must be the one it would have had without it: the split is what
   // lets two beads meet in a seam, and with no seam to make it is a plain loss of
   // the coincident-face cover a single subtraction gives. So the grouping is
-  // taken from the rule and not from the knob — no vertex served, one group.
+  // taken from what the rule actually served — no vertex served, one group.
   std::vector<int> parent(chains.size());
   for (size_t i = 0; i < chains.size(); ++i) parent[i] = static_cast<int>(i);
   std::function<int(int)> findRoot = [&](int x) {
@@ -3282,7 +3197,7 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   };
   int rest = -1;
   for (size_t i = 0; i < chains.size(); ++i) {
-    if (localGroup && servedEnd(i)) continue;
+    if (servedEnd(i)) continue;
     if (rest < 0) rest = static_cast<int>(i);
     else parent[findRoot(static_cast<int>(i))] = findRoot(rest);
   }
@@ -3290,7 +3205,7 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   // chains are one group wherever one is built. A seam vertex builds none, and
   // there the chains are left as they are.
   for (const Junction& j : junctions) {
-    if (localGroup && seamVertex(j.vert)) continue;
+    if (seamVertex(j.vert)) continue;
     const auto it = chainsAt.find(j.vert);
     if (it == chainsAt.end()) continue;
     for (size_t k = 1; k < it->second.size(); ++k) {
