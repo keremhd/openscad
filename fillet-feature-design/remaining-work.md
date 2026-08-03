@@ -86,8 +86,9 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
    already computes, so the cell and the stubs go together. 9 self-touching
    configurations of 540 become 2, and both survivors are D17 rather than this.
    Measured and dead: the count of ends alone breaks the documented thin-slab
-   idiom, and no threshold on the opening angle separates the cases — 90 degrees
-   comes back clean while 75 and 105 do not. See below.
+   idiom, and no threshold on the opening angle separates the cases. The reading
+   that 90 degrees is clean held only for one shape at one size and is retired by
+   D17. See below.
 16. ~~**D16**~~ — **closed, and nothing ships.** Five rules were built and each
    was broken by a shape a modeller would draw. What came out is a congruence: a
    flat land between two chamfers presents the same facet, the same seams and the
@@ -101,7 +102,11 @@ Roughly dependency-ordered; the groupings are what matter more than the sequence
 17. **D17** — the two configurations still self-touching after D13 and D15, both
    the pipe tee and neither at a corner. One is a station seam whose cover does
    not reach the rim, and predates both; the other is neither union but their
-   difference. See below.
+   difference. Carried with them is the third item, the cusp a brush still
+   leaves, which is answered: corner cells honour the brush on a convex tool and
+   not on a concave one, decided on the sign because nothing at the corner
+   predicts the cusp — the opening angle least of all. See below, and for the
+   over-release it trades for.
 18. **REVIEW** — an outside read of what ships, in
    [`pr-review.md`](pr-review.md). Four blocking items left — R1, R2, R5 and R7;
    R3 and R4 are closed with D13. Kept
@@ -2136,10 +2141,16 @@ radii:
 | configurations self-touching, of 3 | 1 | 2 | **0** | 2 | 1 |
 
 Flat walls, exact normals, no curvature and no tessellation seam anywhere near
-it. **Ninety degrees is the only clean column**, and it is clean for a reason that
-is about the mesh rather than the shape: there the two beads are mirror images, so
-their intersection curve lands on the symmetry plane and the boolean resolves it.
-Every other angle leaves a flap. Building the corner closes all fifteen.
+it. Ninety degrees is the only clean column **of this table**, and it is clean for
+a reason that is about the mesh rather than the shape: there the two beads are
+mirror images, so their intersection curve lands on the symmetry plane and the
+boolean resolves it. Every other angle leaves a flap. Building the corner closes
+all fifteen.
+
+**Do not read that column as a property of ninety degrees.** It is one shape at
+one size. D17 swept twenty-five congruent right-angled corners at `r = 2` and 6 to
+7 of them cusp, so the mirror symmetry above buys nothing in general and **no rule
+may be built on the opening angle**.
 
 That also settles the metric question the two open defects share: the boss/plate
 crease this shows up on has a setback uniform to **1.3e-13 %**, and a purpose-built
@@ -2196,28 +2207,24 @@ of zero thickness, because two surfaces meeting at no angle give the boolean
 nothing to resolve. The output is a degenerate solid, and no acceptable amount of
 brush honouring buys that.
 
-So the corner cell is not the only thing that could answer it, and here it is the
-one thing that cannot: a cell is hulled from the seated ball and the sections the
-beads stop at, with no perpendicular to clip it against in three directions at
-once, so it always stands outside what the caller selected. What is wanted instead
-is for the two beads to **cross** rather than graze — overlapping where their
-footprints meet on the shared wall, about a radius out from the vertex, so their
-surfaces meet at a real angle. That leaves the visible line, adds material only
-inside the beads' own footprints, needs no cell, and therefore touches neither the
-thin-slab idiom nor the brush contract. It is tracked in D17 and is not the
-"running the ends a hair past the vertex" route already rejected above: that one
-extended the ends *along the crease* through the vertex, which is a different
-place from where the flanks actually cross.
-
-No case pins any of this today; it wants one, and the shape to write it on is the
-flat two-bar corner below with a brush over both plate creases.
+**What answers it is the corner cell after all, and the thing that decides is the
+tool's sign.** This section used to propose making the two beads **cross** rather
+than graze, on the reasoning that a cell hulled from the seated ball and the two
+stop sections has no perpendicular to clip it against in three directions at once
+and therefore always stands outside what the caller selected. That route is
+superseded and was not built. What ships instead builds the cell — but only on the
+concave side, where honouring the brush is not known to be sound, and never on the
+convex side, where the thin-slab idiom lives and no marked corner has ever been
+measured cusping. D17 records the rule, what it cost, and the over-release it
+trades for.
 
 **The angle does not work and was measured, not assumed.** The obvious rule — a
 cell only where the two ends leave nearly parallel, since a cube corner miters
 cleanly at 90 degrees — fails on the table above: 75 and 105 degrees both cusp
-while 90 does not, so no threshold separates them. A triangular prism's top corner
-and the two-bosses control both measure **60.000 degrees** and come back on
-opposite sides. Do not rebuild it.
+while 90 does not there, so no threshold separates them. A triangular prism's top
+corner and the two-bosses control both measure **60.000 degrees** and come back on
+opposite sides. D17 closed the last opening by measuring right-angled corners that
+do cusp. Do not rebuild it.
 
 ### The two-profile corner cell, and what was wrong with it
 
@@ -2332,19 +2339,138 @@ the canal cut through rather than along, the way the arc's two overshoot points
 and the corner ball's horns already do elsewhere — or whether it is the ball's
 tessellation putting a facet flat against a wedge face at that one size.
 
-### The one a brush still leaves cusped
+### The one a brush still leaves cusped — decided on the tool's sign
 
-Not found by the sweep, which uses no brushes. Where a brush covers two of three
-arms at a vertex and the third would also have been refused for size, D15's rule
-marks the vertex, no cell is built, and the two beads that remain meet at zero
-angle — a flap, and an invalid solid. D15 states why a corner cell cannot be the
-answer there and what the alternative is: make the two beads overlap where their
-footprints cross on the wall they share, so the surfaces meet at an angle and the
-boolean resolves them into the visible line that a corner without a ball is
-supposed to have. Measure it on this case first, and then ask whether it would
-also have served for the refused-crease case D15 closed with a cell — not to
-replace what ships, which is verified, but because a route that needs no cell at
-all would simplify everything downstream of it.
+Not found by the sweep, which uses no brushes. Where a brush covers a crease for
+less than the radius back from a vertex, `dropUncoveredCorners` marks that vertex
+— the `noCorner` set — and no corner cell is built, which is what the caller asked
+for. But the two beads that still arrive there have nothing between them, so the
+caller's solid touches itself: an edge carrying more than two faces, which a
+Nef/CGAL kernel downstream **refuses outright rather than reports**.
+
+**The rule is the tool's sign and nothing smaller.**
+
+```cpp
+inline bool cornerCellsHonourBrush(bool concave) { return !concave; }
+```
+
+in `FilletBuilder_internal.h`. A convex tool honours the mark. A concave tool
+ignores it, builds the corner anyway, and warns at the node.
+
+**Why the sign, and why nothing finer.**
+
+*Backed by unit tests in the tree* (`FilletBuilder_test.cc`, the two `brush:`
+cases named below):
+
+- **Convex marked corners do not cusp — 0 of 16.** "brush: a slab over the top
+  face rounds its edges and leaves the corners square" sweeps a cube top at eight
+  slab depths spanning four orders of magnitude, at `r = 2` and `r = 3`, and
+  checks `touchingEdges` on the finished solid at every one. None touch with the
+  brush honoured.
+- **Concave ones do — 6 of 15.** "brush: a concave corner the brush was cut short
+  of is built anyway" sweeps a two-bar corner at five opening angles and three
+  radii. With the brush honoured, six come back touching: `r = 1` at 60°, 75° and
+  105°; `r = 2` at 75° and 105°; `r = 3` at 120°. Building the corner leaves none
+  of the fifteen touching. Note what that list shows: an angle that touches at one
+  radius is clean at another, so no property of a single corner predicts it and
+  any per-corner rule is fitting noise.
+
+*Session sweeps, not landed as tests.* Recorded because they were measured, but
+nothing in the tree re-checks them:
+
+- Larger sweeps over where the feature sits on the plate showed *which*
+  configurations touch moving with position, at a fixed angle and radius.
+- Convex: a wider set than the test carries — an irregular quadrilateral prism at
+  three tessellations and an oblique pyramid — also produced no touching marked
+  corner. Earlier drafts of this section totalled these as "0 of 19"; the
+  enumeration behind that figure does not add up and the shapes are not in the
+  tree, so treat the 16 above as the backed number and this as corroboration.
+
+**The opening angle least of all.** D15's table below has ninety degrees as its
+only clean column; that is one shape at one size and must not be read as a
+property of ninety degrees. The D17 session swept twenty-five congruent
+right-angled corners at `r = 2` and **6 to 7 of them cusp** — that is the figure
+this document stands behind for that experiment. An earlier draft here said "on a
+grid of 25 congruent corners only 2 touch"; that appears to be D15's separate
+"9 self-touching configurations → 2" sweep written into the wrong sentence, and it
+is not a second measurement of the 25-corner grid. Neither figure is re-measured
+by any test in the tree, and the 25-corner grid was not landed as one.
+
+The unit test above makes the same point without needing that grid: ninety degrees
+is one of the five angles it sweeps, and at none of its three radii does it come
+back touching — while 75° and 105° do at two radii each and 120° at one. So the
+angle sorts nothing. Ninety degrees is also the angle of the convex thin-slab
+idiom, where the brush *is* honoured and the solid is sound, so the two cases are
+not distinguishable by anything at the corner. They are distinguishable by the
+sign.
+
+**Read `touchingEdges` as a proxy.** It counts edges carrying more than two faces
+after merging vertices at exactly equal positions, so it sees a touch only where
+the boolean happened to emit identical coordinates on both surfaces. Non-zero
+proves a defect; zero is evidence and not proof. That is also why the concave test
+asserts only that *some* configurations touch and not which six — the six are a
+property of the float output and would move under a backend that rounded
+differently.
+
+**The outcome predicate was built and is abandoned — do not rebuild it.** A
+`cornersToRelease` set that decided per corner by testing the built solid made the
+geometry **backend-dependent**, left 8 of 15 CGAL configurations still
+self-touching, and built 1 of 4 congruent corners in a symmetric pocket, so a
+four-fold symmetric pocket came back asymmetric. The related option — normalising
+the mesh first so that the test reads the same everywhere — is structurally dead:
+the Manifold and the CGAL pipeline hand the fillet node meshes that differ —
+the same solid to eight figures, but with vertices moved and merged by Nef, so the
+two do not share a vertex set. Anything read off a boolean of that mesh differs
+between backends by construction. (An earlier draft quantified this as "18 of
+about 25 vertices shared". No measurement in the tree produces that figure — the
+unit suite is Manifold-only — so it is recorded here as the qualitative fact it
+is; the load-bearing point is that the meshes differ at all.)
+
+Cost of the sign rule, measured:
+
+| | sign rule | outcome predicate |
+|---|---|---|
+| backend volumes identical | **15 of 15** | 8 of 15 |
+| extra boolean or rebuild | none | one |
+| diff | **+22 lines** | +70 |
+
+Test suite 1860 assertions across 84 cases (1728 before the two brush cases were
+widened to sweep radii). The convex thin slab is 983.36182 with 0 corners released
+at every brush height, and the two-of-three corner case is 1.66323388.
+
+**What the node says.** One warning per node carrying a count, not one per corner:
+a 200×200 plate with a 5×5 grid of pockets, floor brushed thin, `fillet_tool(r=2)`
+emits a single line reading "100 corners are built although the brush covers less
+than the radius 2 of the creases meeting there". The message does not claim the
+corners needed the cell — which of them did is exactly what cannot be told from
+the corner — it says they are all built for that reason.
+
+### The trade that was accepted with it
+
+This is a trade and not a win. The sign rule builds corners at all 15 concave
+configurations of the test sweep where 6 needed one. Concretely, the concave analogue of the
+thin-slab idiom — a pocket floor brushed thin, with vertical corners meant to stay
+sharp — **loses its sharp corners**: 27251.724 at HEAD becomes 27267.678.
+
+The owner accepted it, for two reasons:
+
+- **Nothing that worked is being taken away.** That idiom does not work at HEAD
+  either: it returns an invalid solid, a self-touching edge, which downstream
+  refuses.
+- **Uniformly wrong beats selectively right.** The abandoned predicate's "fix"
+  built 1 of 4 congruent corners in that same pocket. Building all four is the
+  better answer even though it is the more material one.
+
+The second is the project standard rather than a judgement made here —
+generalisation over patchwork, being bad but uniform beats being excellent but
+discontinuous.
+
+### A pre-existing convex defect found in passing, deliberately not chased
+
+Two convex models self-touch with **no marked corner at all** and no warning, at
+coarse arc tessellation. HEAD does this too, so it is not caused by the sign rule
+and it is not the brushed cusp. Recorded here because it was seen, not because it
+belongs to this item.
 
 ### A known gap in the tests rather than in the tool
 
