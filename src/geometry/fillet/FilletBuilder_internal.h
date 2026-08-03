@@ -24,6 +24,7 @@
 // combinatorics — vertex merging, edge adjacency, concavity — directly, without
 // going through the geometry evaluator. Not part of the public fillet API.
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
@@ -150,17 +151,128 @@ using SpineInterval = std::pair<double, double>;
 // meaning the whole of it — the common case, and the only one when no brush was
 // given at all. A chain the brushes miss entirely is not carried with an empty
 // `keep`; it is dropped from the chain list.
+//
+// A chain has two polylines, and the distinction only appears once one has been
+// resampled. `raw` is the crease as the mesh has it, every vertex of it, and is
+// never altered by anything here. The stations — the points the bead's sections
+// are placed at — are `at`, `pts` and `verts` read together: `at[i]` is where
+// station i sits in `raw`'s own parameter (integer k meaning exactly `raw[k]`,
+// k + f meaning f of the way along raw segment k), `pts[i]` is its position, and
+// `verts[i]` is the mesh vertex it is, or -1 where it is a new point interior to
+// a raw segment.
+//
+// `at` and `pts` empty is the identity: one station per crease vertex, which is
+// how every chain leaves buildChains and how it stays unless resampleChains has
+// something to fix. Every accessor below reduces to the plain expression it
+// replaced in that case, so an unresampled chain is built from bit-identical
+// inputs.
+//
+// The two ends are always exact mesh vertices, resampled or not. Chains are cut
+// at every vertex of crease-degree other than two, so a junction is a chain end
+// by construction, and the whole of the junction, brush-coverage and corner-cell
+// bookkeeping identifies ends by their mesh vertex.
 struct Chain
 {
   std::vector<int> verts;
   bool closed = false;
   std::vector<SpineInterval> keep;
+  std::vector<int> raw;
+  std::vector<double> at;
+  std::vector<Vector3d> pts;
+
+  // The crease polyline, which is `raw` once anything has set it and `verts`
+  // before that — buildChains fills `raw`, so the fallback is only for a Chain
+  // assembled by hand, as the unit tests do.
+  const std::vector<int>& rawRun() const { return raw.empty() ? verts : raw; }
+  int rawCount() const { return static_cast<int>(rawRun().size()); }
+
+  // Where station i sits in the crease's own parameter.
+  double param(int i) const { return at.empty() ? static_cast<double>(i) : at[i]; }
+
+  // Station i's position. Identical to m.pos[verts[i]] whenever that is what it
+  // is, since `pts` is filled by copy.
+  const Vector3d& point(const std::vector<Vector3d>& pos, int i) const
+  {
+    return pts.empty() ? pos[verts[i]] : pts[i];
+  }
+
+  // The mesh edge the crease arrives at station i on, and the one it leaves by.
+  // At a station that is a mesh vertex these are the two crease edges meeting
+  // there, exactly as they always were; at an interpolated station both are the
+  // one raw segment it lies inside, which is what says such a station cannot be
+  // a corner of the crease. {-1, -1} where the crease ends.
+  std::pair<int, int> inEdge(int i) const
+  {
+    const std::vector<int>& run = rawRun();
+    const int n = static_cast<int>(run.size());
+    const double p = param(i);
+    const int k = static_cast<int>(p);
+    if (p > static_cast<double>(k)) return {run[k], run[(k + 1) % n]};
+    if (k > 0) return {run[k - 1], run[k]};
+    return closed && n > 1 ? std::pair<int, int>{run[n - 1], run[0]}
+                           : std::pair<int, int>{-1, -1};
+  }
+  std::pair<int, int> outEdge(int i) const
+  {
+    const std::vector<int>& run = rawRun();
+    const int n = static_cast<int>(run.size());
+    const double p = param(i);
+    const int k = static_cast<int>(p);
+    if (p > static_cast<double>(k)) return {run[k], run[(k + 1) % n]};
+    if (k + 1 < n) return {run[k], run[k + 1]};
+    return closed && n > 1 ? std::pair<int, int>{run[n - 1], run[0]}
+                           : std::pair<int, int>{-1, -1};
+  }
+
+  // A mesh edge representative of the crease between stations i and j: the raw
+  // segment their midpoint falls in, so a station segment spanning several raw
+  // ones is asked about in the middle rather than at either end.
+  std::pair<int, int> rawMid(int i, int j) const
+  {
+    const std::vector<int>& run = rawRun();
+    const int n = static_cast<int>(run.size());
+    const double a = param(i);
+    double b = param(j);
+    if (b <= a) b += static_cast<double>(n);  // the closing segment of a ring
+    const int k = std::min(static_cast<int>(0.5 * (a + b)), n - 1);
+    return {run[k % n], run[(k + 1) % n]};
+  }
 };
 
 // Walk the selected edges into chains via shared vertices. Vertices of degree 2
 // are interior stations; degree 1 are open ends; degree >= 3 are branch/junction
 // vertices where chains terminate. Returns chains in canonical order.
 std::vector<Chain> buildChains(const MergedMesh& m, const std::vector<EdgeKey>& edges);
+
+// Put a chain's stations back at even spacing, before anything is built from it.
+//
+// Where two tessellations cross, the crease they share has wildly unequal
+// segments: on a hole through a curved wall the shortest is a couple of
+// thousandths of the median, and that ratio gets worse with refinement rather
+// than better. One station per crease vertex then puts two stations almost on
+// top of each other; their averaged wall normals are ill-conditioned, the arcs
+// they carry sit at different depths and cross, and the wedge left between them
+// stands in the bore as a fin.
+//
+// The fix is spacing, and spacing alone: the stations are laid out at equal arc
+// length along the crease, as many of them as the crease has segments. Density
+// is therefore exactly what it was — this buys regularity without paying for it
+// in sampling, which is what dropping vertices instead would do, and what would
+// show up as a bead lofting longer chords and dipping further off the true wall.
+//
+// A station that lands between two crease vertices is a new point *on* the
+// crease polyline, so the crease is not moved, only re-divided; its walls are
+// the walls of the raw segment it lies in. The two ends are pinned to their mesh
+// vertices, since they are where corner cells are built and where the brush's
+// coverage is tested, and a ring's canonical first vertex is pinned with them.
+void resampleChains(const MergedMesh& m, std::vector<Chain>& chains, double fraction);
+
+// What counts as a sliver, and so whether a chain is resampled at all: a segment
+// shorter than half its chain's median. Strictly below 1 is the whole point — a
+// crease whose segments are all near its median has none, is never resampled,
+// and comes out of the builder bit for bit as it went in. A hole in a flat plate
+// and a crease along a surface of revolution's axis are both in that case.
+inline constexpr double kSliverFraction = 0.5;
 
 // Which stretches of a chain the brushes select. The spine is intersected, not
 // the tool volume: each segment is cast against the brush and the crossings
@@ -333,6 +445,25 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
                                          const std::map<EdgeKey, std::vector<int>>& adj,
                                          const std::vector<Chain>& chains, double size,
                                          bool concave, bool wedge, double thresholdDeg);
+
+// Whether a crease on which every sample was exempt is asked about anyway is
+// settable from the environment, so that a shape can be bisected against an
+// older build. A test that pins either answer therefore has to say which one it
+// means; otherwise it reports the ambient environment rather than the code, and
+// whoever is bisecting sees the suite fail for the reason they set. This holds
+// the rule for the body it is declared in and puts back whatever was in force
+// before, environment included. Nothing outside the tests sets it.
+class ScopedSizeGateRule
+{
+public:
+  explicit ScopedSizeGateRule(bool asksBlindCreases);
+  ~ScopedSizeGateRule();
+  ScopedSizeGateRule(const ScopedSizeGateRule&) = delete;
+  ScopedSizeGateRule& operator=(const ScopedSizeGateRule&) = delete;
+
+private:
+  int previous_;
+};
 
 // The chamfer/bevel cross-section at one chain station: the convex pentagon
 // TA, TB, TB', v', TA'. TA and TB are the setback points on the two walls; the

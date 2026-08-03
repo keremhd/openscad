@@ -48,6 +48,30 @@ manifold::Manifold box(double sx, double sy, double sz)
   return manifold::Manifold::Cube(manifold::vec3(sx, sy, sz), false);
 }
 
+// Turn the seam rule on for the body of a test and put the environment back
+// afterwards, so a test that pins its shape does so whatever the caller's
+// environment says. Only the tests whose expected shape the rule changes need it;
+// everything else runs on the default path.
+struct SeamRule
+{
+  // Every variable the rule reads is saved and restored, not only the one that
+  // turns it on: a developer with the overrun exported in their shell would
+  // otherwise get a red suite for no reason of the code's.
+  const bool hadGroup = getenv("OPENSCAD_FILLET_LOCALGROUP") != nullptr;
+  const bool hadOver = getenv("OPENSCAD_FILLET_SEAMOVER") != nullptr;
+  const std::string overWas = hadOver ? std::string(getenv("OPENSCAD_FILLET_SEAMOVER")) : std::string();
+  SeamRule()
+  {
+    setenv("OPENSCAD_FILLET_LOCALGROUP", "1", 1);
+    unsetenv("OPENSCAD_FILLET_SEAMOVER");
+  }
+  ~SeamRule()
+  {
+    if (!hadGroup) unsetenv("OPENSCAD_FILLET_LOCALGROUP");
+    if (hadOver) setenv("OPENSCAD_FILLET_SEAMOVER", overWas.c_str(), 1);
+  }
+};
+
 // A CurveDiscretizer standing in for a given set of tessellation variables, the
 // way the node's factory builds one from the call's $fn/$fa/$fs.
 CurveDiscretizer discretizer(double fn, double fa = 12.0, double fs = 2.0)
@@ -1256,6 +1280,12 @@ TEST_CASE("brush: a corner one crease is cut short of gets no corner cell")
   // for size leaves behind, and nothing in the chains that are left tells the two
   // apart. So the volume below is a guard on more than the brush: a corner cell
   // built from the count of ends alone shows up here as a third more material.
+  // Under the seam rule, which is what decides the shape here: the vertical crease
+  // the brush left short is a crease of the model that no bead covers, so the two
+  // beads that do arrive meet each other along it instead of a ball being built
+  // over the top of it.
+  const SeamRule seamRule;
+
   const double r = 1.0;
   const auto cube = box(10.0, 10.0, 10.0);
   const MergedMesh mm = mergeMesh(cube.GetMeshGL64());
@@ -1290,7 +1320,23 @@ TEST_CASE("brush: a corner one crease is cut short of gets no corner cell")
     if (shortVolume == 0.0) shortVolume = tool.Volume();
     else CHECK(tool.Volume() == Approx(shortVolume));
   }
-  CHECK(shortVolume == Approx(1.6632).margin(1e-3));
+  // The whole of what the brush asked for, and the overrun that lets the two beads
+  // meet. The quarter-round cross-section is r*r - pi*r*r/4, so for r = 1:
+  //
+  //   two beads, 5 mm each   2 * 5   * (1 - pi/4) = 2.146018
+  //   two overruns, 0.1 r    2 * 0.1 * (1 - pi/4) = 0.042920
+  //                                                 --------
+  //                                                 2.188938
+  //
+  // against 2.189273 measured, 0.015% apart. The overrun is outside the cube, so
+  // it is not material the caller's difference takes: measured against a hand-built
+  // model of the delivered shape - two beads capped flat at 5 mm, the vertical edge
+  // square - this build is 0.0006 mm3 proud.
+  //
+  // This pinned 1.6632 before, which is 7.75 mm of bead where the brush asked for
+  // 10: the beads were being clipped back to 3.875 mm each. Against that same hand
+  // model the old shape is 0.47 mm3 proud. The old value pinned the clipped bead.
+  CHECK(shortVolume == Approx(2.18927).margin(1e-3));
 
   // Past r the same brush gets the corner, and the third bead with it.
   size_t chainsLeft = 0, junctions = 0;
@@ -1320,6 +1366,10 @@ TEST_CASE("brush: a slab over the top face rounds its edges and leaves the corne
   // survived saw two where three arrived, built the corner, and turned this into
   // the eight-sphere shape. Less brush, more material, with the switch at a
   // hundredth of the radius.
+  // Under the seam rule: each vertical edge is a crease of the model that no bead
+  // covers, so the top beads meet along it rather than rounding its start away.
+  const SeamRule seamRule;
+
   const double r = 2.0;
   const auto cube = box(10.0, 10.0, 10.0);
   const MergedMesh mm = mergeMesh(cube.GetMeshGL64());
@@ -1361,7 +1411,20 @@ TEST_CASE("brush: a slab over the top face rounds its edges and leaves the corne
   // Pinned against the shape it must not be. Building a corner cell at each of
   // the four top vertices instead gives 967.4 here, so the two answers are 16
   // cubic millimetres apart and this number tells them apart.
-  CHECK(first == Approx(983.36).margin(0.05));
+  //
+  // This pinned 983.36 before, and that number contradicts the prose above it. The
+  // prose asks for the four top edges "covered end to end, so they carry full
+  // beads"; a hand-built model of exactly that - four full quarter-rounds, the
+  // four vertical edges left square - measures 968.5591. HEAD's 983.36 is 15.16
+  // mm3 of material above that hand ideal, i.e. bead the four top edges never got,
+  // and HEAD's mesh for this shape also carries a non-manifold edge. So the old
+  // number pinned a defect, not the documented shape.
+  //
+  // 968.089 rather than the hand ideal's 968.559 because this test builds the arc
+  // from 32 segments: an inscribed polygon cuts a little wider than the true
+  // quarter circle. At the tessellation the hand model uses the two agree to
+  // 0.018 mm3.
+  CHECK(first == Approx(968.089).margin(0.05));
 }
 
 TEST_CASE("brush: a corner the brush reaches but does not cover is not built")
@@ -1908,6 +1971,98 @@ TEST_CASE("size: only the stretch of crease the brushes kept is asked about")
   const auto verdicts = checkChainSizes(mm, adj, highChains, 1.0, false, false, 20.0);
   CHECK(countFault(verdicts, SizeFault::OffFace) == highChains.size());
   for (const auto& v : verdicts) CHECK(v.where.z() > 90.0);
+}
+TEST_CASE("size: a crease the exemptions cover entirely is still asked about")
+{
+  // The same needle, and a radius chosen so that the junction exemption alone
+  // covers the whole crease: the three slant creases are 120 long and meet at
+  // the apex, so a reach of 2 * 70 = 140 puts every sample on every one of them
+  // inside it, and the two end samples are exempt as ends. Nothing is left for
+  // the gate to look at.
+  //
+  // What the answer has to be does not depend on that. A ball of radius 70 set
+  // against a needle 3 across stands off the walls it is meant to blend by 66
+  // and 121 mm, on every one of the six creases, so all six have to be refused
+  // and refused as OffFace. That is not the small-radius answer scaled up: at
+  // radius 1 the three base creases return Fits, and only the three slant
+  // creases are refused, by 0.156, 0.156 and 1.57. Half the verdicts change
+  // between the two radii, and the reason to pin the large one is that it is
+  // the radius at which the exemptions swallow the whole crease -- a gate that
+  // returns Fits there is answering "I could not look" as if it were "it fits".
+  //
+  // The rule is set for this body rather than read from the environment, so
+  // that OPENSCAD_FILLET_SIZEGATE=legacy in a bisecting shell does not turn
+  // this into a failing suite.
+  const ScopedSizeGateRule askBlindCreases(true);
+
+  const auto needle = manifold::Manifold::Cylinder(120.0, 3.0, 0.0, 3, false);
+  const MergedMesh mm = mergeMesh(needle.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 20.0, /*wantConcave=*/false));
+  REQUIRE(chains.size() == 6);
+
+  const auto verdicts = checkChainSizes(mm, adj, chains, 70.0, false, false, 20.0);
+  CHECK(countFault(verdicts, SizeFault::OffFace) == chains.size());
+  // And by an amount worth the name. The needle is 3 across and 120 long, so a
+  // blend of 70 misses its walls by tens of millimetres; a fault reported at a
+  // fraction of the size would mean the gate had found float noise rather than
+  // the miss.
+  for (const auto& v : verdicts) CHECK(v.amount > 70.0 * 0.5);
+}
+
+TEST_CASE("size: a crease the exemptions cover is judged the same at any scale")
+{
+  // The same needle and the same radius as above, at one millionth of the size.
+  // A modeller without units has no size at which its answers may change, and
+  // nothing about this question depends on one: the two solids are similar, so
+  // a blend of 70e-6 on a needle 3e-6 across stands off its walls by exactly a
+  // millionth of what a blend of 70 on a needle 3 across stands off by, and all
+  // six creases have to be refused for the same reason and by that amount.
+  //
+  // The expectation is derived from that similarity rather than from what the
+  // gate emits: the scaled amounts are checked against the unit-scale ones,
+  // measured here in the same test, times the scale. The unit-scale ones are
+  // themselves the hand-built answer pinned above -- 66.43 on the three base
+  // creases and 121.09 on the three slant ones -- so both ends of the ratio are
+  // tied to the needle's proportions and neither is a reading of the output.
+  //
+  // What this catches is a margin expressed as an absolute number of
+  // millimetres. Such a floor does not shrink with the model, so a millionth
+  // scale puts the whole of the evidence underneath it and every crease comes
+  // back Fits -- which is not an academic case: `fillet()` on crossing pipes
+  // at that scale returned a solid in 19 separate pieces while the same model
+  // at unit scale was sound, and the gate made no refusal at all to say so.
+  const ScopedSizeGateRule askBlindCreases(true);
+
+  const auto needle = manifold::Manifold::Cylinder(120.0, 3.0, 0.0, 3, false);
+  const MergedMesh mm = mergeMesh(needle.GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const auto chains = buildChains(mm, selectedEdges(mm, adj, 20.0, /*wantConcave=*/false));
+  REQUIRE(chains.size() == 6);
+  const auto unit = checkChainSizes(mm, adj, chains, 70.0, false, false, 20.0);
+  REQUIRE(countFault(unit, SizeFault::OffFace) == 6);
+
+  const double k = 1e-6;
+  const auto small = needle.Scale(manifold::vec3(k, k, k));
+  const MergedMesh sm = mergeMesh(small.GetMeshGL64());
+  const auto sadj = buildEdgeAdjacency(sm.tris);
+  const auto schains = buildChains(sm, selectedEdges(sm, sadj, 20.0, /*wantConcave=*/false));
+  REQUIRE(schains.size() == 6);
+  const auto scaled = checkChainSizes(sm, sadj, schains, 70.0 * k, false, false, 20.0);
+
+  CHECK(countFault(scaled, SizeFault::OffFace) == 6);
+  std::vector<double> want, got;
+  for (const auto& v : unit) want.push_back(v.amount * k);
+  for (const auto& v : scaled) got.push_back(v.amount);
+  std::sort(want.begin(), want.end());
+  std::sort(got.begin(), got.end());
+  REQUIRE(want.size() == got.size());
+  for (size_t i = 0; i < want.size(); ++i) CHECK(got[i] == Approx(want[i]).epsilon(1e-6));
+
+  // And the shape of the answer is the same too: three creases at the smaller
+  // amount and three at the larger, not six that happen to average right.
+  CHECK(got[0] == Approx(66.4313 * k).epsilon(1e-4));
+  CHECK(got[5] == Approx(121.0920 * k).epsilon(1e-4));
 }
 
 TEST_CASE("size: a spine that turns from one wall onto the next still meets both")

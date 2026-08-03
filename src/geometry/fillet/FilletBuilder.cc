@@ -24,10 +24,16 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <limits>
+#include <functional>
+#include <locale>
 #include <map>
 #include <memory>
 #include <set>
+#include <sstream>
+#include <string>
 #include <utility>
 #include <vector>
 
@@ -321,7 +327,113 @@ std::vector<Chain> buildChains(const MergedMesh& m, const std::vector<EdgeKey>& 
   std::sort(chains.begin(), chains.end(),
             [&](const Chain& a, const Chain& b) { return less(a.verts.front(), b.verts.front()); });
 
+  // The crease as the mesh has it. `at` and `pts` are left empty, which is the
+  // identity: one station per crease vertex, standing exactly on it.
+  for (Chain& chain : chains) chain.raw = chain.verts;
+
   return chains;
+}
+
+void resampleChains(const MergedMesh& m, std::vector<Chain>& chains, double fraction)
+{
+  if (!(fraction > 0.0)) return;
+
+  size_t redivided = 0;
+  for (Chain& chain : chains) {
+    const std::vector<int>& run = chain.rawRun();
+    const int n = static_cast<int>(run.size());
+    // Two stations on an open chain are both its ends, and three on a ring are
+    // the least that still bounds an area; there is nothing to redivide.
+    if (n < (chain.closed ? 4 : 3)) continue;
+
+    const int segments = chain.closed ? n : n - 1;
+    std::vector<double> len(segments);
+    for (int i = 0; i < segments; ++i)
+      len[i] = (m.pos[run[(i + 1) % n]] - m.pos[run[i]]).norm();
+
+    std::vector<double> sorted = len;
+    std::nth_element(sorted.begin(), sorted.begin() + segments / 2, sorted.end());
+    const double median = sorted[segments / 2];
+    if (!(median > 0.0)) continue;
+
+    // Nothing is a sliver: leave the chain exactly as it was, so a crease that
+    // was already regular is not perturbed by a hair.
+    const double floorLen = fraction * median;
+    if (std::all_of(len.begin(), len.end(), [&](double l) { return l >= floorLen; })) continue;
+
+    std::vector<double> arc(segments + 1, 0.0);
+    for (int i = 0; i < segments; ++i) arc[i + 1] = arc[i] + len[i];
+    const double total = arc[segments];
+    if (!(total > 0.0)) continue;
+
+    // As many stations as the crease has segments, at equal arc length. The
+    // count is what it was, so nothing about how closely the bead follows the
+    // wall changes; only the spacing does, from a spread of a thousand to one
+    // down to exactly even.
+    const int count = segments;
+    const double step = total / count;
+
+    // Arc length back to the crease's own parameter. The search is over the
+    // cumulative arc, so a sliver contributes an interval of zero width and is
+    // simply passed over rather than landed on.
+    auto paramAt = [&](double s) {
+      const int i = std::clamp(
+        static_cast<int>(std::upper_bound(arc.begin(), arc.end(), s) - arc.begin()) - 1, 0,
+        segments - 1);
+      return static_cast<double>(i) + (len[i] > 0.0 ? (s - arc[i]) / len[i] : 0.0);
+    };
+
+    std::vector<double> at;
+    std::vector<Vector3d> pts;
+    std::vector<int> verts;
+    const int stations = chain.closed ? count : count + 1;
+    at.reserve(stations);
+    pts.reserve(stations);
+    verts.reserve(stations);
+    for (int k = 0; k < stations; ++k) {
+      // The ends are the crease's ends and are taken from the mesh, not solved
+      // for: k = 0 is vertex 0 (a ring's canonical start as much as an open
+      // chain's first vertex), and an open chain's last station is its last
+      // vertex. Everything between is placed by arc length, and lands on a
+      // vertex exactly when the arithmetic puts it there.
+      double p;
+      if (k == 0)
+        p = 0.0;
+      else if (!chain.closed && k == count)
+        p = static_cast<double>(segments);
+      else
+        p = paramAt(static_cast<double>(k) * step);
+
+      const int j = static_cast<int>(p);
+      const double f = p - static_cast<double>(j);
+      at.push_back(p);
+      if (f <= 0.0) {
+        verts.push_back(run[j % n]);
+        pts.push_back(m.pos[run[j % n]]);
+      } else {
+        const Vector3d& a = m.pos[run[j]];
+        const Vector3d& b = m.pos[run[(j + 1) % n]];
+        verts.push_back(-1);
+        pts.push_back(a + f * (b - a));
+      }
+    }
+
+    if (at.size() < static_cast<size_t>(chain.closed ? 3 : 2)) continue;
+    chain.at = std::move(at);
+    chain.pts = std::move(pts);
+    chain.verts = std::move(verts);
+    ++redivided;
+  }
+
+  // How many creases were actually re-divided, so a result that matches the one
+  // before it can be told from a mechanism that never ran. Off unless asked for,
+  // and it changes nothing either way.
+  if (getenv("OPENSCAD_FILLET_RESAMPLE_DEBUG") != nullptr) {
+    std::ostringstream os;
+    os.imbue(std::locale::classic());
+    os << "FILLETRESAMPLE chains " << chains.size() << " redivided " << redivided << "\n";
+    fputs(os.str().c_str(), stdout);
+  }
 }
 
 std::vector<SpineInterval> chainSelection(const MergedMesh& m, const Chain& chain,
@@ -339,8 +451,8 @@ std::vector<SpineInterval> chainSelection(const MergedMesh& m, const Chain& chai
   std::vector<Event> events;
   std::vector<double> segmentLength(segments);
   for (size_t i = 0; i < segments; ++i) {
-    const Vector3d& a = m.pos[chain.verts[i]];
-    const Vector3d& b = m.pos[chain.verts[(i + 1) % n]];
+    const Vector3d& a = chain.point(m.pos, static_cast<int>(i));
+    const Vector3d& b = chain.point(m.pos, static_cast<int>((i + 1) % n));
     segmentLength[i] = (b - a).norm();
     for (const auto& c : brush.segmentCrossings(a, b))
       events.push_back({static_cast<double>(i) + c.t, c.entering});
@@ -351,7 +463,7 @@ std::vector<SpineInterval> chainSelection(const MergedMesh& m, const Chain& chai
   // A crossing says which way it goes, so the state before the first one is
   // read off it directly. Only a chain that crosses nothing needs the brush
   // asked about a point, and then one point settles the whole chain.
-  bool inside = events.empty() ? brush.contains(m.pos[chain.verts[0]]) : !events.front().entering;
+  bool inside = events.empty() ? brush.contains(chain.point(m.pos, 0)) : !events.front().entering;
 
   std::vector<SpineInterval> keep;
   double open = inside ? 0.0 : -1.0;
@@ -470,27 +582,65 @@ std::vector<StationNormals> chainNormals(const MergedMesh& m,
     return true;
   };
 
+  // The crease between two chain parameters, reduced to one direction per wall.
+  // Without resampling every span is exactly one mesh edge and this is the edge's
+  // own pair of normals, which is what it has always been. With it, a span can
+  // cover several raw segments and start or stop partway along one, and each
+  // segment counts for as much of it as lies inside the span — so a sliver
+  // counts for as little as it is long, and the ill-conditioned average that the
+  // fins are made of does not arise.
+  const std::vector<int>& run = chain.rawRun();
+  const int rawN = chain.rawCount();
+  auto spanNormals = [&](double from, double to, Vector3d& nA, Vector3d& nB) {
+    if (to <= from) to += static_cast<double>(rawN);  // a ring's closing stretch
+    const int first = static_cast<int>(from);
+    // One whole mesh edge, asked for and answered as itself: the common case,
+    // and the one an unresampled chain is entirely made of.
+    if (from == static_cast<double>(first) && to == static_cast<double>(first + 1))
+      return sidedNormals(run[first % rawN], run[(first + 1) % rawN], nA, nB);
+
+    Vector3d sumA = Vector3d::Zero(), sumB = Vector3d::Zero(), eA, eB;
+    for (int k = first; static_cast<double>(k) < to; ++k) {
+      const int a = run[k % rawN], b = run[(k + 1) % rawN];
+      if (!sidedNormals(a, b, eA, eB)) continue;
+      const double lo = std::max(from - static_cast<double>(k), 0.0);
+      const double hi = std::min(to - static_cast<double>(k), 1.0);
+      if (hi <= lo) continue;
+      const double w = (hi - lo) * (m.pos[b] - m.pos[a]).norm();
+      sumA += w * eA;
+      sumB += w * eB;
+    }
+    if (sumA.norm() < 1e-12 || sumB.norm() < 1e-12) return false;
+    nA = sumA.normalized();
+    nB = sumB.normalized();
+    return true;
+  };
+
   const int n = static_cast<int>(chain.verts.size());
   std::vector<StationNormals> out(n);
   for (int i = 0; i < n; ++i) {
-    const int v = chain.verts[i];
     StationNormals s;
-    s.v = m.pos[v];
+    s.v = chain.point(m.pos, i);
 
-    // Average each wall's normal over the vertex's incident chain edges (with
-    // wrap-around on a closed ring); an open end has only one incident edge.
-    const int prevV = i > 0 ? chain.verts[i - 1] : (chain.closed ? chain.verts[n - 1] : -1);
-    const int nextV = i < n - 1 ? chain.verts[i + 1] : (chain.closed ? chain.verts[0] : -1);
+    // Average each wall's normal over the crease either side of the station
+    // (with wrap-around on a closed ring); an open end has only one side. The
+    // triangles the station names its walls by are the ones of the mesh edge the
+    // crease arrives on, or leaves by where there is nothing before it.
+    const bool hasPrev = i > 0 || chain.closed;
+    const bool hasNext = i < n - 1 || chain.closed;
+    const double here = chain.param(i);
     Vector3d sumA = Vector3d::Zero(), sumB = Vector3d::Zero(), nA, nB;
-    if (prevV >= 0 && sidedNormals(prevV, v, nA, nB)) {
+    const std::pair<int, int> in = chain.inEdge(i);
+    const std::pair<int, int> outE = chain.outEdge(i);
+    if (hasPrev && spanNormals(chain.param(i > 0 ? i - 1 : n - 1), here, nA, nB)) {
       sumA += nA;
       sumB += nB;
-      sidedTris(m, adj, prevV, v, s.triA, s.triB);
+      if (in.first >= 0) sidedTris(m, adj, in.first, in.second, s.triA, s.triB);
     }
-    if (nextV >= 0 && sidedNormals(v, nextV, nA, nB)) {
+    if (hasNext && spanNormals(here, chain.param(i < n - 1 ? i + 1 : 0), nA, nB)) {
       sumA += nA;
       sumB += nB;
-      if (s.triA < 0) sidedTris(m, adj, v, nextV, s.triA, s.triB);
+      if (s.triA < 0 && outE.first >= 0) sidedTris(m, adj, outE.first, outE.second, s.triA, s.triB);
     }
     if (sumA.norm() >= 1e-9 && sumB.norm() >= 1e-9) {
       s.nA = sumA.normalized();
@@ -800,11 +950,15 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
     ChainContact station;
     if (isBuilt(static_cast<double>(i))) {
       bool turnedA = false, turnedB = false;
-      const int prevV = i > 0 ? chain.verts[i - 1] : (chain.closed ? chain.verts[n - 1] : -1);
-      const int nextV = i + 1 < n ? chain.verts[i + 1] : (chain.closed ? chain.verts[0] : -1);
+      // The walls the crease arrives on and leaves by. At an interpolated
+      // station both are the one raw segment it lies inside, so it never reads
+      // as a corner — which is right: a point in the middle of a segment has no
+      // turn in it.
+      const std::pair<int, int> inE = chain.inEdge(static_cast<int>(i));
+      const std::pair<int, int> outE = chain.outEdge(static_cast<int>(i));
       int inA = -1, inB = -1, outA = -1, outB = -1;
-      if (prevV >= 0 && nextV >= 0 && sideSurfaces(prevV, chain.verts[i], inA, inB) &&
-          sideSurfaces(chain.verts[i], nextV, outA, outB)) {
+      if (inE.first >= 0 && outE.first >= 0 && sideSurfaces(inE.first, inE.second, inA, inB) &&
+          sideSurfaces(outE.first, outE.second, outA, outB)) {
         turnedA = inA != outA;
         turnedB = inB != outB;
       }
@@ -826,7 +980,9 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
     const StationNormals& b = stations[(i + 1) % n];
     if (!a.valid || !b.valid) continue;
     int segA = -1, segB = -1;
-    if (!sidedTris(m, adj, chain.verts[i], chain.verts[(i + 1) % n], segA, segB)) continue;
+    const std::pair<int, int> segEdge =
+      chain.rawMid(static_cast<int>(i), static_cast<int>((i + 1) % n));
+    if (!sidedTris(m, adj, segEdge.first, segEdge.second, segA, segB)) continue;
 
     // One sample per size along the segment, and never fewer than asked. A fixed
     // count is a trap on a long crease: the room a spike leaves its tool runs
@@ -868,6 +1024,89 @@ double pointTriangleDistance(const Vector3d& p, const Vector3d& a, const Vector3
   return (p - closestPointOnTriangle(p, a, b, c)).norm();
 }
 
+// Whether the size gate falls back to the samples its two exemptions discarded
+// on a crease where they discarded every one of them. On by default: every
+// control measured is byte-identical either way, because a crease that has
+// nothing to test also has nothing to report, and the fallback only fires where
+// the discarded samples miss their wall by millimetres. `legacy` restores the
+// behaviour where such a crease was passed unexamined, which is what bisecting
+// a shape against an older build needs.
+// Negative means the environment decides; 0 and 1 are a ScopedSizeGateRule
+// speaking over it for the duration of its body. Only the tests set it.
+int sizeGateRuleOverride = -1;
+
+bool filletSizeGateAsksBlindCreases()
+{
+  static const bool fromEnv = [] {
+    const char *s = getenv("OPENSCAD_FILLET_SIZEGATE");
+    return !(s && std::string(s) == "legacy");
+  }();
+  return sizeGateRuleOverride < 0 ? fromEnv : sizeGateRuleOverride != 0;
+}
+
+ScopedSizeGateRule::ScopedSizeGateRule(bool asksBlindCreases) : previous_(sizeGateRuleOverride)
+{
+  sizeGateRuleOverride = asksBlindCreases ? 1 : 0;
+}
+
+ScopedSizeGateRule::~ScopedSizeGateRule() { sizeGateRuleOverride = previous_; }
+
+// One line per crease on stdout saying what the size gate was able to look at:
+// how many of its contact samples were testable, how far the testable and the
+// exempt ones missed their walls, and what it concluded. Off unless asked for.
+bool filletGateDiagnostics()
+{
+  static const bool on = getenv("OPENSCAD_FILLET_SIZEGATE_DEBUG") != nullptr;
+  return on;
+}
+
+// The same chain, parameterised by the crease as the mesh has it: one station
+// per crease vertex, and the brushes' intervals carried over to that parameter.
+//
+// Whether a size fits is a question about the target and the size, and about
+// nothing else; where the stations happen to sit is not part of it. Re-dividing
+// a crease at equal arc length steps over its slivers by design, so a blend that
+// leaves its wall only across one would go unsampled and be accepted. Asking the
+// crease itself keeps one answer per target, whatever the stations do.
+namespace {
+Chain rawStationChain(const Chain& chain)
+{
+  if (chain.at.empty()) return chain;
+
+  Chain out;
+  out.raw = chain.rawRun();
+  out.verts = out.raw;
+  out.closed = chain.closed;
+
+  const int nsta = static_cast<int>(chain.at.size());
+  const double nraw = static_cast<double>(out.raw.size());
+  // Station parameter -> crease parameter: the piecewise-linear map `at` is,
+  // read forwards. A ring's parameter runs one past its last station, onto the
+  // closing segment, and that end is the crease's own length.
+  auto toRaw = [&](double q) {
+    const double last = chain.closed ? static_cast<double>(nsta) : static_cast<double>(nsta - 1);
+    q = std::clamp(q, 0.0, last);
+    if (q >= last) return chain.closed ? nraw : nraw - 1.0;
+    const int i = static_cast<int>(q);
+    const double f = q - static_cast<double>(i);
+    const double a = chain.at[i];
+    double b = i + 1 < nsta ? chain.at[i + 1] : nraw;
+    if (b <= a) b = nraw;
+    return a + f * (b - a);
+  };
+
+  for (const SpineInterval& iv : chain.keep) {
+    const SpineInterval mapped{toRaw(iv.first), toRaw(iv.second)};
+    if (mapped.second - mapped.first > 1e-12) out.keep.push_back(mapped);
+  }
+  // A brush that covers nothing has to stay covering nothing: an empty `keep` is
+  // read as the whole chain, so a stretch that maps away leaves a point rather
+  // than the lot.
+  if (out.keep.empty() && !chain.keep.empty()) out.keep.emplace_back(0.0, 0.0);
+  return out;
+}
+}  // namespace
+
 std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
                                          const std::map<EdgeKey, std::vector<int>>& adj,
                                          const std::vector<Chain>& chains, double size,
@@ -880,9 +1119,11 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
 
   std::vector<std::vector<ChainContact>> contacts;
   contacts.reserve(chains.size());
-  for (const Chain& chain : chains)
-    contacts.push_back(chainContacts(m, adj, chain, size, concave, wedge, surfaceOf,
+  for (const Chain& chain : chains) {
+    const Chain asMeshed = rawStationChain(chain);
+    contacts.push_back(chainContacts(m, adj, asMeshed, size, concave, wedge, surfaceOf,
                                      /*samplesPerSegment=*/3));
+  }
 
   // The crowding question is asked of where contact points sit against each
   // other, and those sit on a tessellated wall: each is within about half a seam
@@ -896,9 +1137,12 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
   const double faceTol =
     std::max(size * (1.0 - std::cos(thresholdDeg * M_PI / 180.0)), 1e-9 * size);
 
+  // Asked of the crease as the mesh has it, not of the stations: two chains meet
+  // at a mesh vertex, and a resampled chain's stations are not all of them. The
+  // two are the same list until something has been resampled.
   std::vector<std::set<int>> chainVerts(chains.size());
   for (size_t ci = 0; ci < chains.size(); ++ci)
-    chainVerts[ci].insert(chains[ci].verts.begin(), chains[ci].verts.end());
+    chainVerts[ci].insert(chains[ci].rawRun().begin(), chains[ci].rawRun().end());
 
   // A box around each chain's contact points, so the crowding question can skip
   // the pairs that are nowhere near each other.
@@ -960,15 +1204,41 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
     // corners are 60 degrees, so stepping perpendicular to one base edge leaves
     // through the next. A size that genuinely does not fit fails along the
     // crease, not only at its ends, and the samples in between are what say so.
+    //
+    // Both exemptions are stated as narrowings of the question, and they are
+    // only that while something is left to ask. A crease shorter than the
+    // junction reach has no sample that is neither an end nor beside a
+    // junction, so on that crease the exemptions do not narrow the question,
+    // they delete it — and the shape that produces such creases in bulk is a
+    // bead's runout lip, which arrives already broken into dozens of two- and
+    // three-vertex chains meeting each other inside one reach. The tally below
+    // is what tells the two apart: where nothing at all was tested, the
+    // evidence that was thrown away is all there is, and it is used.
     const size_t last = contacts[ci].empty() ? 0 : contacts[ci].size() - 1;
+    int nExempt = 0, nTested = 0;
+    double offExempt = 0.0, offTested = 0.0;
+    double coordMag = 0.0;
+    Vector3d exemptAt = Vector3d::Zero();
     for (size_t i = 0; i < contacts[ci].size(); ++i) {
       const ChainContact& c = contacts[ci][i];
       if (!c.valid) continue;
-      if (!chains[ci].closed && (i == 0 || i == last)) continue;
-      bool nearJunction = false;
-      for (const Vector3d& p : junctionPos)
-        if ((c.v - p).norm() < junctionReach) { nearJunction = true; break; }
-      if (nearJunction) continue;
+      // How big the numbers being subtracted are, along this crease. A miss is
+      // a nearest point and a wall's boundary taken away from each other, so
+      // whatever the subtraction cannot resolve is a fraction of these, and of
+      // nothing else.
+      coordMag = std::max({coordMag, c.v.cwiseAbs().maxCoeff(), c.TA.cwiseAbs().maxCoeff(),
+                           c.TB.cwiseAbs().maxCoeff()});
+      bool exempt = !chains[ci].closed && (i == 0 || i == last);
+      if (!exempt)
+        for (const Vector3d& p : junctionPos)
+          if ((c.v - p).norm() < junctionReach) { exempt = true; break; }
+      if (exempt) {
+        ++nExempt;
+        if (c.offFace > offExempt) { offExempt = c.offFace; exemptAt = c.v; }
+        continue;
+      }
+      ++nTested;
+      offTested = std::max(offTested, c.offFace);
       // A miss of zero is not a miss. Where the contact lands exactly on the
       // wall's boundary the blend stops precisely at the edge of the wall it is
       // meant to meet, which is a fit — and the two are told apart by a double's
@@ -981,6 +1251,60 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
         break;
       }
     }
+
+    // The margin here is not the one the tested samples use, and it must not be.
+    // A tested sample sits in the interior of a wall, where its miss is either
+    // exactly zero or macroscopic, so a nanometre tells the two apart. Every
+    // exempt sample sits *on* a wall's boundary — that is what made it exempt —
+    // and there the miss is the nearest point and the boundary subtracted from
+    // each other, two computations of one point. That difference is not zero and
+    // it would be read as geometry, differently on two edges of the same
+    // bracket, so a floor has to go under it.
+    //
+    // Two quantities set that floor and they are independent, so it is the
+    // larger of them. A crease that genuinely cannot carry the size misses by a
+    // fraction *of the size*: measured misses on the shape this rule exists for
+    // run from 2e-4 of the size upward, so a ten-thousandth of the size sits
+    // below every real miss. What the subtraction cannot resolve, though, has
+    // nothing to do with the size — it is a fraction of the magnitude of the
+    // coordinates being subtracted. Measured on right-angle box models, whose
+    // creases are exact so that every non-zero answer is arithmetic: across 288
+    // runs and 984 such creases, at coordinate magnitudes from 40 to 1e4, the
+    // largest spurious miss is 2.4e-8 mm at 40 and 2.0e-6 mm at 1e4, and never
+    // more than 6e-10 of the coordinate magnitude. A ten-millionth of it clears
+    // that by about 170, and it is not set higher because too low a floor costs
+    // a refusal — a valid solid with an unfilleted crease — while too high a one
+    // costs the shattered solid this gate exists to stop.
+    //
+    // Past a coordinate magnitude of about 1e4 the evidence on those same exact
+    // creases stops looking like round-off at all: it reaches 0.8 mm at 1e5 and
+    // 1.2 mm at 1e6, a large fraction of the size asked for, because the mesh
+    // the question is asked of has itself degraded. This term does not cover
+    // that and should not pretend to. What happens there is a refusal, which is
+    // the safe answer to a question that can no longer be asked.
+    //
+    // Both terms scale with the model, which is what a modeller without units
+    // requires: the same shape at any scale gets the same verdicts. An absolute
+    // millimetre would not, and the coordinate term is also what keeps a floor
+    // under a very small size, which is the job an absolute one was doing badly.
+    const double blindFloor = std::max(1e-4 * size, 1e-7 * coordMag);
+    if (filletSizeGateAsksBlindCreases() && verdict.fault == SizeFault::Fits && nTested == 0 &&
+        nExempt > 0 && offExempt > blindFloor) {
+      verdict = {SizeFault::OffFace, exemptAt, offExempt};
+    }
+
+    if (filletGateDiagnostics()) {
+      std::ostringstream os;
+      os.imbue(std::locale::classic());
+      os << "FILLETGATE chain " << ci << " closed=" << chains[ci].closed
+         << " samples=" << contacts[ci].size() << " tested=" << nTested << " exempt=" << nExempt
+         << " maxOffFace_tested=" << offTested << " maxOffFace_exempt=" << offExempt
+         << " junctions=" << junctionPos.size() << " reach=" << junctionReach
+         << " coordMag=" << coordMag << " blindFloor=" << blindFloor
+         << " verdict=" << static_cast<int>(verdict.fault) << "\n";
+      fputs(os.str().c_str(), stdout);
+    }
+
     if (verdict.fault != SizeFault::Fits) continue;
 
     // Is the room it needs its own? Another crease's contact line inside the
@@ -1022,7 +1346,7 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
         // contact points on the model.
         if (!reach[cj].contains(c.C, apex)) continue;
         bool meets = false;
-        for (const int v : chains[cj].verts)
+        for (const int v : chains[cj].rawRun())
           if (chainVerts[ci].count(v)) { meets = true; break; }
         if (meets) continue;
 
@@ -1180,10 +1504,152 @@ manifold::Manifold unionCells(std::vector<manifold::Manifold>& cells)
   return cells.front();
 }
 
+// A crease vertex a cell has to carry, and how far off the cell's own chord it
+// lies. A cell is the hull of the sections at its two ends, so what it covers
+// along the crease is the straight chord between them. While one section stands
+// at every crease vertex that chord IS the crease and nothing can be missed; as
+// soon as the stations are re-divided a chord can span a crease vertex and pass
+// inside it, and the sliver of material out at that vertex is a hair outside the
+// tool. `s` is where the vertex falls along the cell, `off` the vector from the
+// chord to it.
+struct SpineBulge
+{
+  double s = 0.0;
+  Vector3d off = Vector3d::Zero();
+};
+
+// The direction a tool at this crease vertex may grow in without taking
+// material it was never asked for. Face normals point out of the solid, so their
+// sum at the vertex points out of it too: a round is outside its crease and may
+// grow that way, a fillet is inside the notch and may grow the other. Zero where
+// the crease's own segments cannot be walked.
+Vector3d wallsAway(const MergedMesh& m, const std::map<EdgeKey, std::vector<int>>& adj,
+                   const std::vector<int>& run, size_t j, bool closed, bool concave)
+{
+  const size_t n = run.size();
+  Vector3d sum = Vector3d::Zero();
+  auto add = [&](int a, int b) {
+    int tA = -1, tB = -1;
+    if (!sidedTris(m, adj, a, b, tA, tB)) return;
+    sum += m.tris[tA].normal + m.tris[tB].normal;
+  };
+  if (j > 0) add(run[j - 1], run[j]);
+  else if (closed && n > 1) add(run[n - 1], run[0]);
+  if (j + 1 < n) add(run[j], run[j + 1]);
+  else if (closed && n > 1) add(run[n - 1], run[0]);
+  if (sum.norm() < 1e-12) return Vector3d::Zero();
+  return (concave ? -1.0 : 1.0) * sum.normalized();
+}
+
+// Every crease vertex each cell's chord passes inside of. Indexed by cell, which
+// is by leading section, so it lines up with the loop in appendChainCells.
+//
+// `sectionAt` is where each section sits in chain-parameter space. The result is
+// empty for a chain nobody resampled: there every station is a crease vertex, so
+// no chord can span one, and the cells are exactly what they always were.
+std::vector<std::vector<SpineBulge>> chainBulges(const MergedMesh& m,
+                                                 const std::map<EdgeKey, std::vector<int>>& adj,
+                                                 const Chain& chain,
+                                                 const std::vector<double>& sectionAt, bool concave)
+{
+  const size_t nsec = sectionAt.size();
+  if (chain.at.empty() || nsec < 2) return {};
+
+  const std::vector<int>& run = chain.rawRun();
+  const double nraw = static_cast<double>(run.size());
+  const double nsta = static_cast<double>(chain.at.size());
+
+  // Chain parameter -> crease parameter, and -> the point the sections are
+  // lofted between, which is the chord of the two stations either side rather
+  // than the crease itself.
+  auto rawParam = [&](double q) {
+    const double k = std::floor(q);
+    const double f = q - k;
+    const int i = static_cast<int>(k);
+    const double a = chain.param(i % static_cast<int>(nsta));
+    double b = chain.param((i + 1) % static_cast<int>(nsta));
+    if (b <= a) b += nraw;
+    return a + f * (b - a);
+  };
+  auto stationPoint = [&](double q) {
+    const double k = std::floor(q);
+    const double f = q - k;
+    const int i = static_cast<int>(k);
+    const Vector3d& a = chain.point(m.pos, i % static_cast<int>(nsta));
+    const Vector3d& b = chain.point(m.pos, (i + 1) % static_cast<int>(nsta));
+    return (a + f * (b - a)).eval();
+  };
+  // Crease parameter -> chain parameter: the inverse of the piecewise-linear map
+  // above, which is what puts the vertex at the right fraction of the cell.
+  auto chainParam = [&](double p) {
+    for (int i = 0; i < static_cast<int>(nsta); ++i) {
+      const double a = chain.param(i);
+      double b = chain.param((i + 1) % static_cast<int>(nsta));
+      if (b <= a) b += nraw;
+      if (p >= a - 1e-12 && p <= b + 1e-12 && b > a)
+        return static_cast<double>(i) + (p - a) / (b - a);
+    }
+    return -1.0;
+  };
+
+  const size_t segments = chain.closed ? nsec : nsec - 1;
+  std::vector<std::vector<SpineBulge>> out(segments);
+  for (size_t i = 0; i < segments; ++i) {
+    const double q0 = sectionAt[i];
+    double q1 = sectionAt[(i + 1) % nsec];
+    // Only a ring's closing cell runs off the end of the parameter. Anywhere
+    // else two sections that do not advance are a ramp doubling back on a
+    // station, and reading that as a wrap would hand the cell the whole crease.
+    if (chain.closed && i + 1 == nsec && q1 <= q0) q1 += nsta;
+    if (q1 - q0 < 1e-12) continue;
+
+    const double p0 = rawParam(q0);
+    double p1 = rawParam(q1);
+    if (p1 <= p0) p1 += nraw;
+    const Vector3d A = stationPoint(q0);
+    const Vector3d B = stationPoint(q1);
+
+    for (double j = std::floor(p0) + 1.0; j < p1 - 1e-9; j += 1.0) {
+      if (j <= p0 + 1e-9) continue;
+      double qj = chainParam(j >= nraw ? j - nraw : j);
+      if (qj < 0.0) continue;
+      if (qj < q0 - 1e-9) qj += nsta;
+      const double s = (qj - q0) / (q1 - q0);
+      if (!(s > 1e-9 && s < 1.0 - 1e-9)) continue;
+      const size_t jj = static_cast<size_t>(j) % run.size();
+      const Vector3d& P = m.pos[run[jj]];
+      Vector3d off = P - (A + s * (B - A));
+      if (off.norm() < 1e-12) continue;
+
+      // Only ever grow the cell the way the tool is allowed to grow. A crease
+      // vertex sits either side of its chord, and a cell reaching for one that
+      // leans into the solid takes material no tool asked it to: on a coarse
+      // cone that is enough to cut a fin clean off and leave it loose. The
+      // component of the reach that points into the solid is dropped, and the
+      // one that points out of it - the one the missed material is under - is
+      // kept whole.
+      const Vector3d away = wallsAway(m, adj, run, jj, chain.closed, concave);
+      if (!away.isZero()) {
+        const double into = off.dot(away);
+        if (into < 0.0) off -= into * away;
+        if (off.norm() < 1e-12) continue;
+      }
+      out[i].push_back({s, off});
+    }
+  }
+  return out;
+}
+
 // Hull each consecutive pair of cross-sections along a chain, appending one cell
 // per spine segment. A closed chain wraps, so its last station also pairs with
 // its first. Degenerate segments (a zero-length spine step, or a section that
 // collapsed) hull to nothing rather than to a bad solid and are dropped.
+//
+// A cell also carries the section at every crease vertex its chord passes inside
+// of, slid off the chord onto that vertex. The hull is then of three or more
+// coplanar-ended sections rather than two, and since it contains the two-section
+// hull it can only ever cover more of the crease, never less. The end faces are
+// untouched, so two neighbouring cells still meet on the one plane.
 //
 // `runs` restricts the work to the stretches the brushes selected, empty meaning
 // all of it. Where a run starts or ends partway along a segment the two sections
@@ -1196,6 +1662,7 @@ template <typename Section, typename PointsOf, typename LerpOf>
 void appendChainCells(const Chain& chain, const std::vector<Section>& sections,
                       const PointsOf& pointsOf, LerpOf lerpOf,
                       const std::vector<SpineInterval>& runs,
+                      const std::vector<std::vector<SpineBulge>>& bulges,
                       std::vector<manifold::Manifold>& cells)
 {
   const size_t n = sections.size();
@@ -1222,6 +1689,18 @@ void appendChainCells(const Chain& chain, const std::vector<Section>& sections,
       std::vector<manifold::vec3> pts;
       for (const Section *section : {&head, &tail})
         for (const Vector3d& p : pointsOf(*section)) pts.emplace_back(p.x(), p.y(), p.z());
+
+      if (i < bulges.size()) {
+        for (const SpineBulge& bulge : bulges[i]) {
+          if (bulge.s <= s0 + 1e-12 || bulge.s >= s1 - 1e-12) continue;
+          const Section mid = lerpOf(a, b, bulge.s);
+          if (!mid.valid) continue;
+          for (const Vector3d& p : pointsOf(mid)) {
+            const Vector3d q = p + bulge.off;
+            pts.emplace_back(q.x(), q.y(), q.z());
+          }
+        }
+      }
 
       manifold::Manifold cell = manifold::Manifold::Hull(pts);
       if (cell.IsEmpty()) continue;
@@ -1454,7 +1933,8 @@ SpineInterval endWindow(const MergedMesh& m, const Chain& chain, bool front, dou
   for (size_t k = 0; k + 1 < n && left > 0.0; ++k) {
     const size_t i = front ? k : n - 1 - k;
     const size_t j = front ? k + 1 : n - 2 - k;
-    const double seg = (m.pos[chain.verts[j]] - m.pos[chain.verts[i]]).norm();
+    const double seg =
+      (chain.point(m.pos, static_cast<int>(j)) - chain.point(m.pos, static_cast<int>(i))).norm();
     if (seg >= left) {
       param += step * (left / seg);
       break;
@@ -1611,7 +2091,10 @@ manifold::Manifold buildWedgeSolid(const MergedMesh& m,
   for (const Chain& chain : chains) {
     const std::vector<WedgeSection> sections =
       wedgeSections(m, adj, chain, t, concave, thresholdDeg);
-    appendChainCells(chain, sections, pointsOf, lerpWedge, chain.keep, cells);
+    std::vector<double> at(sections.size());
+    for (size_t i = 0; i < at.size(); ++i) at[i] = static_cast<double>(i);
+    appendChainCells(chain, sections, pointsOf, lerpWedge, chain.keep,
+                     chainBulges(m, adj, chain, at, concave), cells);
     appendSeamCovers(chain, sections, pointsOf,
                      [](const WedgeSection& s) { return sectionAnchor(s.p); }, chain.keep, cells);
   }
@@ -1807,6 +2290,198 @@ std::vector<int> dropUncoveredCorners(const MergedMesh& m, std::vector<Chain>& c
   }
   chains = std::move(keeping);
   return out;
+}
+
+// Does a crease of the model leave this vertex unfilleted?
+//
+// A corner ball rounds across everything that arrives at a vertex. Where a sharp
+// edge of the model continues out of that vertex, there is nothing a ball can do
+// that lines up with it — it rounds the edge's own start away — so the two beads
+// that do arrive have to meet each other in a seam along that edge instead. Where
+// nothing sharp leaves, there is nothing to line up with and the ball is right.
+//
+// Why an edge counts is deliberately not asked. A crease the brush excluded, one
+// refused for size, and one turning the other way all leave the same sharp edge
+// in the output, and the blend owes that edge the same seam.
+//
+// What counts as a crease of the model is `isFeatureAngle` and nothing else — the
+// same threshold the selection itself is made on. That is what keeps a
+// tessellated wall out of this: the seams between the facets of a cylinder turn
+// by a fraction of the threshold, so they are not creases here any more than they
+// are creases to the selection, and two bead segments meeting at such a seam
+// still get their ball. Reading curvature off the tessellation instead would put
+// a seam at every facet boundary.
+std::set<EdgeKey> filletedEdges(const std::vector<Chain>& chains)
+{
+  // A station is a mesh vertex only when it was put there by the crease walk. A
+  // chain whose stations have been placed along the spine instead — at equal arc
+  // length, say — carries -1 wherever a station falls between two mesh vertices,
+  // and the pair either side of one is not a mesh edge at all. Reading such a
+  // pair as an EdgeKey would index the mesh at -1; skipping it is the only
+  // honest answer this function can give from `verts` alone. Where a chain can
+  // carry interpolated stations, what this wants is the mesh run underneath it,
+  // and the caller has to hand that over rather than the station list.
+  // The mesh run underneath is exactly what `rawRun()` is, and every chain
+  // carries it, so ask that rather than skipping the pairs that cannot be read.
+  // Skipping is safe but not right: it drops the filleted edges either side of
+  // an interpolated station, and a crease read as unfilleted when it is in fact
+  // filleted makes a seam vertex out of one that is not.
+  std::set<EdgeKey> out;
+  for (const Chain& c : chains) {
+    const std::vector<int>& run = c.rawRun();
+    for (size_t i = 0; i + 1 < run.size(); ++i) {
+      const int a = run[i], b = run[i + 1];
+      if (a < 0 || b < 0) continue;
+      out.insert(EdgeKey{std::min(a, b), std::max(a, b)});
+    }
+  }
+  return out;
+}
+
+// Does this chain arrive at the given end running straight?
+//
+// The seam rule replaces a seated ball — a construction solved against whatever
+// walls it finds — with a pair of beads carried PAST the vertex along the
+// straight line their last segment lies on. That line is the crease's own
+// continuation only where the crease arrives straight. Where it arrives on a
+// curve, the straight line is a chord produced past its second end, and it leaves
+// the circle on the outside: the top of the bead's cross-section is tangent to
+// the curved wall the crease rides, so carrying it along that line lays it a hair
+// OUTSIDE the wall, and the tangency becomes a sliver of surface resting on the
+// wall at a hair of an angle. That is the very degeneracy the overrun exists to
+// remove, put back a little further along — and it is what a bead run past the
+// foot of a cylinder does. A seated ball has no such problem, so a vertex a bead
+// arrives at on a curve is handed back to it.
+//
+// One segment is straight with nothing to check: a crease with no station between
+// its ends is a straight line, and the line its segment lies on is itself.
+bool arrivesStraight(const MergedMesh& m, const Chain& c, bool front)
+{
+  // Of the crease, not of the stations: a resampled chain carries -1 where a
+  // station falls between two mesh vertices, and m.pos[-1] is a read off the
+  // front of the array. The curve whose chord is produced past its end is the
+  // mesh's own, so the crease run is also the right question.
+  const std::vector<int>& run = c.rawRun();
+  const size_t n = run.size();
+  if (n < 3) return true;
+  const Vector3d end = m.pos[front ? run[0] : run[n - 1]];
+  const Vector3d mid = m.pos[front ? run[1] : run[n - 2]];
+  const Vector3d far = m.pos[front ? run[2] : run[n - 3]];
+  const Vector3d a = end - mid, b = mid - far;
+  const double la = a.norm(), lb = b.norm();
+  if (la < 1e-12 || lb < 1e-12) return true;
+  return a.dot(b) / (la * lb) > 1.0 - 1e-9;
+}
+
+bool creaseLeavesUnfilleted(const MergedMesh& m,
+                            const std::map<EdgeKey, std::vector<int>>& adj,
+                            const std::set<EdgeKey>& filleted, double thresholdDeg, int v)
+{
+  for (const auto& [key, ts] : adj) {
+    if (key.first != v && key.second != v) continue;
+    if (ts.size() != 2) continue;
+    const EdgeClass ec = classifyEdge(m, key, m.tris[ts[0]], m.tris[ts[1]]);
+    if (!isFeatureAngle(ec.dihedralDeg, thresholdDeg)) continue;  // tessellation seam
+    if (filleted.count(key) == 0) return true;
+  }
+  return false;
+}
+
+// How far a bead may run past a seam vertex before it runs out of the part it is
+// running through.
+//
+// The overrun past a seam vertex is free only where the part goes on past the
+// vertex: the bead continues into the wall the unfilleted crease runs along,
+// which for a concave blend is solid the caller unions onto, and for a convex one
+// is air outside the part that the caller's cut never has to reach. None of that
+// holds for a wall thinner than the overrun, for one that turns away inside it,
+// or for one that ends inside it — there the bead crosses a face of the part
+// nothing was blending and stands proud of it.
+//
+// So the swept end of the bead is measured against the mesh: every corner of the
+// end profile is carried along the overrun direction, and the first face it
+// crosses is where the room runs out. Faces of the vertex's own fan are not
+// crossings — they are the walls the bead is tangent to and its profile starts
+// on — and neither are faces the overrun merely runs along, since a bead sliding
+// tangentially past the facets of a curved wall never leaves it.
+//
+// Only a face the run pushes the bead OUT through can bound it, which is what the
+// outward normal is read for: a face the run carries the bead INTO is solid
+// closing over it, not a face it will stand proud of.
+//
+// The crossing counts whether it lies ahead of the profile corner or behind it.
+// Behind means that corner started on the far side of the face already: at an
+// opening angle under a right angle the corner of the end profile sits r*cos(θ)
+// into the neighbouring wall, so a wall thinner than that has the bead poking out
+// of it before the overrun begins. Carrying such a corner further along the run
+// only takes it further out, so it has no room at all — and reading forward only
+// missed that, left the overrun unbounded, and put the bead a quarter of a
+// millimetre proud of a wall one and a half millimetres thick.
+//
+// `reach` is how far to look, in BOTH directions, and is also the answer where
+// nothing was found. Forward it is the point past which more room stops making a
+// difference. Backward it is how far out a face may already have been breached
+// and still be one this overrun is about to make worse: a bead standing more than
+// its whole overrun proud of a wall is a radius that does not fit that wall,
+// which is a complaint about the radius, and letting it withhold the overrun
+// would only take the seam repair away from the models that need it most.
+double seamRoom(const MergedMesh& m, int vert, const std::vector<Vector3d>& from,
+                const Vector3d& dir, double reach)
+{
+  // A face the overrun is more parallel to than this is one it runs along rather
+  // than through. The facets of a tessellated wall are the case that matters:
+  // consecutive facets turn by a fraction of a degree and their planes lie a
+  // hair off the ray, so without this a curved wall would read as no room at all.
+  constexpr double kMinCross = 0.1;
+  constexpr double kOnFace = 1e-6;
+
+  // The box spans the run both ways, since a face already breached lies behind
+  // the profile corner that breached it.
+  Vector3d lo = from.front(), hi = from.front();
+  for (const Vector3d& p : from) {
+    lo = lo.cwiseMin(p - reach * dir).cwiseMin(p + reach * dir);
+    hi = hi.cwiseMax(p - reach * dir).cwiseMax(p + reach * dir);
+  }
+
+  double room = reach;
+  for (const auto& tri : m.tris) {
+    if (tri.v[0] == vert || tri.v[1] == vert || tri.v[2] == vert) continue;
+    const Vector3d& a = m.pos[tri.v[0]];
+    const Vector3d& b = m.pos[tri.v[1]];
+    const Vector3d& c = m.pos[tri.v[2]];
+    if (a.cwiseMin(b).cwiseMin(c).x() > hi.x() || a.cwiseMax(b).cwiseMax(c).x() < lo.x()) continue;
+    if (a.cwiseMin(b).cwiseMin(c).y() > hi.y() || a.cwiseMax(b).cwiseMax(c).y() < lo.y()) continue;
+    if (a.cwiseMin(b).cwiseMin(c).z() > hi.z() || a.cwiseMax(b).cwiseMax(c).z() < lo.z()) continue;
+
+    const Vector3d e1 = b - a, e2 = c - a;
+    const Vector3d n = e1.cross(e2);
+    const double area2 = n.norm();
+    if (area2 < 1e-18) continue;
+    // Signed, not absolute: the run has to be going the way the face looks for
+    // crossing it to leave the bead outside.
+    if (n.dot(dir) / area2 < kMinCross) continue;
+    // A face the vertex itself lies in is one of its own walls however it was
+    // triangulated, so a triangle of it that does not carry the vertex is still
+    // not something the bead crosses.
+    if (std::abs(n.dot(m.pos[vert] - a) / area2) < kOnFace * std::max(1.0, reach)) continue;
+
+    for (const Vector3d& s : from) {
+      const Vector3d pv = dir.cross(e2);
+      const double det = e1.dot(pv);
+      if (std::abs(det) < 1e-18) continue;
+      const double inv = 1.0 / det;
+      const Vector3d tv = s - a;
+      const double u = tv.dot(pv) * inv;
+      if (u < 0.0 || u > 1.0) continue;
+      const Vector3d qv = tv.cross(e1);
+      const double v = dir.dot(qv) * inv;
+      if (v < 0.0 || u + v > 1.0) continue;
+      const double t = e2.dot(qv) * inv;
+      if (t < -reach || t > room) continue;
+      room = std::max(0.0, t);
+    }
+  }
+  return room;
 }
 
 std::vector<Junction> chainJunctions(const MergedMesh& m,
@@ -2092,9 +2767,89 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   const double eps = std::max(1e-3 * r, 1e-9);
   const int segs = std::max(arcSegments, 3);
 
+  // EXPERIMENTAL (env OPENSCAD_FILLET_LOCALGROUP=1). Under the seam rule a
+  // vertex that an unfilleted crease leaves gets no corner cell and no corner
+  // ball: the two beads that do arrive meet each other in a seam along that
+  // crease instead. Nothing else about the vertex changes here — what the rule
+  // does with it is applied further down, where the cell, the ball and the
+  // grouping of the subtraction are decided.
+  const bool localGroup = getenv("OPENSCAD_FILLET_LOCALGROUP") != nullptr;
+  const std::set<EdgeKey> filleted = filletedEdges(chains);
   const std::vector<Junction> junctions = chainJunctions(m, adj, chains, r, concave, noCorner);
+  // Vertices some bead reaches on a curve. The seam rule carries a bead past the
+  // vertex along the line its last segment lies on, which is the crease's own
+  // continuation only where the crease arrives straight; see arrivesStraight.
+  std::set<int> arrivesBent;
+  if (localGroup) {
+    for (const Chain& c : chains) {
+      if (c.closed || c.verts.size() < 2) continue;
+      for (const bool front : {true, false})
+        if (!arrivesStraight(m, c, front))
+          arrivesBent.insert(front ? c.verts.front() : c.verts.back());
+    }
+  }
+  // Every use below asks the same question of the same vertex, and answering it
+  // walks the edge table, so it is answered once.
+  std::map<int, bool> seamCache;
+  auto seamVertex = [&](int v) {
+    if (!localGroup) return false;
+    const auto it = seamCache.find(v);
+    if (it != seamCache.end()) return it->second;
+    const bool yes = arrivesBent.count(v) == 0 &&
+                     creaseLeavesUnfilleted(m, adj, filleted, thresholdDeg, v);
+    seamCache.emplace(v, yes);
+    return yes;
+  };
+  // How far a bead arriving at a seam vertex runs past it, as a fraction of the
+  // radius, and the largest the override may ask for. The ceiling is the top of
+  // the measured basin: past it the overrun is longer than the corner it is
+  // repairing and starts writing over the beads either side of it.
+  constexpr double kSeamOverDefault = 0.10;
+  constexpr double kSeamOverMax = 2.0;
+  // A tenth is the measured floor: it is far enough that the two beads
+  // overlap over a region at every opening angle and every tessellation measured,
+  // and short enough to stay well inside the wall it runs into where there is a
+  // wall to stay inside of — where there is less room than that, seamRoom below
+  // takes what there is instead.
+  //
+  // env OPENSCAD_FILLET_SEAMOVER=<fraction of r> overrides it, and overrides
+  // nothing else: at zero the beads stop a hair short of each other again, which
+  // is the whole of the difference, and everything the seam rule does about the
+  // corner cell, the ball and the grouping still happens.
+  const double seamOver = [&]() -> double {
+    if (!localGroup) return 0.0;
+    const char *s = getenv("OPENSCAD_FILLET_SEAMOVER");
+    if (s == nullptr) return kSeamOverDefault;
+    // Not atof or strtod: both read the decimal point of the running locale, and
+    // under a locale that writes it as a comma "0.1" parses as a clean zero —
+    // which is a mode of its own here, not a misreading anyone would notice.
+    std::istringstream in{std::string(s)};
+    in.imbue(std::locale::classic());
+    double v = 0.0;
+    in >> v;
+    if (in.fail() || !in.eof() || !std::isfinite(v) || v < 0.0 || v > kSeamOverMax) {
+      LOG(message_group::Warning, "Ignoring OPENSCAD_FILLET_SEAMOVER=%1$s: expected a fraction of "
+                                  "the radius between 0 and %2$g",
+          s, kSeamOverMax);
+      return kSeamOverDefault;
+    }
+    return v;
+  }();
+
   std::map<int, const Junction *> junctionAt;
-  for (const Junction& j : junctions) junctionAt[j.vert] = &j;
+  for (const Junction& j : junctions) {
+    // A seam vertex builds no corner cell, so nothing is going to fill what
+    // truncating the spines into it would empty. Leaving it out of the map is
+    // what stops the truncation, and hands the vertex to the rule below that has
+    // the two beads meet each other instead. The brush already withheld the
+    // junction at the corners it shortened; this is the same withholding at the
+    // corners a crease is missing from for any other reason.
+    //
+    // Not gated on the overrun: the vertex gets no ball whatever the overrun is,
+    // and truncating into a corner that nothing then fills is a hole either way.
+    if (seamVertex(j.vert)) continue;
+    junctionAt[j.vert] = &j;
+  }
 
   std::vector<std::vector<RoundSection>> sections;
   sections.reserve(chains.size());
@@ -2108,9 +2863,13 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   // lets the selection stay in the space the caller's brush cut it in, which is
   // the only space where a brush boundary is a fixed physical point.
   std::vector<std::vector<double>> sectionAt(chains.size());
+  // Where each chain's own far end sits in that space before anything moves it,
+  // which is the parameter a selection reaching the end of the chain reaches.
+  std::vector<double> chainEndParam(chains.size(), 0.0);
   for (size_t ci = 0; ci < chains.size(); ++ci) {
     sectionAt[ci].resize(sections[ci].size());
     for (size_t i = 0; i < sectionAt[ci].size(); ++i) sectionAt[ci][i] = static_cast<double>(i);
+    chainEndParam[ci] = sectionAt[ci].empty() ? 0.0 : sectionAt[ci].back();
   }
 
   // Cut every chain back where its ball first meets a wall of the junction it
@@ -2335,6 +3094,15 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   // touch is what the caller's union resolves into a flap of zero thickness. The
   // hair of crease left bare between them is bare either way: it is the corner
   // the refused crease runs into, which nothing was going to blend.
+  //
+  // A seam vertex goes the other way, and runs each bead PAST the vertex instead.
+  // The hair does not actually separate the two surfaces where it matters: the
+  // top of a bead's cross-section is tangent to its own wall, that wall is the one
+  // the other bead's crease ends on, and the two tops therefore converge on the
+  // same point of the sharp edge however far back either bead stops. They meet
+  // there at no angle at all, and a boolean can only resolve that into a knife
+  // edge. Overlapping them over a region instead makes the meeting an ordinary
+  // transversal crossing, and the seam an ordinary intersection curve.
   {
     std::map<int, int> endsAt;
     for (size_t ci = 0; ci < chains.size(); ++ci) {
@@ -2360,11 +3128,63 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
         // crease whose stations are the intersection curve of two curved walls
         // has segments a fraction of the hair long, and taking the hair off one
         // of those is taking off the whole cell.
-        const double back = std::min(eps / step, 0.05);
+        double back = std::min(eps / step, 0.05);
+        // EXPERIMENTAL (env OPENSCAD_FILLET_SEAMOVER=<fraction of r>): at a seam
+        // vertex, run the bead PAST the vertex instead of stopping short of it.
+        //
+        // Stopping short leaves the two beads a hair apart with their surfaces
+        // parallel across the gap; running exactly to the vertex has them touch.
+        // Either way the two surfaces meet at no angle at the one place they both
+        // reach - the top of each bead's cross section, where it is tangent to the
+        // wall the other bead's own wall crosses - and a boolean can only resolve
+        // that into a knife edge. Overrunning makes the two bodies overlap over a
+        // region instead, so their surfaces cross transversally and the seam is an
+        // ordinary intersection curve.
+        //
+        // Past the vertex the bead is inside the wall the refused crease runs
+        // along - solid for a concave blend the caller unions on, outside the
+        // part for a convex one the caller cuts with - so where that wall goes on
+        // past the vertex the overrun costs nothing. Where it does not, seamRoom
+        // says how much of it there is and the overrun takes a share of that
+        // instead; a bead that ran past the far side of a thin wall would stand
+        // proud of a face nothing was blending.
+        if (seamOver > 0.0 && seamVertex(vert)) {
+          std::vector<Vector3d> swept(sec[endIdx].w.begin(), sec[endIdx].w.end());
+          swept.push_back(sec[endIdx].v);
+          const Vector3d dir = (sec[endIdx].v - sec[nbrIdx].v) / step;
+          const double want = seamOver * r;
+          // Half the room, never all of it: landing the bead's end exactly on the
+          // far face puts two coincident surfaces in front of the caller's
+          // boolean, which is the thing the overrun exists to avoid. Looking out
+          // to twice what is wanted is therefore looking exactly as far as it can
+          // matter — past that the half is more than the whole of the want.
+          const double room = seamRoom(m, vert, swept, dir, 2.0 * want);
+          const double over = std::min(want, 0.5 * room);
+          if (over > 1e-12) {
+            back = -std::min(over / step, 0.5);
+          } else {
+            // No room at all: the bead is against a wall thinner than its own
+            // profile and there is nothing past the vertex to run into. The two
+            // beads cannot be made to overlap, so make sure they do not merely
+            // graze either — stopping them a definite distance short instead of a
+            // hair short turns a tangential touch into a plain gap, which a
+            // boolean can resolve. Half the overrun, by the same halving rule the
+            // room is shared out under. Only ever less material, never more, so
+            // it cannot put the bead through the wall the overrun was refused for.
+            back = std::max(back, std::min(0.5 * want / step, 0.5));
+          }
+        }
         const RoundSection stop = lerpSection(sec[nbrIdx], sec[endIdx], 1.0 - back);
         if (!stop.valid) continue;
 
         sec[endIdx] = stop;
+        // The section moved, so where it sits in chain-parameter space moves with
+        // it, overrun and hair alike. Leaving the parameter behind would not hold
+        // the caller's brush boundaries still - it would reparameterise the whole
+        // last segment under them, and slide every boundary on it by a share of
+        // the overrun. The overrun itself is still reached: a run of the selection
+        // that asked for the chain's own end asks for a parameter beyond the last
+        // station now, and toSectionSpace clamps it onto that station.
         sectionAt[ci][endIdx] -= (sectionAt[ci][endIdx] - sectionAt[ci][nbrIdx]) * back;
       }
     }
@@ -2382,23 +3202,123 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   // it, and the material it asked for is the corner cell's already — so the
   // chain builds no bead, which is what the brush asked for. Whether the corner
   // itself is built is a separate question, already settled by endAnchored.
+  //
+  // A run that reaches an end of the chain reaches whatever that end became. An
+  // overrun puts the end station past the chain's own last parameter, and a run
+  // stopping at that last parameter would then stop short of it — the caller
+  // asked for the whole crease and would get it minus the overrun at each end.
+  // So a run touching an end is carried out to where the end went. Only ever
+  // outward: an end a junction truncated sits inside the chain instead, and the
+  // clamp in toSectionSpace already answers for that.
   std::vector<std::vector<SpineInterval>> keepOf(chains.size());
   for (size_t ci = 0; ci < chains.size(); ++ci) {
-    keepOf[ci] = toSectionSpace(chains[ci].keep, sectionAt[ci], chains[ci].closed);
+    std::vector<SpineInterval> keep = chains[ci].keep;
+    if (!chains[ci].closed && sectionAt[ci].size() >= 2) {
+      for (SpineInterval& iv : keep) {
+        if (iv.first <= 1e-12) iv.first = std::min(iv.first, sectionAt[ci].front());
+        if (iv.second >= chainEndParam[ci] - 1e-12)
+          iv.second = std::max(iv.second, sectionAt[ci].back());
+      }
+    }
+    keepOf[ci] = toSectionSpace(keep, sectionAt[ci], chains[ci].closed);
     if (keepOf[ci].empty() && !chains[ci].keep.empty()) chainUsable[ci] = false;
   }
 
+  // EXPERIMENTAL (env OPENSCAD_FILLET_LOCALGROUP=1): group the subtraction by
+  // the chains a corner ball actually ties together, instead of globally.
+  //
+  // The recorded reason the subtraction is global is that a corner ball has to
+  // cut the wedges of every chain meeting at its vertex. That requirement is
+  // local to the vertex, so it is met by putting exactly those chains in one
+  // group. Where no ball is built the requirement is vacuous, and the chains may
+  // be kept apart — which is what lets two beads arriving at a brush-shortened
+  // corner run into each other and leave a seam instead of one canal gouging the
+  // other's bead.
+  //
+  // chainJunctions already drops every vertex in `noCorner` — the vertices where
+  // the brush covered fewer arms than the corner has creases — so the junction
+  // list is precisely the set of corners that get a ball, and linking the chains
+  // at those vertices is the whole rule. At a corner where every crease is
+  // selected, all its chains land in one group and the result is the global
+  // subtraction unchanged.
+  //
+  // Chains are linked only where a ball is built, so a vertex that emits no
+  // junction at all links nothing — and a brushed corner emits none, because the
+  // brush pass already put it in `noCorner`. Splitting the subtraction there is
+  // only ever a means to serve a seam vertex, so where the rule serves none the
+  // grouping must be the one it would have had without it: the split is what
+  // lets two beads meet in a seam, and with no seam to make it is a plain loss of
+  // the coincident-face cover a single subtraction gives. So the grouping is
+  // taken from the rule and not from the knob — no vertex served, one group.
+  std::vector<int> parent(chains.size());
+  for (size_t i = 0; i < chains.size(); ++i) parent[i] = static_cast<int>(i);
+  std::function<int(int)> findRoot = [&](int x) {
+    while (parent[x] != x) x = parent[x] = parent[parent[x]];
+    return x;
+  };
+  std::map<int, std::vector<int>> chainsAt;  // vertex -> chains with an end there
+  for (size_t ci = 0; ci < chains.size(); ++ci) {
+    if (chains[ci].closed || chains[ci].verts.size() < 2) continue;
+    chainsAt[chains[ci].verts.front()].push_back(static_cast<int>(ci));
+    chainsAt[chains[ci].verts.back()].push_back(static_cast<int>(ci));
+  }
+  // Whether a chain is kept apart is asked of the chain, not of the model. A
+  // model can carry a served corner in one place and a withheld one in another,
+  // and one flag for the whole call gives the served corner's answer to every
+  // withheld one: their chains meet at a vertex that emits no junction, so
+  // nothing links them and each subtracts alone — the split with none of the
+  // seam it exists to make.
+  //
+  // So a chain no served seam vertex touches is put back in the one group
+  // everything was in before the rule existed. A seam is two beads meeting, so a
+  // lone chain end has no seam to make and does not count as served.
+  auto servedEnd = [&](size_t ci) {
+    if (chains[ci].closed || chains[ci].verts.size() < 2) return false;
+    for (const int v : {chains[ci].verts.front(), chains[ci].verts.back()}) {
+      const auto it = chainsAt.find(v);
+      if (it != chainsAt.end() && it->second.size() > 1 && seamVertex(v)) return true;
+    }
+    return false;
+  };
+  int rest = -1;
+  for (size_t i = 0; i < chains.size(); ++i) {
+    if (localGroup && servedEnd(i)) continue;
+    if (rest < 0) rest = static_cast<int>(i);
+    else parent[findRoot(static_cast<int>(i))] = findRoot(rest);
+  }
+  // A ball has to cut the wedges of every chain meeting at its vertex, so those
+  // chains are one group wherever one is built. A seam vertex builds none, and
+  // there the chains are left as they are.
+  for (const Junction& j : junctions) {
+    if (localGroup && seamVertex(j.vert)) continue;
+    const auto it = chainsAt.find(j.vert);
+    if (it == chainsAt.end()) continue;
+    for (size_t k = 1; k < it->second.size(); ++k) {
+      const int a = findRoot(it->second[0]), b = findRoot(it->second[k]);
+      if (a != b) parent[a] = b;
+    }
+  }
+
   std::vector<manifold::Manifold> wedgeCells, canalCells;
+  std::vector<int> wedgeGroup, canalGroup;
+  // Tag every cell appended since the vector was last sized with its group, so
+  // the two stay parallel however many cells a helper chose to add.
+  auto tag = [](const std::vector<manifold::Manifold>& cells, std::vector<int>& groups, int g) {
+    groups.resize(cells.size(), g);
+  };
   for (size_t ci = 0; ci < chains.size(); ++ci) {
     if (!chainUsable[ci]) continue;
+    const int gid = findRoot(static_cast<int>(ci));
     const size_t n = sections[ci].size();
     const size_t segments = n < 2 ? 0 : (chains[ci].closed ? n : n - 1);
+    const std::vector<std::vector<SpineBulge>> bulges =
+      chainBulges(m, adj, chains[ci], sectionAt[ci], concave);
     appendChainCells(chains[ci], sections[ci],
                      [](const RoundSection& s) -> const std::array<Vector3d, 5>& { return s.w; },
-                     lerpSection, keepOf[ci], wedgeCells);
+                     lerpSection, keepOf[ci], bulges, wedgeCells);
     appendChainCells(chains[ci], sections[ci],
                      [](const RoundSection& s) -> const std::vector<Vector3d>& { return s.u; },
-                     lerpSection, overhang(keepOf[ci], segments), canalCells);
+                     lerpSection, overhang(keepOf[ci], segments), {}, canalCells);
 
     // Both unions are cut at the same stations, so every one of them hands the
     // subtraction a pair of coincident planes. Cover the seams of each.
@@ -2410,6 +3330,8 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
                      [](const RoundSection& s) -> const std::vector<Vector3d>& { return s.u; },
                      [](const RoundSection& s) { return s.C; },
                      overhang(keepOf[ci], segments), canalCells);
+    tag(wedgeCells, wedgeGroup, gid);
+    tag(canalCells, canalGroup, gid);
   }
 
   // The corner ball as a point set, so the hull below can take it together with
@@ -2441,6 +3363,9 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
 
   for (const Junction& j : junctions) {
     if (j.ballCentres.empty()) continue;
+    // A sharp edge leaves this vertex: the beads meet each other in a seam along
+    // it, and a ball would round that edge's own start away.
+    if (seamVertex(j.vert)) continue;
     const double here = epsAt(j);
     // Where the corner cell stands relative to the beads' overshoot and the
     // arc's two: see cornerCell for why it is between them rather than at either.
@@ -2450,7 +3375,13 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
     for (const RoundSection& s : endSections[j.vert]) profiles.push_back(cornerProfile(s, over));
     manifold::Manifold cell = cornerCell(j, m.pos[j.vert], profiles, r, dir, over);
     if (cell.IsEmpty()) continue;
+    // The group the ball's own vertex ties together: every chain arriving there
+    // was unioned into one component above, so the ball lands in the same group
+    // as all the wedges it has to cut.
+    const auto cit = chainsAt.find(j.vert);
+    const int gid = cit == chainsAt.end() ? 0 : findRoot(cit->second[0]);
     wedgeCells.push_back(std::move(cell));
+    tag(wedgeCells, wedgeGroup, gid);
     // One ball per reachable centre, hulled together. The hull is not an
     // approximation: dilating a convex hull of points by a ball gives the hull
     // of the balls at those points, and the centres are the corners of a convex
@@ -2486,6 +3417,7 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
       }
     }
     canalCells.push_back(manifold::Manifold::Hull(pts));
+    tag(canalCells, canalGroup, gid);
   }
 
   // One subtraction over everything. The spines stop where the ball does, so the
@@ -2493,11 +3425,34 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   // is material another crease still needs — while the corner ball, conversely,
   // has to cut the wedges of every chain meeting at its vertex, which grouping
   // the subtraction per chain would prevent.
-  const manifold::Manifold wedge = unionCells(wedgeCells);
-  if (wedge.IsEmpty()) return {};
-  const manifold::Manifold canal = unionCells(canalCells);
-  if (canal.IsEmpty()) return wedge;
-  return dropVolumelessParts(wedge - canal);
+  // One subtraction per group. With the global grouping above every chain is in
+  // group zero, so this is the single global subtraction unchanged.
+  std::map<int, std::vector<manifold::Manifold>> wedgeOf, canalOf;
+  for (size_t i = 0; i < wedgeCells.size(); ++i)
+    wedgeOf[wedgeGroup[i]].push_back(std::move(wedgeCells[i]));
+  for (size_t i = 0; i < canalCells.size(); ++i)
+    canalOf[canalGroup[i]].push_back(std::move(canalCells[i]));
+
+  // Volumeless parts are what a subtraction leaves behind, so a wedge that never
+  // met a canal has none to drop and is handed back exactly as it was built —
+  // which is what HEAD does with the one group the grouping-off path leaves, and
+  // the reason the drop is asked for once at the end rather than per group.
+  std::vector<manifold::Manifold> parts;
+  bool subtracted = false;
+  for (auto& [gid, cells] : wedgeOf) {
+    const manifold::Manifold wedge = unionCells(cells);
+    if (wedge.IsEmpty()) continue;
+    const auto cit = canalOf.find(gid);
+    if (cit == canalOf.end()) { parts.push_back(wedge); continue; }
+    const manifold::Manifold canal = unionCells(cit->second);
+    if (canal.IsEmpty()) { parts.push_back(wedge); continue; }
+    subtracted = true;
+    parts.push_back(wedge - canal);
+  }
+  if (parts.empty()) return {};
+  if (parts.size() == 1)
+    return subtracted ? dropVolumelessParts(std::move(parts.front())) : std::move(parts.front());
+  return dropVolumelessParts(unionCells(parts));
 }
 
 std::unique_ptr<PolySet> debugEdgeMarkers(
@@ -2608,7 +3563,10 @@ std::shared_ptr<const Geometry> buildFilletTool(
       wantConcave ? "concave" : "convex", thresholdDeg);
 
   const std::vector<EdgeKey> selectedKeys = selectedEdges(m, adj, thresholdDeg, wantConcave);
-  const std::vector<Chain> chains = buildChains(m, selectedKeys);
+  std::vector<Chain> chains = buildChains(m, selectedKeys);
+  // Before the brushes are asked anything, so that there is only ever one
+  // chain-parameter space and it is the one the selection is cut in.
+  resampleChains(m, chains, kSliverFraction);
 
   // debug = true swaps the tool solid for a visualization: colored markers along
   // every edge (concave/convex/rejected), plus the spine's per-vertex tangency
