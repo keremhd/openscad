@@ -240,6 +240,45 @@ This is not byte-identical inertness misread as a win: four models move, 6887
 refusals fire, and the mesh outcome of every one of the 225 is at least as sound
 as before.
 
+### The gate's internal counts, from a temporarily instrumented build
+
+**These numbers, and only these, come from an instrumented binary.** The
+`FILLETGATE` and `FILLETRESAMPLE` prints were re-added to `FilletBuilder.cc` in
+the working tree, unconditionally (no environment variable), the binary was
+built and copied out, and **the source was reverted before anything else was
+done**. `git status` and `git diff` are empty; the instrumentation is not on
+`kerem-fillet`. The instrumented binary carries 0 `OPENSCAD_FILLET` symbols and
+2 diagnostic strings, so it is the shipped code plus prints and nothing else.
+
+**Proof the instrumentation is geometrically inert**: the instrumented build is
+byte-identical to the uninstrumented `post` build on **208 of 208** deterministic
+models, no exceptions. So the counts below belong to the shipped binary's
+behaviour, not to the instrumented one's.
+
+| | `pre` (its own diagnostic) | `post` (instrumented) |
+|---|---|---|
+| **225 corpus** — gate chains | 10378 | **10378** |
+| blind chains | 5784 | **5784** |
+| blind refusals | 4924 | **4924** |
+| creases re-divided | 1703 | **1703** |
+| creases refused / selected | 6887 / 7428 | **6887 / 7428** |
+| **144 census** — gate chains | 2970 | **2970** |
+| blind chains | 498 | **498** |
+| **blind refusals** | **0** | **0** |
+| creases re-divided | 54 | **54** |
+| creases refused / selected | 300 / 549 | **300 / 549** |
+| **81 shapes** — gate chains | 7408 | **7408** |
+| blind chains | 5286 | **5286** |
+| blind refusals | 4924 | **4924** |
+| creases re-divided | 1649 | **1649** |
+| creases refused / selected | 6587 / 6879 | **6587 / 6879** |
+
+**Every count is identical before and after the removal.** The census's
+498-blind-chains / 0-blind-refusals pair — the epsilon repair the review forced —
+is intact in the shipped binary and is now measured there rather than inferred.
+The gate is not merely present; it examines 10378 chains, of which 5784 are
+blind, and refuses 4924 of those.
+
 ---
 
 ## 5. Excluded, and why
@@ -257,11 +296,14 @@ both passes; there are no silent gaps in the tables above.
 
 ## 6. What was NOT measured
 
-* **Post-removal gate chain / served / blind-refusal counts from the shipped
-  binary.** `FILLETGATE` and `FILLETRESAMPLE` were deleted, so `post`'s
-  `blind`/`blindRef`/`redivided` are recorded as *unavailable*, not as zero
-  (`hasGateDebug: false`). Every blind-chain and re-division figure quoted above
-  is from the **`pre`** binary. See §7.
+* **Post-removal gate counts from the *shipped* binary.** They cannot be read
+  from it at all — `FILLETGATE` and `FILLETRESAMPLE` were deleted — so in the
+  §1–§3 tables `post`'s `blind`/`blindRef`/`redivided` are recorded as
+  *unavailable*, not as zero (`hasGateDebug: false`), and every blind-chain and
+  re-division figure there is from the **`pre`** binary. The post-removal counts
+  in §4 come from a **temporarily instrumented** build, reverted immediately;
+  they are proven equivalent to the shipped one by 208/208 byte-identity, but
+  they are not a read of the shipped binary itself.
 * **No clean-`944e0cbef` baseline.** The comparison is pre-removal default
   against post-removal default, which is the question the removal poses. The
   "byte-identical to clean HEAD" counts were not re-derived.
