@@ -182,14 +182,45 @@ building, so a comparison against it has no value.
 | D22 — crease threshold reads render settings | **closed 2026-08-04** by replacing the derivation with the constant 46°. |
 | `cross` yields no mesh at stock defaults | **closed 2026-08-04.** Not an empty mesh — a 17.5 GB OOM SIGKILL before the exporter ran. D22's tail, proven by a cliff at exactly 360/19, the model's own facet angle: `min_angle` 19 and above completes in 0.2 s and is valid, 18.9 and below is killed. |
 | **unguarded `Decompose()` on the finished solid** | **open, new 2026-08-04.** `FilletBuilder.cc:3400`. Materialises a full mesh per component, so any high component count turns an invalid-mesh bug into a machine-killer — `sample(1)` put 1572 of 1572 main-thread samples there. The `unionCells` comment at `:1421` already names the hazard ("cost 112 s and 17 GB on a plate of a hundred bosses"); the final call is that path, unguarded. Fixing the threshold stopped `cross` reaching it; the path is still unsafe. |
-| **`rib_into_boss` invalid at `$fn`=14 and 32** | **open, new 2026-08-04.** Same corner as the fin, smaller fault, on the bead surface where the two beads cross. **Counts corrected 2026-08-05**: at `$fn`=32 it reads χ=4 with 4 non-manifold edges, not χ=3 with 2. Weld 1e-6, five runs. The defect reproduces; the counts most likely moved when D22's closure changed crease selection. |
+| **`rib_into_boss` invalid at `$fn`=14 and 32** | **open, new 2026-08-04.** Same corner as the fin, smaller fault, on the bead surface where the two beads cross. **Reframed 2026-08-05, and the recorded framing retired**: this is not "invalid at 14 and 32". It fails at roughly 5–15 % of values on either axis, the failing set moves when anything else changes, and it is nondeterministic run to run (3 distinct exports in 8 identical invocations at `$fn`=11). On exact STL the `$fn` 8…64 sweep is invalid at **11 and 14 only** — `$fn`=25 and 32 are exporter artefacts, TRAPS 11. The remnant is an **exact duplicate triangle pair with opposite orientation**, a zero-thickness membrane, present in the `fillet_tool()` solid alone, so `buildRoundSolid` produces it rather than the caller's `union()`. Its plane is a section plane of the boss base-arc chain, where consecutive cells abut. |
 | **the builder is nondeterministic in validity** | **open, new 2026-08-05.** `rib_into_boss` at `$fn`=14: 2 of 40 identical runs of one unchanging binary returned a valid mesh (`v=226 e=672 f=448`), 38 returned invalid (`f=450`, nonman=3, χ=4), all rc=0. The topology moves, so this is not the known vertex-order noise. See TRAPS 14 — it makes every single-render measurement on this branch, the 225-model corpus included, weaker than it reads. |
 | **`rib_into_boss` SIGBUS at `R`=1.0** | **open, new 2026-08-05.** rc=138, no output, about one run in six. A hard memory fault, and the most economical explanation for the nondeterminism above. Observed on the 2026-08-04 23:56 build carrying an uncommitted `FilletBuilder.cc`; needs confirming against a committed tree. |
 | D23 — size gate drops creases on impossible misses | diagnosed, unfixed. The "equal radius" framing is recorded as wrong. |
 | D24 — bead truncated and left open at a refused neighbour | **closed 2026-08-04, does not reproduce.** Record: `decisions/2026-08-04-d24-does-not-reproduce.md`. Symptom is a blunt bead end, not a hole. |
-| **`refused_neighbour` non-manifold at r = 0.2, 0.8, 0.9, 1.0** | **open, new 2026-08-04. Breaks promise 1.** A 0.34 µm sliver on 4 faces at r=0.9, stable across weld 1e-4…1e-9, on the concave bead's tangency boundary — the oblique junction, not the refusal. The bench carries r=0.5, which is valid. **2026-08-05**: reproduced at all four radii on the 19:43 build; on the 23:56 build only r=0.8 is still invalid, with 0.2, 0.9 and 1.0 reading valid. Whether three quarters of this defect was fixed on purpose is not yet established, and the nondeterminism above is an alternative explanation that has not been excluded. |
+| **`refused_neighbour` non-manifold at r = 0.2, 0.8, 0.9, 1.0** | **open, new 2026-08-04. Breaks promise 1.** A 0.34 µm sliver on 4 faces at r=0.9, stable across weld 1e-4…1e-9, on the concave bead's tangency boundary — the oblique junction, not the refusal. The bench carries r=0.5, which is valid. **2026-08-05, largely explained.** This model is **fully deterministic** (6 of 6 identical exports at r=0.5, 0.8, 0.9), so the nondeterminism above is not involved. On exact STL the failing set over r 0.05…2.00 is **0.05, 0.10, 0.80, 0.85** — r = 0.9, 0.95, 1.0, 1.05 were exporter artefacts (TRAPS 11), and 0.05/0.10 are a different regime with one warning and far more built. The set is a scattering at every resolution probed: 0.7999 and 0.8 fail while 0.79999, 0.80001 and 0.8001 pass. The bad edge sits at x=0.440817, z=7.5 exactly, y=±(4−r)+δ — where **one bead's spine crosses the neighbouring bead's tangency line**, the one point at which both bead surfaces are tangent to the same wall and so to each other. A sliver wedge of area ~1.5e-7, not a duplicate triangle. Confirmed not the refusal: refusals sit at x=7.5. |
 | latent A3 gap — `chainUsable[ci] = false` | **open, latent.** A two-station chain consumed by truncation is discarded with no warning; the node is argued not to reach it. |
 | D19 — subtractive scalloped ledge | parked at tag `d19-wall-recognition` (`fe8c8d9d1`). |
+
+### The two junction faults share a root cause, 2026-08-05
+
+Both sit at a bead–bead crossing inside a junction, and **both are invisible to Manifold** —
+every failing case reports `Status: NoError, Genus: 0`. OpenSCAD's vertex count exceeds the
+exact-STL welded count by exactly the number of coincident pairs (359 against 358 at r=0.8; 562
+against 560 at `$fn`=32): combinatorially manifold, geometrically pinched. An odd χ with
+`nonman=0` is one such pinch seen from the other side.
+
+The shared cause is the design decision to **separate coincident surfaces by a small offset and
+let the boolean resolve the crossing**. That works generically and fails where the crossing is
+tangential by construction — which is what a bead–bead junction is. The source already names
+both failures in the past tense, at `cornerProfile` and at the seam overrun.
+
+They differ in remnant: a **sliver wedge** on `refused_neighbour`, which vertex welding would
+fix, and a **duplicate-triangle membrane** on `rib_into_boss`, which it cannot touch. So a fix
+at the surface-separation level catches both; a mesh-cleanup fix catches only one.
+
+**Proposed, not yet done.** Part 1: `Manifold::Simplify` / `SetTolerance` exist in the vendored
+library and are never called in `FilletBuilder.cc`; applying `Simplify` to the tool at 1e-6·r —
+three orders below the `eps`=1e-3·r ladder, so nothing deliberately built is in reach — should
+clear the sliver family. Part 2, the membrane, is either deleting the opposed duplicate pair (it
+bounds no volume, so removal is always safe, but re-stitching the fan is real work) or
+guaranteeing an angle rather than an offset where consecutive cells abut, which is the
+established remedy in this file but touches a construction every bench model depends on. Part 1
+first.
+
+**A leading indicator worth keeping**: `rib_into_boss` is exactly y-mirror-symmetric, and **13
+of 33 tessellations export a y-asymmetric mesh** — far more than the invalid rows. At `$fn`=14
+three of the eight unmatched vertices are precisely the non-manifold edge endpoints. Symmetry
+breaking is visible where invalidity is not yet, which makes it the more sensitive gate.
 
 **The corpus is blind to the family these belong to**: all 225 models write an explicit `$fn`, and
 no pass has looked at a junction render. This session demonstrated the cost twice — the corpus

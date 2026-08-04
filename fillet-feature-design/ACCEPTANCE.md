@@ -138,6 +138,11 @@ the other time. **A1 is only meaningful as a repeated measurement**: at least th
 cell, aggregated to the worst outcome, with the number of distinct meshes recorded.
 `fillet-bench/sweep.sh --repeat` is the form that holds; the single-point contact sheet is not.
 
+**A1 must also stop reading OFF.** The bench's OFF exports carry 6 significant figures, which
+welds distinct vertices together and manufactures non-manifold edges that the solid does not
+have (TRAPS 11). Exact ASCII STL round-trips doubles and is the sound input. Until A1 reads it,
+part of every failing set on record is the exporter rather than the operator.
+
 This also weakens, retrospectively, every green single-render result on this branch — the
 225-model corpus included. It does not invalidate them, because the flake direction is not
 known to be symmetric, but no all-green run taken one-render-per-model is stronger than the
