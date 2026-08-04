@@ -17,8 +17,12 @@ Reported per mesh:
 
     v e f       vertices, edges, faces after welding
     comp        connected components, by shared edge
-    bnd         edges carried by exactly one face -- an open surface. A bead
-                truncated and left open shows up here and nowhere else.
+    bnd         edges carried by exactly one face -- an open surface. NOTE that
+                this is identically zero on anything OpenSCAD's Manifold backend
+                exports: every edge of a Manifold is carried by two faces,
+                welding only sums those counts, and a face welding collapses
+                contributes an even count to the one edge it has left. Use it on
+                meshes from elsewhere; it cannot fail on these. README says more.
     nonman      edges carried by more than two faces
     chi         Euler characteristic v - e + f
     genus       (2*comp - chi)/2, meaningful only when bnd and nonman are 0.

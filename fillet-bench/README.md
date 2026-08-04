@@ -62,10 +62,33 @@ Models carrying no curvature render once; `expect.txt` marks them `-`.
 
 | | |
 |---|---|
-| `bnd` | edges on exactly one face — an open surface. **A bead truncated and left open (D24) shows up here and nowhere else.** |
+| `bnd` | edges on exactly one face — an open surface. **Identically zero on anything this pipeline exports; see below.** |
 | `nonman` | edges on more than two faces |
 | `chi` | Euler characteristic. **Odd is a proof of invalidity**, not a measurement — no closed orientable surface has one |
 | `genus` | reported only when the mesh is closed and orientable |
+
+### `bnd` cannot fire here, and this README used to say it could
+
+The claim that a truncated open bead shows up in `bnd` and nowhere else is
+**false**, and it is false by construction rather than by accident:
+
+- `fillet()` builds its tool as a `manifold::Manifold` and hands the caller a
+  Manifold boolean of it against the target. Every edge of that mesh is carried
+  by exactly two faces.
+- `mesh.py` welds vertices, which can only *merge* edges, so every count it ends
+  up with is a sum of twos.
+- The one face it drops is one welding collapsed, and such a face contributes an
+  even count — two — to the single edge it has left.
+
+So no edge can come out carried by exactly one face. `bnd` is zero on a
+correct solid and zero on a broken one, and 36 of 36 tiles read zero. The
+non-manifold edges that do appear are carried by **four** faces, never three,
+which is the same parity argument seen from the other side.
+
+What a truncated bead actually costs is a *visible* blunt end on a solid that is
+still closed — so A1's numbers cannot see it and A5's contact sheet is what it
+is for. The one topological fault found at a refusal site to date is a sliver
+edge carried by four faces, and it shows up in `nonman`, not `bnd`.
 
 **Weld tolerance is stated on every line and is not a detail** — the same mesh has
 read 205 non-manifold edges at 1e-5 and 0 at 1e-6 in this effort. Default 1e-6,

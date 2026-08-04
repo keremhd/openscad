@@ -63,6 +63,7 @@ refusal counts beside every number. One reported win was byte-identical inertnes
 | 7 | `-o /dev/null` | makes OpenSCAD skip the render and report zero calls |
 | 8 | `timeout(1)` | does not exist on this machine; made an export loop report 19/19 FAILED |
 | 9 | Catch2 name splitting | splits on commas, so an unescaped exclusion excludes nothing and silently reports the full total |
+| 10 | `bnd` as the D24 / A3 instrument | identically zero on every Manifold-backend export, by a parity argument, so it reads clean on a correct solid and on a broken one alike. `fillet-bench/README.md` gives the argument |
 
 ## Corrections to the earlier record
 
