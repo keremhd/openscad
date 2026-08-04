@@ -1621,33 +1621,6 @@ size_t countFault(const std::vector<SizeVerdict>& verdicts, SizeFault fault)
 
 }  // namespace
 
-TEST_CASE("zzdebug rib", "[.]")
-{
-  const auto model = box(60.0, 40.0, 6.0) + box(30.0, 4.0, 20.0).Translate(manifold::vec3(10.0, 18.0, 6.0));
-  const MergedMesh mm = mergeMesh(model.GetMeshGL64());
-  const auto adj = buildEdgeAdjacency(mm.tris);
-  const auto chains = buildChains(mm, selectedEdges(mm, adj, 20.0, true));
-  const auto surf = smoothSurfaces(mm, adj, 20.0);
-  for (size_t ci = 0; ci < chains.size(); ++ci) {
-    const auto cs = chainContacts(mm, adj, chains[ci], 1.5, true, false, surf, 3);
-    for (const auto& c : cs) {
-      if (!c.valid) continue;
-      double bA = 1e30, bB = 1e30;
-      for (size_t t = 0; t < mm.tris.size(); ++t) {
-        const auto& tr = mm.tris[t];
-        if (surf[t] == c.surfaceA)
-          bA = std::min(bA, pointTriangleDistance(c.TA, mm.pos[tr.v[0]], mm.pos[tr.v[1]], mm.pos[tr.v[2]]));
-        if (surf[t] == c.surfaceB)
-          bB = std::min(bB, pointTriangleDistance(c.TB, mm.pos[tr.v[0]], mm.pos[tr.v[1]], mm.pos[tr.v[2]]));
-      }
-      if (bA > 0.05 || bB > 0.05)
-        WARN("chain " << ci << " v=(" << c.v.x() << "," << c.v.y() << "," << c.v.z() << ")"
-             << " TA=(" << c.TA.x() << "," << c.TA.y() << "," << c.TA.z() << ") sA=" << c.surfaceA << " offA=" << bA
-             << " TB=(" << c.TB.x() << "," << c.TB.y() << "," << c.TB.z() << ") sB=" << c.surfaceB << " offB=" << bB);
-    }
-  }
-}
-
 TEST_CASE("size: two beads sharing a face fit until their tangency lines meet")
 {
   // The crowding question is about the material the blend uses, and that is the
