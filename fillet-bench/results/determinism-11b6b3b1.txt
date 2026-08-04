@@ -7,6 +7,8 @@
 # cell            runs  rc!=0  distinct-md5  verdict
 # FNSET=14          60      0             1  INVALID v=222 e=660 f=442 nonman=3 chi=4 comp=1 (weld 1e-4, 1e-6, 1e-9 alike), 0 warnings
 # R=1.0             40      0             1  VALID   v=222 e=660 f=440 nonman=0 chi=2 genus=0 comp=1 (weld 1e-6), 0 warnings
+# FNSET=12          20      0             1  VALID   v=173 e=513 f=342 nonman=0 chi=2 genus=0 comp=1 (weld 1e-6), 0 warnings
+#                                              -- this cell produced NO OUTPUT on some runs before the fix
 #
 # Before the fix the same two cells returned two or three distinct meshes over eight runs
 # and R=1.0 exited SIGBUS (rc=138) about one run in six. Neither recurs here.
@@ -112,3 +114,23 @@ r10	17	0	db69a07def823c95205fb11eef57047c	  116298
 r10	18	0	db69a07def823c95205fb11eef57047c	  116298
 r10	19	0	db69a07def823c95205fb11eef57047c	  116298
 r10	20	0	db69a07def823c95205fb11eef57047c	  116298
+fn12	1	0	3a47aaed6b0ec8c00fc7f97136976c92	   85081
+fn12	2	0	3a47aaed6b0ec8c00fc7f97136976c92	   85081
+fn12	3	0	3a47aaed6b0ec8c00fc7f97136976c92	   85081
+fn12	4	0	3a47aaed6b0ec8c00fc7f97136976c92	   85081
+fn12	5	0	3a47aaed6b0ec8c00fc7f97136976c92	   85081
+fn12	6	0	3a47aaed6b0ec8c00fc7f97136976c92	   85081
+fn12	7	0	3a47aaed6b0ec8c00fc7f97136976c92	   85081
+fn12	8	0	3a47aaed6b0ec8c00fc7f97136976c92	   85081
+fn12	9	0	3a47aaed6b0ec8c00fc7f97136976c92	   85081
+fn12	10	0	3a47aaed6b0ec8c00fc7f97136976c92	   85081
+fn12	11	0	3a47aaed6b0ec8c00fc7f97136976c92	   85081
+fn12	12	0	3a47aaed6b0ec8c00fc7f97136976c92	   85081
+fn12	13	0	3a47aaed6b0ec8c00fc7f97136976c92	   85081
+fn12	14	0	3a47aaed6b0ec8c00fc7f97136976c92	   85081
+fn12	15	0	3a47aaed6b0ec8c00fc7f97136976c92	   85081
+fn12	16	0	3a47aaed6b0ec8c00fc7f97136976c92	   85081
+fn12	17	0	3a47aaed6b0ec8c00fc7f97136976c92	   85081
+fn12	18	0	3a47aaed6b0ec8c00fc7f97136976c92	   85081
+fn12	19	0	3a47aaed6b0ec8c00fc7f97136976c92	   85081
+fn12	20	0	3a47aaed6b0ec8c00fc7f97136976c92	   85081
