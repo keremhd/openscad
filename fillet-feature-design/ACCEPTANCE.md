@@ -138,10 +138,16 @@ the other time. **A1 is only meaningful as a repeated measurement**: at least th
 cell, aggregated to the worst outcome, with the number of distinct meshes recorded.
 `fillet-bench/sweep.sh --repeat` is the form that holds; the single-point contact sheet is not.
 
-**A1 must also stop reading OFF.** The bench's OFF exports carry 6 significant figures, which
-welds distinct vertices together and manufactures non-manifold edges that the solid does not
-have (TRAPS 11). Exact ASCII STL round-trips doubles and is the sound input. Until A1 reads it,
-part of every failing set on record is the exporter rather than the operator.
+**A1 must state its weld tolerance, and must not read at one that welds nothing.** Manifold's
+output is 2-manifold by index construction, so an unwelded reader cannot see a self-touch and
+reads clean on a correct solid and a broken one alike — the same parity blindness that retired
+`bnd`. Every disputed failure on record is invalid across weld 1e-4…1e-12 and valid only at
+1e-15.
+
+A1 should read exact ASCII STL rather than OFF, which prints six significant figures. This is a
+precaution and not a correction: measured across 353 cells the OFF loses a vertex on ten of
+them and changes the verdict on none. An earlier version of this file attributed several
+failing sets to the exporter; that claim is withdrawn.
 
 This also weakens, retrospectively, every green single-render result on this branch — the
 225-model corpus included. It does not invalidate them, because the flake direction is not
@@ -222,7 +228,10 @@ If no, it is a release note, not work.
 | D23 — size gate drops creases on impossible misses | documented limitation |
 | D19 — subtractive scalloped ledge | parked, tag `d19-wall-recognition` |
 | unguarded union of surviving parts, `dropVolumelessParts` | **closed 2026-08-05.** Bounded at 32 survivors. The recorded cause — an unguarded `Decompose()` on a high component count — is retired as wrong on measurement; the cost is the batch union of the survivors, and `Decompose` is innocent. `cross` completes at ≤387 MB where it was SIGKILLed at 17.5 GB. All 25 bench models byte-identical on exact STL, suite 2230/88 green |
-| **the builder is nondeterministic in validity** | **open, new 2026-08-05. Blocks A1.** 2 of 40 identical runs of one binary returned a valid `rib_into_boss` at `$fn`=14, 38 returned invalid, all rc=0 — the topology moves between runs. A1 cannot be answered by a single render, and no green single-render result on this branch is stronger than the flake rate |
+| **the builder is nondeterministic in validity** | **open, new 2026-08-05. Blocks A1.** `rib_into_boss` returns 2–3 distinct meshes at every `$fn` tested over 8 identical runs of one binary, all rc=0, and flips validity at `$fn`=14. A1 cannot be answered by a single render, and no green single-render result on this branch is stronger than the flake rate |
+| **χ-odd invalids with no non-manifold edge and no warning** | **open, new 2026-08-05. Breaks promise 1 silently.** `tee` at r=0.9 is χ=3, `nonman=0`, zero warnings; also `tee_oblique` at r=0.2/0.3/0.8 and `cross` at r=0.3. A false acceptance with no signal but parity — the defect direction the gate names as the unacceptable one |
+| **`$fn`=8 invalidates five boss-and-plate models** | **open, new 2026-08-05.** `boss_plate`, `hole_plate`, `two_bosses`, `dome`, `pipe_into_face`, all valid at `$fn`≥10. A coarse-tessellation family the single-point bench could not see |
+| `cross` gains genus with radius | **open, new 2026-08-05.** genus 0 at r≤1.0, 2 at r=1.5, 4 at r=2.0, all valid solids. A promise question — may a fillet punch handles through the model? — not an A1 one |
 | **`rib_into_boss` SIGBUS at `R`=1.0** | **open, new 2026-08-05.** rc=138 and no output on roughly one run in six. A hard memory fault, and the likeliest cause of the nondeterminism above; under hunt with sanitizers |
 | `rib_into_boss` invalid at `$fn`=14 and 32 | **open, new 2026-08-04.** Same corner as the fin, smaller fault. Neither tessellation is one the bench renders — `expect.txt` has no `$fn` axis, so a fault appearing at some tessellations and not others is invisible to it |
 
