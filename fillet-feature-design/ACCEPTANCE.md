@@ -12,24 +12,34 @@ One size per invocation, optional selection brush, Manifold backend.
 
 ## Availability
 
-**The five modules ship behind an experimental feature.** A new
-`Feature::ExperimentalFillet("fillet", ...)` in `src/Feature.h` and `src/Feature.cc`, passed as
-the second argument to each `Builtins::init` in `register_builtin_fillet`
-(`src/core/FilletNode.cc:205`), exactly as `roof` does at `src/core/RoofNode.cc:62`. Today all
-five register unconditionally. Users opt in with `--enable=fillet` or the GUI preference.
+**The five modules ship behind an experimental feature. Implemented 2026-08-04.**
+`Feature::ExperimentalFillet("fillet", ...)` at `src/Feature.h:25` and `src/Feature.cc:52`,
+passed as the second argument to each `Builtins::init` in `register_builtin_fillet`
+(`src/core/FilletNode.cc:208-231`), exactly as `roof` does at `src/core/RoofNode.cc:62`. Users
+opt in with `--enable=fillet` or the GUI preference.
 
 This is the right shape for a first release of a large new geometry operator with known
 documented limitations, and it makes those limitations a stated condition of use rather than a
 surprise.
 
-**And they are not registered at all on a build without Manifold.** Decided: the feature is
-simply unavailable there rather than degrading. That is cleaner than the passthrough R2
-proposed — an unregistered module is an "unknown module" error naming the line, where the
-current code warns and silently returns nothing, which for `fillet()` deletes the model.
+**And they are not registered at all on a build without Manifold. Implemented and verified by
+building one.** `register_builtin_fillet`'s whole body sits inside `#ifdef ENABLE_MANIFOLD`
+with an empty `#else`. On a real `-DENABLE_MANIFOLD=OFF -DENABLE_CGAL=ON` build, `round_tool`
+and `fillet` are both `WARNING: Ignoring unknown module ... line 1`, with and without
+`--enable=fillet`, and `ctest -N -R "fillet|tool-tests"` enumerates zero tests. That is
+cleaner than the passthrough R2 proposed — an unregistered module names the line, where the
+old code warned and silently returned nothing, which for `fillet()` deletes the model.
 
-Consequences, all of which are part of this criterion:
-- Every regression test invoking the modules passes `--enable=fillet`, following the
-  `--enable=predictible-output` and `--enable=lazy-union` precedent in `tests/CMakeLists.txt`.
+Consequences, all of which are part of this criterion and all now done:
+- The five fillet `.scad` files are out of the `FEATURES_3D_FILES` glob and into a dedicated
+  `--enable=fillet` block (`tests/CMakeLists.txt:1252-1284`), roof-style; ctest enumerates the
+  identical 45 tests and all pass.
+- **`tests/CMakeLists.txt:1563` needed neither disables nor a new baseline** — the whole block
+  is inside `if(ENABLE_MANIFOLD)`, so without Manifold no fillet test is created at all. The
+  old twelve-name disable list is gone.
+- `CMakeLists.txt:1588` needed the same guard on the fillet unit-test sources, or
+  `-DENABLE_MANIFOLD=OFF -DENABLE_TESTS=ON` does not compile.
+- `fillet-bench/sheet.sh:18` now passes `--enable=fillet`.
 - The unit tests call the builder directly and are unaffected.
 - The user documentation states the flag in its first paragraph, not in a footnote.
 
@@ -112,9 +122,28 @@ Five checks. All absolute — none is a comparison against a previous build.
 |---|---|---|
 | A1 | Every bench model: zero edges carried by >2 faces, even Euler characteristic, genus as declared per model | the curved-arrival fin |
 | A2 | **Provenance invariance** — see below | D22 |
-| A3 | Every refusal warns and names its crease, and no refusal leaves an open bead | D24 |
+| A3 | Every refusal warns and names its crease. **Second clause retired** — see below | D24 |
 | A4 | Unit suite green on the pin: **2230 assertions / 88 cases** | regression |
 | A5 | Junction contact sheet, one render per bench model, reviewed by a person | the blind spot |
+
+### A3 — why the "open bead" clause is gone
+
+`bnd`, the count of edges carried by exactly one face, was the named instrument for it. **It is
+identically zero on any Manifold-backend export, by parity**: the result is a Manifold boolean
+so every edge carries exactly two faces, `mesh.py`'s weld only merges edges so every count
+stays a sum of twos, and a face the weld collapses contributes two to the one edge it has
+left. Confirmed both ways — every tile reads `bnd=0`, and the non-manifold edges that do
+appear are carried by **four** faces, never three. `mesh.py` on a single-triangle OFF reads
+`bnd=3`, so the script is sound; the measurement was blind on this backend.
+
+So the clause was never passing — it was unmeasurable, and every green `bnd` column on record
+carries no information. It is retired rather than re-instrumented because on a Manifold
+backend an open bead cannot reach the output at all: the boolean closes it. What survives of
+the original worry is a *blunt* bead end, which promise 4 already makes a release note, and
+non-manifold edges, which `nonman` does measure.
+
+Instrument #10, and the first one found by asking what a metric *could* say rather than
+whether its value looked right.
 
 ### A2 — provenance invariance
 
@@ -164,7 +193,10 @@ If no, it is a release note, not work.
 | curved-arrival fin | **closed 2026-08-04.** `arrivesStraight` deleted. The record was wrong about the fallback: there is no seated ball at those vertices — `chainJunctions` finds no junction, because the brush that leaves the crease unfilleted withholds the corner too, so the vertex fell to the stop-a-hair-short branch and the boolean resolved two beads meeting at no angle into a knife edge. `bcurve` `$fn`=64 goes χ=5/5 non-manifold → χ=2/0; across a 37-tessellation sweep, 16 invalid → 2 |
 | D22 — classifier reads `$fa`/`$fn` | **closed 2026-08-04, by removal rather than repair.** The threshold is now the constant 46°, so no render variable and no mesh statistic is consulted. `tee`, `tee_oblique`, `tee_small` and `cross` are all valid at stock defaults |
 | `cross` produces no mesh at all at stock defaults | **closed 2026-08-04.** Not an empty mesh: a 17.5 GB OOM SIGKILL before the exporter ran. Its threshold of 18.0° sat below the model's own 18.947° facet angle, so every facet seam became a crease, and the resulting component count reached the unguarded `Decompose()` at `FilletBuilder.cc:3400`. D22's tail, proven by a cliff at exactly 360/19 |
-| D24 — bead truncated and left open at a refused neighbour | **open, blocks A3** — but the bench reads `bnd=0` on all 35 tiles, including tiles where four chains are refused, so it may be masked rather than live. Under investigation |
+| D24 — bead truncated and left open at a refused neighbour | **closed 2026-08-04, does not reproduce.** The recorded repro renders valid with the feature confirmed firing. The visible symptom is a *blunt* bead end, not a hole — promise 4 makes that a release note. Mechanism understood, not merely absent: truncation applies only at vertices in `junctionAt`, and a refused crease is kept out twice over — `chainJunctions` runs over the post-gate chain set, and every surviving junction is dropped when `creaseLeavesUnfilleted` holds |
+| A3 first clause — multi-refusal warning named only the worst crease | **closed 2026-08-04.** It named 1 of 4 on the repro. Now names every refused crease, capped at 24 then ", and N more". A real A3 failure that no instrument was watching |
+| `refused_neighbour` non-manifold at r = 0.2, 0.8, 0.9, 1.0 | **open, new 2026-08-04. Breaks promise 1.** Valid at 0.3–0.7, 1.2, 1.5, 2.0. At r=0.9 a 0.34 µm sliver carried by 4 faces, stable across weld 1e-4…1e-9, on the concave bead's tangency boundary and nowhere near either refusal — the oblique junction, not the refusal. The bench carries r=0.5, which is valid, so a green bench hides it |
+| latent A3 gap — `chainUsable[ci] = false` | **open, latent.** `buildRoundSolid` discards a two-station chain consumed by truncation with no warning. Its comment argues the node cannot reach it (shortest chain seen there: seventeen stations), so latent rather than live |
 | D23 — size gate drops creases on impossible misses | documented limitation |
 | D19 — subtractive scalloped ledge | parked, tag `d19-wall-recognition` |
 | unguarded `Decompose()` on the finished solid, `FilletBuilder.cc:3400` | **open, new 2026-08-04.** Any high component count reaches it and it materialises a full mesh per component — 17.5 GB and SIGKILL on the `cross` repro. The `unionCells` comment at `:1421` already names this hazard. Fixing the threshold stopped `cross` reaching it; it did not make the path safe |

@@ -184,7 +184,9 @@ building, so a comparison against it has no value.
 | **unguarded `Decompose()` on the finished solid** | **open, new 2026-08-04.** `FilletBuilder.cc:3400`. Materialises a full mesh per component, so any high component count turns an invalid-mesh bug into a machine-killer — `sample(1)` put 1572 of 1572 main-thread samples there. The `unionCells` comment at `:1421` already names the hazard ("cost 112 s and 17 GB on a plate of a hundred bosses"); the final call is that path, unguarded. Fixing the threshold stopped `cross` reaching it; the path is still unsafe. |
 | **`rib_into_boss` invalid at `$fn`=14 and 32** | **open, new 2026-08-04.** χ=4/3 non-manifold and χ=3/2 non-manifold, weld 1e-6. Same corner as the fin, smaller fault, on the bead surface where the two beads cross. |
 | D23 — size gate drops creases on impossible misses | diagnosed, unfixed. The "equal radius" framing is recorded as wrong. |
-| D24 — bead truncated and left open at a refused neighbour | diagnosed, unfixed. All-planar repro. **But the bench reads `bnd=0` on all 35 tiles**, including tiles where the size gate refuses four chains, so it may be masked rather than live. Under investigation. |
+| D24 — bead truncated and left open at a refused neighbour | **closed 2026-08-04, does not reproduce.** Record: `decisions/2026-08-04-d24-does-not-reproduce.md`. Symptom is a blunt bead end, not a hole. |
+| **`refused_neighbour` non-manifold at r = 0.2, 0.8, 0.9, 1.0** | **open, new 2026-08-04. Breaks promise 1.** A 0.34 µm sliver on 4 faces at r=0.9, stable across weld 1e-4…1e-9, on the concave bead's tangency boundary — the oblique junction, not the refusal. The bench carries r=0.5, which is valid. |
+| latent A3 gap — `chainUsable[ci] = false` | **open, latent.** A two-station chain consumed by truncation is discarded with no warning; the node is argued not to reach it. |
 | D19 — subtractive scalloped ledge | parked at tag `d19-wall-recognition` (`fe8c8d9d1`). |
 
 **The corpus is blind to the family these belong to**: all 225 models write an explicit `$fn`, and
@@ -193,10 +195,13 @@ called the `arrivesStraight` branch clean and one rendered junction found a fin 
 characteristic inside it; and `box_step`'s recorded genus regressions turned out to be artefacts
 of the same blind spot.
 
-**The bench has the same blind spot one axis over.** `expect.txt` carries one `$fn` per model,
-so a fault that appears at some tessellations and not others is invisible to it — which is
-exactly how `rib_into_boss` at `$fn`=14 and 32 survives a green bench. A `$fn` axis is the
-single highest-value addition to the instrument.
+**The bench has the same blind spot on two axes.** `expect.txt` carries one `$fn` and one
+radius per model, so a fault appearing at some tessellations or some sizes and not others is
+invisible to it. Both have now bitten: `rib_into_boss` fails at `$fn`=14 and 32, and
+`refused_neighbour` fails at r = 0.2, 0.8, 0.9, 1.0 — each surviving an all-green bench
+because the one value the bench happens to carry is a good one. **A `$fn` axis and a radius
+axis are the two highest-value additions to the instrument**, and between them they would have
+caught both defects on the run that introduced the models.
 
 ---
 
@@ -242,14 +247,14 @@ is about what the next reader has to open, not about preservation — git holds 
 Lifted from `archive/pr-review.md` when it was archived. R3 and R4 are closed; R1, R2 and R5
 were re-verified against the tree as still present on 2026-08-04.
 
-**Blocking:**
+**Blocking — all closed 2026-08-04.** R1, R2, R5, the experimental gating and the
+documentation defect are done and committed; only R7's comment register and the "worth doing"
+items below remain.
 
-**None of these are implemented yet.** Commit `39557c022`, "Ship the fillet modules behind an
-experimental flag, and drop them without Manifold", touched only `ACCEPTANCE.md` and
-`STATE.md` — it wrote the criterion, not the code. `Feature::ExperimentalFillet` does not
-exist in `src/Feature.h` or `src/Feature.cc`, and `register_builtin_fillet` still registers
-all five modules unconditionally. A commit message in the imperative reads as done; check the
-diffstat.
+A trap worth keeping: commit `39557c022`, "Ship the fillet modules behind an experimental
+flag, and drop them without Manifold", touched only `ACCEPTANCE.md` and `STATE.md`. It wrote
+the criterion, not the code, and read as done for a day. **A commit subject in the imperative
+is a claim; the diffstat is the evidence.**
 
 - **R1** — `buildFilletTool` echoes a mesh-statistics line unconditionally
   (`FilletBuilder.cc:3498`), once per tool node and twice per `fillet()`. No other OpenSCAD
