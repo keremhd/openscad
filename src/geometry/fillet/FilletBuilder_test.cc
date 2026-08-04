@@ -61,9 +61,22 @@ CurveDiscretizer discretizer(double fn, double fa = 12.0, double fs = 2.0)
   });
 }
 
-// The crease threshold the operator derives from the tessellation parameters:
-// half again the coarsest seam OpenSCAD would generate at those settings.
+// An explicit threshold at a known angle, the value a min_angle= would carry.
+// Tests that need *some* threshold to drive the builder at use this so the
+// number in the test is the number the builder sees; it is not the rule the
+// operator applies on its own, which is meshThreshold below.
 double derivedThreshold(const CurveDiscretizer& d) { return 1.5 * d.getMaxSeamAngle(); }
+
+// The crease threshold buildFilletTool derives with no min_angle=, read off the
+// solid's own dihedral distribution and nothing else.
+double meshThreshold(const manifold::Manifold& m)
+{
+  const MergedMesh mm = mergeMesh(m.GetMeshGL64());
+  return std::max(1.5 * seamAngle(mm, buildEdgeAdjacency(mm.tris)), 1.0);
+}
+
+// Classify at the threshold the operator would pick for this solid by itself.
+ClassCounts classifyAuto(const manifold::Manifold& m) { return classify(m, meshThreshold(m)); }
 
 // A gable prism: a 60 x 10 slab with a roof over it, apex at (30, 18), extruded
 // 40 in z. The two shoulders turn 75 degrees and the apex turns 30, so one solid
@@ -475,79 +488,121 @@ TEST_CASE("curved wall: the blend leaves no crease the model does not have")
   CHECK(sharpest == Approx(90.0).margin(0.5));
 }
 
-TEST_CASE("threshold: derived from the tessellation parameters, not hardcoded")
+TEST_CASE("threshold: measured off the mesh, not read from render variables")
 {
-  // $fa bounds any seam OpenSCAD generates on its own, and $fn imposes 360/$fn
-  // when it is set, so the coarsest seam in scope is the larger of the two. The
-  // threshold is half again that, which is what keeps a seam from being mistaken
-  // for a crease while leaving real features clear of it.
-  CHECK(discretizer(0).getMaxSeamAngle() == Approx(12.0));    // $fa default
-  CHECK(discretizer(16).getMaxSeamAngle() == Approx(22.5));   // $fn coarser than $fa
-  CHECK(discretizer(64).getMaxSeamAngle() == Approx(12.0));   // $fn finer; $fa wins
-  CHECK(discretizer(0, 30.0).getMaxSeamAngle() == Approx(30.0));
-  CHECK(derivedThreshold(discretizer(16)) == Approx(33.75));
+  // The seam angle is the lowest densely populated cluster of dihedral angles.
+  // On a cylinder that is exactly its facet angle, whatever the caller's $fn or
+  // $fa were when the solid was made, and however it arrived.
+  for (const int fn : {8, 16, 64}) {
+    CAPTURE(fn);
+    const auto cyl = manifold::Manifold::Cylinder(1.0, 1.0, 1.0, fn, false);
+    const MergedMesh mm = mergeMesh(cyl.GetMeshGL64());
+    CHECK(seamAngle(mm, buildEdgeAdjacency(mm.tris)) == Approx(360.0 / fn));
+    CHECK(meshThreshold(cyl) == Approx(540.0 / fn));
+  }
+  // The number the old $fa/$fn rule produced for a 16-facet solid, reproduced
+  // without consulting either.
+  CHECK(meshThreshold(manifold::Manifold::Cylinder(1.0, 1.0, 1.0, 16, false)) == Approx(33.75));
+  CHECK(meshThreshold(manifold::Manifold::Cylinder(1.0, 1.0, 1.0, 8, false)) == Approx(67.5));
+}
+
+TEST_CASE("threshold: an untessellated solid has no seam angle")
+{
+  // The self-consistency clause. A cube's only non-flat edges are its twelve
+  // 90-degree corners: one big cluster with nothing sharper above it, which is
+  // the shape's creases and not seams under them. Read as a seam angle it would
+  // give a 135-degree threshold and the cube would have no features at all.
+  const auto cube = manifold::Manifold::Cube(manifold::vec3(1.0), false);
+  const MergedMesh mm = mergeMesh(cube.GetMeshGL64());
+  CHECK(seamAngle(mm, buildEdgeAdjacency(mm.tris)) == Approx(0.0));
+  CHECK(meshThreshold(cube) == Approx(1.0));
+
+  const ClassCounts c = classifyAuto(cube);
+  CHECK(c.feature == 12);
+  CHECK(c.featureConvex == 12);
+}
+
+TEST_CASE("threshold: rotating a solid by one facet does not move its seam angle")
+{
+  // The self-proving invariant. An n-gon prism turned about its own axis by
+  // 360/n is the identical point set, so a tee built on a run pipe turned by one
+  // facet is the identical solid — but Manifold cuts the branch's intersection
+  // curve against different facets, so the mesh is not the same mesh. A
+  // threshold that is a property of the shape cannot move; one that keys off
+  // anything in the triangulation will.
+  const int fn = 32;   // pipeTee's own facet count
+  const auto branch = manifold::Manifold::Cylinder(25.0, 6.0, 6.0, fn, false)
+                        .Rotate(-90, 0, 0)
+                        .Translate(manifold::vec3(0.0, 0.0, 30.0));
+  const auto run = manifold::Manifold::Cylinder(60.0, 10.0, 10.0, fn, false);
+
+  const auto tee = run + branch;
+  const auto turned = run.Rotate(0.0, 0.0, 360.0 / fn) + branch;
+  REQUIRE(turned.Volume() == Approx(tee.Volume()).epsilon(1e-9));
+
+  const double base = meshThreshold(tee);
+  CHECK(base == Approx(1.5 * 360.0 / fn));   // a tessellated solid; not vacuous
+  CHECK(meshThreshold(turned) == Approx(base));
+  CHECK(classifyAuto(turned).feature == classifyAuto(tee).feature);
 }
 
 TEST_CASE("threshold: cylinder side seams are rejected at every tessellation")
 {
-  // The same claim as the stability case above, but through the threshold the
-  // operator actually uses rather than a hand-picked 60 degrees. A cylinder's
-  // side seams are exactly 360/$fn, which the derived threshold clears by half
-  // again at every resolution, while the 90-degree rims never come close to it.
-  // This is the case a hardcoded constant gets wrong: at $fn=8 the seams are 45
-  // degrees and any fixed threshold below 67.5 would fillet them.
+  // A cylinder's side seams are exactly 360/$fn, which the threshold the mesh
+  // yields clears by half again at every resolution, while the 90-degree rims
+  // never come close to it. This is the case a hardcoded constant gets wrong: at
+  // $fn=8 the seams are 45 degrees and any fixed threshold below 67.5 would
+  // fillet them.
   for (const int fn : {8, 16, 64}) {
     CAPTURE(fn);
     const auto cyl = manifold::Manifold::Cylinder(1.0, 1.0, 1.0, fn, false);
-    const ClassCounts c = classify(cyl, derivedThreshold(discretizer(fn)));
+    const ClassCounts c = classifyAuto(cyl);
 
     CHECK(c.feature == static_cast<size_t>(2 * fn));
     CHECK(c.featureConvex == static_cast<size_t>(2 * fn));
   }
 }
 
-TEST_CASE("threshold: a real crease shallower than the caller's facets is dropped")
+TEST_CASE("threshold: a real crease shallower than an explicit min_angle is dropped")
 {
-  // The two tests above check the direction that keeps a cylinder smooth: a seam
-  // must never be read as a crease. This is the other direction, which nothing
-  // covered — a crease the SHAPE really has, shallower than the tessellation the
-  // caller happens to be working at, is silently not a feature.
+  // The tests above check the direction that keeps a cylinder smooth: a seam
+  // must never be read as a crease. This is the other direction — a crease the
+  // SHAPE really has, shallower than the min_angle= the caller named, is
+  // silently not a feature, and nothing is said about it.
   //
-  // The gable's apex turns 30 degrees and its shoulders 75. At $fa = 12 the
-  // threshold is 18 and both are features; at $fn = 8 it is 67.5, and the apex
-  // drops out while the shoulders stay. Nothing is said about it. Fifteen
-  // feature edges become fourteen, and which fourteen depends on a variable the
-  // caller set to control smoothness.
+  // The gable's apex turns 30 degrees and its shoulders 75. At 18 or 22.5 both
+  // are features; at 67.5 the apex drops out while the shoulders stay. Fifteen
+  // feature edges become fourteen.
   const auto roof = roofPrism();
   const Vector3d apexA(30.0, 18.0, 0.0), apexB(30.0, 18.0, 40.0);
   const Vector3d shoulderA(0.0, 10.0, 0.0), shoulderB(0.0, 10.0, 40.0);
 
   // Five vertical edges plus both five-edge rims, so long as the apex counts.
-  CHECK(classify(roof, derivedThreshold(discretizer(0))).feature == 15);     // $fa = 12 -> 18
-  CHECK(classify(roof, derivedThreshold(discretizer(24))).feature == 15);    // -> 22.5
-  CHECK(classify(roof, derivedThreshold(discretizer(8))).feature == 14);     // -> 67.5
+  CHECK(classify(roof, 18.0).feature == 15);
+  CHECK(classify(roof, 22.5).feature == 15);
+  CHECK(classify(roof, 67.5).feature == 14);
 
-  CHECK(isSelected(roof, derivedThreshold(discretizer(0)), apexA, apexB));
-  CHECK_FALSE(isSelected(roof, derivedThreshold(discretizer(8)), apexA, apexB));
+  // Left alone, the roof carries no tessellation at all: its populated angle
+  // clusters are its own creases, nothing sits half again above them, and every
+  // one of the fifteen is a feature.
+  CHECK(meshThreshold(roof) == Approx(1.0));
+  CHECK(classifyAuto(roof).feature == 15);
+
+  CHECK(isSelected(roof, 18.0, apexA, apexB));
+  CHECK_FALSE(isSelected(roof, 67.5, apexA, apexB));
   // And it is only the shallow one that goes: the shoulders clear 67.5, so the
   // same call rounds one crease of this roof and not the other.
-  CHECK(isSelected(roof, derivedThreshold(discretizer(8)), shoulderA, shoulderB));
-
-  // min_angle= is the way out, and it has to be, because the threshold cannot
-  // both keep a smooth cylinder smooth and pick up a crease shallower than that
-  // cylinder's own facets.
+  CHECK(isSelected(roof, 67.5, shoulderA, shoulderB));
   CHECK(isSelected(roof, 20.0, apexA, apexB));
 }
 
 TEST_CASE("threshold: a facet angle equal to the threshold is rejected, all of it")
 {
-  // A model tessellated at one setting and filleted at another, which is what a
-  // $fn inside a module and a $fn at the call site give you. The caller is at
-  // $fn = 24 throughout, so the threshold is 22.5 and only the model moves.
+  // A model whose facets turn by exactly the min_angle= the caller named. The
+  // threshold is 22.5 throughout and only the model moves.
   //
-  // The tie is reachable rather than hypothetical: the threshold is half again
-  // the caller's facet angle, so a model at two thirds the caller's $fn turns by
-  // exactly it. Either side of that the answer was always clean — at $fn = 12
+  // The tie is reachable rather than hypothetical: 22.5 is what a caller writes
+  // for a 16-facet model. Either side of it the answer was always clean — at $fn = 12
   // the facets turn 30 and every vertical seam is a crease, at $fn = 32 they
   // turn 11.25 and none is. At $fn = 16 they turn 22.5, and a bare comparison
   // took twelve of the sixteen: the dihedral of a tessellated cylinder does not
@@ -556,8 +611,7 @@ TEST_CASE("threshold: a facet angle equal to the threshold is rejected, all of i
   //
   // isFeatureAngle settles it by rejecting the tie, so a prism stays a prism
   // rather than having three quarters of its facets rounded.
-  const double threshold = derivedThreshold(discretizer(24));
-  CHECK(threshold == Approx(22.5));
+  const double threshold = 22.5;
 
   const auto rims = [](int fn) { return static_cast<size_t>(2 * fn); };
   CHECK(classify(manifold::Manifold::Cylinder(20.0, 10.0, 10.0, 12, false), threshold).feature ==

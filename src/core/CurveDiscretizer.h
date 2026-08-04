@@ -46,8 +46,7 @@ public:
   /**
    * Upper bound (in degrees) on the dihedral angle of any circular seam this
    * discretizer can emit: the $fn seam when $fn is set, bounded by $fa
-   * otherwise. The fillet operator uses this to separate a real feature edge
-   * from a curve-tessellation seam.
+   * otherwise.
    */
   double getMaxSeamAngle() const { return std::max(fa, fn > 0 ? 360.0 / fn : 0.0); }
 

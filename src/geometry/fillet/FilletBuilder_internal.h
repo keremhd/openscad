@@ -108,10 +108,10 @@ struct ClassCounts
 // colouring all ask the same question, and at a value where they disagreed an
 // edge would be a crease to one and a flat seam to another.
 //
-// Ties are rejected, not accepted. An exact tie is reachable — the threshold is
-// 1.5x the caller's facet angle, so a model tessellated at two thirds the
-// caller's $fn turns by exactly it — and there the dihedrals land a few ulp
-// either side of the threshold, splitting edges that are identical by symmetry.
+// Ties are rejected, not accepted. An exact tie is reachable — min_angle= can
+// name any value, including one a surface's own facets turn by — and there the
+// dihedrals of a tessellated surface land a few ulp either side of the
+// threshold, splitting edges that are identical by symmetry.
 // Rejecting keeps a prism a prism; accepting would round every facet of one.
 // The margin is four orders above that ulp noise and far below any angle a
 // caller chose on purpose.
@@ -119,6 +119,15 @@ inline bool isFeatureAngle(double dihedralDeg, double thresholdDeg)
 {
   return dihedralDeg >= thresholdDeg * (1 + 1e-9);
 }
+
+// The angle at which this solid's own curve tessellation seams turn, read off
+// the distribution of its dihedral angles: the lowest cluster of near-equal
+// angles holding at least a tenth of the non-flat edges. Returns 0 for a solid
+// with no tessellation, and for one whose lowest populated cluster has nothing
+// appreciably sharper above it — there that cluster is the shape's creases.
+// Depends on the mesh alone, so it answers the same for a solid however it
+// arrived: at defaults, at an explicit $fn, or through an STL round trip.
+double seamAngle(const MergedMesh& m, const std::map<EdgeKey, std::vector<int>>& adj);
 
 // Walk the adjacency, classify every two-face edge, and tally the counts. Edges
 // with a dihedral below thresholdDeg are treated as seams and skipped. Same-
