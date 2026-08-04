@@ -1041,17 +1041,10 @@ Response GeometryEvaluator::visit(State& state, const FilletNode& node)
           // cross-section standing in that face, and a round pass that never saw
           // the bead leaves that crescent as a sharp lip over the outline it
           // rounded beside it.
-          //
-          // Both passes classify at the threshold measured on the child, before
-          // either has run. The round pass is handed a solid that already
-          // carries the fillet pass's beads, whose arcs are tessellated to this
-          // call's $fn rather than to the model's, so measuring the threshold
-          // there would read the operator's own output.
-          const double threshold = creaseThreshold(node, target);
           auto blended = target;
           if (node.inner) {
             if (auto tool = ManifoldUtils::createManifoldFromGeometry(
-                  buildFilletTool(node, FilletType::FILLET, target, brush, threshold));
+                  buildFilletTool(node, FilletType::FILLET, target, brush));
                 tool && !tool->isEmpty()) {
               blended = std::make_shared<ManifoldGeometry>(*blended + *tool);
             }
@@ -1059,7 +1052,7 @@ Response GeometryEvaluator::visit(State& state, const FilletNode& node)
           ManifoldGeometry result = *blended;
           if (node.outer) {
             if (auto tool = ManifoldUtils::createManifoldFromGeometry(
-                  buildFilletTool(node, FilletType::ROUND, blended, brush, threshold));
+                  buildFilletTool(node, FilletType::ROUND, blended, brush));
                 tool && !tool->isEmpty()) {
               result = result - *tool;
             }

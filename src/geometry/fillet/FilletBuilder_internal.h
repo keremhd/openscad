@@ -109,25 +109,35 @@ struct ClassCounts
 // edge would be a crease to one and a flat seam to another.
 //
 // Ties are rejected, not accepted. An exact tie is reachable — min_angle= can
-// name any value, including one a surface's own facets turn by — and there the
-// dihedrals of a tessellated surface land a few ulp either side of the
-// threshold, splitting edges that are identical by symmetry.
-// Rejecting keeps a prism a prism; accepting would round every facet of one.
-// The margin is four orders above that ulp noise and far below any angle a
-// caller chose on purpose.
+// name any value, and the default threshold sits exactly on the wall seams of a
+// cylinder($fn=8) — and there the dihedrals of a tessellated surface land a few
+// ulp either side of the threshold, splitting edges that are identical by
+// symmetry. Rejecting keeps a prism a prism; accepting would round every facet
+// of one. The margin is four orders above that ulp noise and far below any angle
+// a caller chose on purpose.
 inline bool isFeatureAngle(double dihedralDeg, double thresholdDeg)
 {
   return dihedralDeg >= thresholdDeg * (1 + 1e-9);
 }
 
-// The angle at which this solid's own curve tessellation seams turn, read off
-// the distribution of its dihedral angles: the lowest cluster of near-equal
-// angles holding at least a tenth of the non-flat edges. Returns 0 for a solid
-// with no tessellation, and for one whose lowest populated cluster has nothing
-// appreciably sharper above it — there that cluster is the shape's creases.
-// Depends on the mesh alone, so it answers the same for a solid however it
-// arrived: at defaults, at an explicit $fn, or through an STL round trip.
-double seamAngle(const MergedMesh& m, const std::map<EdgeKey, std::vector<int>>& adj);
+// The dihedral above which an edge is a feature rather than a curve-tessellation
+// seam, when min_angle= names no other value. A constant, not a quantity read
+// off the mesh or off $fn/$fa: classification is then a property of the solid
+// alone, identical whether the solid arrived at stock defaults, at an explicit
+// $fn, or through an STL round trip.
+//
+// 48 clears every tessellation seam a bench model produces (the widest measured
+// is 36 degrees, on a 10 mm cylinder at stock defaults) while sitting below the
+// steep part of every real intersection curve, and it leaves the 45-degree wall
+// seams of a cylinder($fn=8) classified as seams.
+//
+// It sits off every facet angle a low $fn produces — 51.43 at 7, 45 at 8, 40 at
+// 9, 36 at 10 — by at least 3 degrees. A threshold equal to a facet angle would
+// decide a whole prism's classification on where its computed dihedrals land
+// relative to the tie margin, and measured facet angles are not exact: a
+// sphere's latitude rings read about 0.065 degrees off nominal, and a resize()d
+// mesh drifts further.
+inline constexpr double kDefaultCreaseThresholdDeg = 48.0;
 
 // Walk the adjacency, classify every two-face edge, and tally the counts. Edges
 // with a dihedral below thresholdDeg are treated as seams and skipped. Same-

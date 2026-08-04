@@ -124,48 +124,6 @@ EdgeClass classifyEdge(const MergedMesh& m, const EdgeKey& key, const Tri& A, co
   return {phi, concave};
 }
 
-double seamAngle(const MergedMesh& m, const std::map<EdgeKey, std::vector<int>>& adj)
-{
-  std::vector<double> pos;
-  for (const auto& [key, ts] : adj) {
-    if (ts.size() != 2) continue;
-    const double phi = classifyEdge(m, key, m.tris[ts[0]], m.tris[ts[1]]).dihedralDeg;
-    // Below 1 degree is a triangulation diagonal across a face that is flat to
-    // within rounding, never a seam a curve was tessellated into.
-    if (phi >= 1.0) pos.push_back(phi);
-  }
-  if (pos.empty()) return 0.0;
-  std::sort(pos.begin(), pos.end());
-
-  // A uniform tessellation puts many edges at one nearly identical small angle;
-  // a real crease running along an intersection curve has an angle that varies
-  // edge to edge, so each of its values is individually rare. So: group the
-  // angles into clusters of near-equal values and take the lowest cluster that
-  // is populated enough to be a tessellation. The 1.02 + 0.2 tolerance spans
-  // the spread a single cylinder's own seams show (an ellipse-cut cylinder's
-  // facets are not exactly equal); 0.10 is well under the share of edges any
-  // tessellated surface contributes and well over the share of any one crease.
-  const double quorum = 0.10 * static_cast<double>(pos.size());
-  double sigma = 0.0;
-  std::size_t start = 0;
-  for (std::size_t i = 1; i <= pos.size(); ++i) {
-    if (i < pos.size() && pos[i] <= pos[i - 1] * 1.02 + 0.2) continue;
-    if (static_cast<double>(i - start) >= quorum) {
-      sigma = pos[i - 1];
-      break;
-    }
-    start = i;
-  }
-
-  // Self-consistency: if nothing on the solid turns appreciably sharper than the
-  // cluster just picked, that cluster is the shape's own creases, not seams
-  // under them. A cube reaches here — its twelve 90-degree edges are one large
-  // cluster with nothing above — and must come out with no seam angle at all.
-  const bool anySharper = pos.back() > 1.5 * sigma;
-  if (!anySharper) sigma = 0.0;
-  return sigma;
-}
-
 ClassCounts classifyEdges(const MergedMesh& m,
                           const std::map<EdgeKey, std::vector<int>>& adj,
                           double thresholdDeg, bool useProvenance)
@@ -3470,19 +3428,9 @@ std::unique_ptr<PolySet> debugSpineMarkers(const MergedMesh& m,
 // into chains, and build the tool solid along them. A diagnostic count line goes
 // out on every invocation (a plain cube yields 12 feature edges, all convex; an
 // inside corner yields a single concave edge).
-double creaseThreshold(const FilletNode& node,
-                       const std::shared_ptr<const ManifoldGeometry>& target)
-{
-  using namespace fillet::detail;
-  if (node.min_angle >= 0) return node.min_angle;
-  if (!target || target->isEmpty()) return -1.0;
-  const MergedMesh m = mergeMesh(target->getManifold().GetMeshGL64());
-  return std::max(1.5 * seamAngle(m, buildEdgeAdjacency(m.tris)), 1.0);
-}
-
 std::shared_ptr<const Geometry> buildFilletTool(
   const FilletNode& node, FilletType type, const std::shared_ptr<const ManifoldGeometry>& target,
-  const std::shared_ptr<const ManifoldGeometry>& brush, double thresholdOverride)
+  const std::shared_ptr<const ManifoldGeometry>& brush)
 {
   using namespace fillet::detail;
 
@@ -3495,17 +3443,9 @@ std::shared_ptr<const Geometry> buildFilletTool(
   const MergedMesh m = mergeMesh(target->getManifold().GetMeshGL64());
   const std::map<EdgeKey, std::vector<int>> adj = buildEdgeAdjacency(m.tris);
 
-  // The crease threshold comes from the target's own dihedral distribution, not
-  // from $fn/$fa: a solid does not carry the settings that made it, and may be
-  // an imported STL, a union built at two resolutions, or a resize()d mesh. Half
-  // again the measured seam angle clears every seam of a uniform tessellation
-  // while leaving real creases above it. The 1-degree floor is what makes an
-  // untessellated solid (seam angle 0) still classify its own corners as
-  // features. min_angle= overrides all of it.
-  const double thresholdDeg =
-    thresholdOverride >= 0
-      ? thresholdOverride
-      : (node.min_angle >= 0 ? node.min_angle : std::max(1.5 * seamAngle(m, adj), 1.0));
+  // The crease threshold is a constant unless min_angle= names one. Nothing here
+  // reads the mesh or $fn/$fa, so a solid classifies the same however it arrived.
+  const double thresholdDeg = node.min_angle >= 0 ? node.min_angle : kDefaultCreaseThresholdDeg;
   // Face provenance (whether two faces trace back to the same source surface)
   // is only meaningful when the mesh carries more than one source id; a single-
   // id mesh (imported STL, polyhedron) can't rely on it.

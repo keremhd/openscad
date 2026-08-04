@@ -64,19 +64,14 @@ CurveDiscretizer discretizer(double fn, double fa = 12.0, double fs = 2.0)
 // An explicit threshold at a known angle, the value a min_angle= would carry.
 // Tests that need *some* threshold to drive the builder at use this so the
 // number in the test is the number the builder sees; it is not the rule the
-// operator applies on its own, which is meshThreshold below.
+// operator applies on its own, which is kDefaultCreaseThresholdDeg.
 double derivedThreshold(const CurveDiscretizer& d) { return 1.5 * d.getMaxSeamAngle(); }
 
-// The crease threshold buildFilletTool derives with no min_angle=, read off the
-// solid's own dihedral distribution and nothing else.
-double meshThreshold(const manifold::Manifold& m)
+// Classify at the threshold the operator applies with no min_angle= named.
+ClassCounts classifyAuto(const manifold::Manifold& m)
 {
-  const MergedMesh mm = mergeMesh(m.GetMeshGL64());
-  return std::max(1.5 * seamAngle(mm, buildEdgeAdjacency(mm.tris)), 1.0);
+  return classify(m, kDefaultCreaseThresholdDeg);
 }
-
-// Classify at the threshold the operator would pick for this solid by itself.
-ClassCounts classifyAuto(const manifold::Manifold& m) { return classify(m, meshThreshold(m)); }
 
 // A gable prism: a 60 x 10 slab with a roof over it, apex at (30, 18), extruded
 // 40 in z. The two shoulders turn 75 degrees and the apex turns 30, so one solid
@@ -488,41 +483,38 @@ TEST_CASE("curved wall: the blend leaves no crease the model does not have")
   CHECK(sharpest == Approx(90.0).margin(0.5));
 }
 
-TEST_CASE("threshold: measured off the mesh, not read from render variables")
+TEST_CASE("threshold: the default is a constant, not read from anything")
 {
-  // The seam angle is the lowest densely populated cluster of dihedral angles.
-  // On a cylinder that is exactly its facet angle, whatever the caller's $fn or
-  // $fa were when the solid was made, and however it arrived.
-  for (const int fn : {8, 16, 64}) {
+  // The default threshold is the same number for every solid: no render
+  // variable, no property of the mesh, no facet count. A cylinder classifies to
+  // its rims alone at every tessellation whose facets fall under it, and the
+  // count owed is the same count at each.
+  for (const int fn : {16, 32, 64}) {
     CAPTURE(fn);
     const auto cyl = manifold::Manifold::Cylinder(1.0, 1.0, 1.0, fn, false);
-    const MergedMesh mm = mergeMesh(cyl.GetMeshGL64());
-    CHECK(seamAngle(mm, buildEdgeAdjacency(mm.tris)) == Approx(360.0 / fn));
-    CHECK(meshThreshold(cyl) == Approx(540.0 / fn));
+    CHECK(classifyAuto(cyl).feature == static_cast<size_t>(2 * fn));
   }
-  // The number the old $fa/$fn rule produced for a 16-facet solid, reproduced
-  // without consulting either.
-  CHECK(meshThreshold(manifold::Manifold::Cylinder(1.0, 1.0, 1.0, 16, false)) == Approx(33.75));
-  CHECK(meshThreshold(manifold::Manifold::Cylinder(1.0, 1.0, 1.0, 8, false)) == Approx(67.5));
+  // The constant sits off every facet angle a low $fn produces, so no prism's
+  // classification is decided inside the tie margin.
+  for (const int fn : {7, 8, 9, 10, 12}) {
+    CAPTURE(fn);
+    CHECK(std::abs(360.0 / fn - kDefaultCreaseThresholdDeg) > 2.0);
+  }
 }
 
-TEST_CASE("threshold: an untessellated solid has no seam angle")
+TEST_CASE("threshold: an untessellated solid classifies its own corners")
 {
-  // The self-consistency clause. A cube's only non-flat edges are its twelve
-  // 90-degree corners: one big cluster with nothing sharper above it, which is
-  // the shape's creases and not seams under them. Read as a seam angle it would
-  // give a 135-degree threshold and the cube would have no features at all.
+  // A cube's only non-flat edges are its twelve 90-degree corners, which clear
+  // the default threshold. Nothing on the solid is read to reach that: a cube
+  // and a cylinder are classified at the same number.
   const auto cube = manifold::Manifold::Cube(manifold::vec3(1.0), false);
-  const MergedMesh mm = mergeMesh(cube.GetMeshGL64());
-  CHECK(seamAngle(mm, buildEdgeAdjacency(mm.tris)) == Approx(0.0));
-  CHECK(meshThreshold(cube) == Approx(1.0));
 
   const ClassCounts c = classifyAuto(cube);
   CHECK(c.feature == 12);
   CHECK(c.featureConvex == 12);
 }
 
-TEST_CASE("threshold: rotating a solid by one facet does not move its seam angle")
+TEST_CASE("threshold: rotating a solid by one facet does not move its classification")
 {
   // The self-proving invariant. An n-gon prism turned about its own axis by
   // 360/n is the identical point set, so a tee built on a run pipe turned by one
@@ -540,19 +532,19 @@ TEST_CASE("threshold: rotating a solid by one facet does not move its seam angle
   const auto turned = run.Rotate(0.0, 0.0, 360.0 / fn) + branch;
   REQUIRE(turned.Volume() == Approx(tee.Volume()).epsilon(1e-9));
 
-  const double base = meshThreshold(tee);
-  CHECK(base == Approx(1.5 * 360.0 / fn));   // a tessellated solid; not vacuous
-  CHECK(meshThreshold(turned) == Approx(base));
+  // Not vacuous: the tee carries features, and its two meshes are not the same
+  // triangulation.
+  CHECK(classifyAuto(tee).feature > 0);
   CHECK(classifyAuto(turned).feature == classifyAuto(tee).feature);
 }
 
 TEST_CASE("threshold: cylinder side seams are rejected at every tessellation")
 {
-  // A cylinder's side seams are exactly 360/$fn, which the threshold the mesh
-  // yields clears by half again at every resolution, while the 90-degree rims
-  // never come close to it. This is the case a hardcoded constant gets wrong: at
-  // $fn=8 the seams are 45 degrees and any fixed threshold below 67.5 would
-  // fillet them.
+  // A cylinder's side seams turn 360/$fn and its rims turn 90, so a threshold
+  // between the two takes the rims alone. $fn=8 is the coarsest tessellation the
+  // default threshold still calls flat: its seams turn 45, three degrees under
+  // the constant, and an octagonal prism keeps its eight walls. A threshold
+  // below 45 rounds every facet of one.
   for (const int fn : {8, 16, 64}) {
     CAPTURE(fn);
     const auto cyl = manifold::Manifold::Cylinder(1.0, 1.0, 1.0, fn, false);
@@ -582,11 +574,12 @@ TEST_CASE("threshold: a real crease shallower than an explicit min_angle is drop
   CHECK(classify(roof, 22.5).feature == 15);
   CHECK(classify(roof, 67.5).feature == 14);
 
-  // Left alone, the roof carries no tessellation at all: its populated angle
-  // clusters are its own creases, nothing sits half again above them, and every
-  // one of the fifteen is a feature.
-  CHECK(meshThreshold(roof) == Approx(1.0));
-  CHECK(classifyAuto(roof).feature == 15);
+  // The same drop happens under the default threshold with no min_angle= named
+  // at all: the apex turns 30, below the constant, and the shoulders turn 75.
+  // A real crease shallower than the constant is the documented case for
+  // min_angle=.
+  CHECK(classifyAuto(roof).feature == 14);
+  CHECK(classify(roof, 20.0).feature == 15);
 
   CHECK(isSelected(roof, 18.0, apexA, apexB));
   CHECK_FALSE(isSelected(roof, 67.5, apexA, apexB));
