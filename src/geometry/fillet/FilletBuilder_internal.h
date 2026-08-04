@@ -172,8 +172,9 @@ using SpineInterval = std::pair<double, double>;
 //
 // The list is called `stations` and not `verts` because it is not the vertices
 // of this crease. Reading it as if it were is a bug this builder has shipped
-// four times — in `checkChainSizes`, `arrivesStraight`, `filletedEdges` and
-// `chainJunctions` — each time found at integration and never by a test. It is
+// four times — in `checkChainSizes`, `filletedEdges`, `chainJunctions` and a
+// seam predicate since removed — each time found at integration and never by a
+// test. It is
 // private for the same reason: the only two questions it can answer from outside
 // are `stationCount()` and `openEnds()`. Anything else about the crease is a
 // question for `rawRun()`, `param()`, `point()`, `inEdge()`, `outEdge()` or

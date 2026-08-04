@@ -2339,41 +2339,6 @@ std::set<EdgeKey> filletedEdges(const std::vector<Chain>& chains)
   return out;
 }
 
-// Does this chain arrive at the given end running straight?
-//
-// The seam rule replaces a seated ball — a construction solved against whatever
-// walls it finds — with a pair of beads carried PAST the vertex along the
-// straight line their last segment lies on. That line is the crease's own
-// continuation only where the crease arrives straight. Where it arrives on a
-// curve, the straight line is a chord produced past its second end, and it leaves
-// the circle on the outside: the top of the bead's cross-section is tangent to
-// the curved wall the crease rides, so carrying it along that line lays it a hair
-// OUTSIDE the wall, and the tangency becomes a sliver of surface resting on the
-// wall at a hair of an angle. That is the very degeneracy the overrun exists to
-// remove, put back a little further along — and it is what a bead run past the
-// foot of a cylinder does. A seated ball has no such problem, so a vertex a bead
-// arrives at on a curve is handed back to it.
-//
-// One segment is straight with nothing to check: a crease with no station between
-// its ends is a straight line, and the line its segment lies on is itself.
-bool arrivesStraight(const MergedMesh& m, const Chain& c, bool front)
-{
-  // Of the crease, not of the stations: a resampled chain carries -1 where a
-  // station falls between two mesh vertices, and m.pos[-1] is a read off the
-  // front of the array. The curve whose chord is produced past its end is the
-  // mesh's own, so the crease run is also the right question.
-  const std::vector<int>& run = c.rawRun();
-  const size_t n = run.size();
-  if (n < 3) return true;
-  const Vector3d end = m.pos[front ? run[0] : run[n - 1]];
-  const Vector3d mid = m.pos[front ? run[1] : run[n - 2]];
-  const Vector3d far = m.pos[front ? run[2] : run[n - 3]];
-  const Vector3d a = end - mid, b = mid - far;
-  const double la = a.norm(), lb = b.norm();
-  if (la < 1e-12 || lb < 1e-12) return true;
-  return a.dot(b) / (la * lb) > 1.0 - 1e-9;
-}
-
 bool creaseLeavesUnfilleted(const MergedMesh& m,
                             const std::map<EdgeKey, std::vector<int>>& adj,
                             const std::set<EdgeKey>& filleted, double thresholdDeg, int v)
@@ -2779,25 +2744,22 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   // and the grouping of the subtraction are decided.
   const std::set<EdgeKey> filleted = filletedEdges(chains);
   const std::vector<Junction> junctions = chainJunctions(m, adj, chains, r, concave, noCorner);
-  // Vertices some bead reaches on a curve. The seam rule carries a bead past the
-  // vertex along the line its last segment lies on, which is the crease's own
-  // continuation only where the crease arrives straight; see arrivesStraight.
-  std::set<int> arrivesBent;
-  for (const Chain& c : chains) {
-    int endFront = -1, endBack = -1;
-    if (!c.openEnds(endFront, endBack)) continue;
-    for (const bool front : {true, false})
-      if (!arrivesStraight(m, c, front))
-        arrivesBent.insert(front ? endFront : endBack);
-  }
+  // Whether the crease arrives at the vertex straight or on a curve is not asked.
+  // Withholding a curved arrival from the rule does not hand it to a seated ball:
+  // where a crease leaves a vertex unfilleted because a brush cut it, that same
+  // brush withheld the corner, so chainJunctions finds no junction there and the
+  // withheld vertex falls to the plain stop-a-hair-short branch below. Its two
+  // beads then meet at no angle at the top of their cross-sections, which is the
+  // knife edge the overrun exists to remove. Measured on a rib running out of a
+  // cylindrical boss over 37 tessellations: withheld, 16 invalid solids; served, 2.
+  //
   // Every use below asks the same question of the same vertex, and answering it
   // walks the edge table, so it is answered once.
   std::map<int, bool> seamCache;
   auto seamVertex = [&](int v) {
     const auto it = seamCache.find(v);
     if (it != seamCache.end()) return it->second;
-    const bool yes = arrivesBent.count(v) == 0 &&
-                     creaseLeavesUnfilleted(m, adj, filleted, thresholdDeg, v);
+    const bool yes = creaseLeavesUnfilleted(m, adj, filleted, thresholdDeg, v);
     seamCache.emplace(v, yes);
     return yes;
   };

@@ -2670,8 +2670,9 @@ TEST_CASE("curved crease: a uniform seam gives a uniform setback")
 // Every other chain in this file comes straight from buildChains, where exactly
 // one station stands on each crease vertex, so the two lists agree and a
 // consumer that confuses them still passes. That is how the same fault reached
-// four separate consumers -- checkChainSizes, arrivesStraight, filletedEdges and
-// chainJunctions -- and was caught four times by hand and never here. These are
+// four separate consumers -- checkChainSizes, filletedEdges, chainJunctions and
+// a seam predicate since removed -- and was caught four times by hand and never
+// here. These are
 // the invariants those consumers were relying on, stated once.
 TEST_CASE("resampling: a station is not a crease vertex, and the ends still are")
 {
