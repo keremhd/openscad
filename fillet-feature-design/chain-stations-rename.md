@@ -447,3 +447,126 @@ was left on the old path.
 
 **Verdict: complete and correct on its own,** with the one overstated sentence
 above noted and not repaired here.
+
+## 3.2 The probe — the reading §2 said it never got
+
+§2's own "not verified" list closes with: *"No `endVert()` assert was ever
+observed firing, and it cannot fire in this build: `-DNDEBUG`."* This closes
+that gap by making the refusal observable in a Release build.
+
+**Instrument.** The prepared patch defines `OPENENDS_PROBE`, `#undef NDEBUG`s
+before `<cassert>` in `FilletBuilder_internal.h`, and puts an `fprintf` on
+`openEnds`' refusal branch plus an `assert` on its success branch. Two flaws,
+neither fatal, both worked around by reading the right signal:
+
+* The `#ifdef OPENENDS_PROBE / #undef NDEBUG` hunks at line 1 of
+  `FilletBuilder.cc` and `FilletBuilder_test.cc` are **dead**: `OPENENDS_PROBE`
+  is defined by the header, which those lines precede. Only the header's own
+  `#undef` does anything — but it is enough, because `<cassert>` re-evaluates
+  `NDEBUG` at every include, and all three TUs that include the header
+  (`FilletBuilder.cc`, `FilletBuilder_test.cc`, `FilletCompare_test.cc`) get it.
+* The added `assert` checks `front >= 0 && back >= 0` on the **success** branch.
+  That is not the old `assert(!closed)` case. The `fprintf` on the refusal
+  branch is the instrument that answers the question; the assert is a bystander.
+
+**Instrument validated before it was believed.** `strings` on the instrumented
+binary found both probe strings, including the assert message — proof the
+`#undef` took, since this is the same `-O3 -DNDEBUG` build in which the original
+`assert(!closed)` left no string at all. Then it was run against an answer
+already known: the R3 test, whose ring branch gained exactly 2 assertions in
+§3.3 and therefore has exactly 2 closed chains.
+
+**It fired. Observed, not inferred.**
+
+| run | refusals | detail |
+|---|---|---|
+| R3 test alone | **4** | all `closed=1 n=120 back=-1` |
+| full suite | **1139** | all `closed=1`; 4 with `back=-1`, 1135 with `back >= 0` |
+| the 4 tests that call `openEnds` in their own body | 4 (R3 only) | so **1135 refusals come from production code in `FilletBuilder.cc`** |
+
+The R3 reading is the direct one. On the two resampled bore-mouth rings, 120
+stations each, `openEnds` refuses and the last station **is `-1`** — the value
+`endVert(/*front=*/false)` would have returned, silently, in every build this
+repository makes. That is the defect R1 described, observed rather than argued.
+
+**Three findings the probe produced that were not asked for:**
+
+1. **The `stations.size() < 2` half of the guard never fired — 0 of 1139.** The
+   whole suite never presents a chain of fewer than two stations. That half is
+   correct by inspection and unexercised by measurement; it is not proven.
+2. **1135 of the 1139 rings had `back >= 0`, not `-1`.** These are rings the
+   resampler never touched, whose last station is a real mesh vertex. On those,
+   `endVert(false)` would have returned a **plausible, valid, wrong** vertex —
+   an ordinary station of a loop returned as if it were an end. That is a worse
+   failure mode than `-1`, which at least tends to fault loudly, and neither the
+   old header prose nor R1 mentions it.
+3. **The old assert was dead twice over.** Every one of the 1139 refusals
+   happens at a point where the pre-change code had already tested `closed`
+   itself and skipped — so no shipping call site ever reached `endVert` with a
+   closed chain. The assert was both compiled out by `-DNDEBUG` *and*
+   unreachable given correct callers. What actually kept rings out was the
+   eleven open-coded call-site guards, not the assertion the header credited.
+   **The value of `070b8e175` is therefore prospective, not a live-bug fix:** it
+   makes the twelfth caller unable to forget. That is worth having, and it is a
+   smaller claim than "endVert(false) on a ring returned -1 in all shipped
+   builds" — true of the function in isolation, but no caller ever did it.
+
+**Reverted.** `git checkout --` on the three files, then
+`libopenscadinternal.a`, `OpenSCADUnitTests` and `OpenSCAD.app` all rebuilt from
+clean sources (the probe had contaminated the static library the GUI links).
+`strings` on all three: 0 `OPENENDSPROBE`, 0 `endVert`, 0 `a ring has no end
+vertex`. Tree clean.
+
+## 3.3 The suite
+
+Predicted before measuring, and the prediction included a deliberate departure
+from the pinned total.
+
+| measurement | predicted | measured |
+|---|---|---|
+| suite excluding the R3 test | 1709 / 85 | **1709 / 85, green** |
+| the R3 test alone | 513 + 2 | **515 / 1 case, green** |
+| full suite | 2222 + 2 = **2224** | **2224 / 86, green** |
+| `ctest -R fillet` | 21 / 21 | **21 / 21 passed** |
+
+**The 1709 / 85 pin is held exactly.** The total moved from 2222 to **2224**,
+and this was predicted before it was measured rather than discovered after:
+`070b8e175` added `CHECK_FALSE(c.openEnds(ringFront, ringBack))` to the R3
+test's ring branch, which runs once per closed chain, and that model has two.
+The R3 test moves 513 -> 515 for the same reason. **No pin was edited.** The
+three pre-existing tests the commit also rewrote (lines 771, 964, 2552) each
+swap one assertion for one assertion or touch only control flow, which is why
+1709 does not move.
+
+An instrument failed here first and is recorded so the next agent does not
+repeat it: **Catch2 splits its test-name argument on commas**, and the R3 test's
+name contains one. `exclude:resampling: a station is not a crease vertex, and
+the ends still are` excludes *nothing* and cheerfully reports the full 2224 / 86
+as though it were the excluded figure. The comma must be backslash-escaped. The
+same trap made a four-test exclusion drop one test. Every number above was taken
+with escaped commas and cross-checked for consistency (1709 + 515 = 2224).
+
+## 3.4 What this section did NOT verify
+
+* **No byte-identity sweep of its own.** The 19-of-19 md5 result for
+  `070b8e175` is **inherited** from the agent that made the change and was
+  killed; it was not re-taken here. If it matters, it is one agent's unreviewed
+  word.
+* **The `stations.size() < 2` half of `openEnds` is unproven** — 0 of 1139
+  probe refusals took it. See §3.2 finding 1.
+* **No probe on the GUI binary.** The 1139 refusals are all from
+  `OpenSCADUnitTests`. `OpenSCADExe` was rebuilt and checked clean but was never
+  run instrumented, so no reading was taken through a real render pipeline.
+* **`ctest -R fillet` remains largely blind** to fillet geometry — CSG
+  scene-graph dumps and fuzzy image compares on models this change cannot move.
+  21/21 is necessary, not sufficient, and it is not evidence about `openEnds`.
+* **The overstated `rawRun()` sentence in `070b8e175`'s commit message was not
+  repaired** (§3.1). It is a message, not code, and rewriting history to fix it
+  was judged worse than recording it.
+* **`arrivesStraight` untouched and unmeasured**, per the owner's decision and
+  because another agent holds it in a separate worktree.
+* **The two latent sites (`FilletBuilder.cc:2804`, `:3032`) were checked for
+  regression only**, not repaired — they were deliberately left, and §3.1 shows
+  the change does not move them.
+* **No performance measurement.** Eleven guards became eleven calls to a
+  `[[nodiscard]]` inline; nothing was timed.
