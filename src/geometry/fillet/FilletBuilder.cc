@@ -3669,6 +3669,11 @@ std::shared_ptr<const Geometry> buildFilletTool(
   std::vector<Chain> fitting;
   size_t refused = 0;
   const SizeVerdict *worst = nullptr;
+  // A cap on the list, not on the refusals: past a few dozen the line stops
+  // being something a user reads and the count is the whole of the message.
+  constexpr size_t kMaxNamedRefusals = 24;
+  std::string refusedAt;
+  size_t named = 0;
   for (size_t ci = 0; ci < usable.size(); ++ci) {
     const SizeVerdict& verdict = verdicts[ci];
     if (verdict.fault == SizeFault::Fits) {
@@ -3676,10 +3681,18 @@ std::shared_ptr<const Geometry> buildFilletTool(
       continue;
     }
     ++refused;
-    // The one worth naming is the one that misses by the most: it is the crease
-    // to look at first, and on a target with many it is the one whose size the
-    // caller most likely meant to ask about.
+    // The one worth leading with is the one that misses by the most: it is the
+    // crease to look at first, and on a target with many it is the one whose
+    // size the caller most likely meant to ask about. The rest are named after
+    // it — a refusal the user cannot locate is a refusal they cannot answer, and
+    // the count alone locates none of them.
     if (!worst || verdict.amount > worst->amount) worst = &verdict;
+    if (named < kMaxNamedRefusals) {
+      if (named) refusedAt += ", ";
+      refusedAt += STR("[", verdict.where.x(), ", ", verdict.where.y(), ", ", verdict.where.z(),
+                       "]");
+      ++named;
+    }
   }
   // One line however many creases went, because a crease is refused per crease
   // and read per model. A target that refuses one is a size to reconsider; a
@@ -3700,10 +3713,11 @@ std::shared_ptr<const Geometry> buildFilletTool(
       LOG(message_group::Warning, node.modinst->location(), "",
           "%1$s: %2$s %3$g does not fit %4$d of the %5$d crease(s) selected; the worst is at "
           "[%6$.4g, %7$.4g, %8$.4g] - %9$s. Those creases are dropped; the size is never clamped "
-          "to make it fit.",
+          "to make it fit. Dropped at: %10$s%11$s",
           node.name(), isWedgeOnly ? "setback" : "radius", node.size, static_cast<int>(refused),
           static_cast<int>(usable.size()), worst->where.x(), worst->where.y(), worst->where.z(),
-          why);
+          why, refusedAt,
+          refused > named ? STR(", and ", refused - named, " more") : std::string());
   }
   usable = std::move(fitting);
 
