@@ -123,7 +123,7 @@ Five checks. All absolute — none is a comparison against a previous build.
 | A1 | Every bench model: zero edges carried by >2 faces, even Euler characteristic, genus as declared per model. **Every cell measured at least three times and aggregated to the worst outcome** — one render per cell is not sound; see below | the curved-arrival fin |
 | A2 | **Provenance invariance** — see below | D22 |
 | A3 | Every refusal warns and names its crease. **Second clause retired** — see below | D24 |
-| A4 | Unit suite green on the pin: **2230 assertions / 88 cases** | regression |
+| A4 | Unit suite green on the pin: **2230 assertions / 88 cases — measured green 2026-08-05, six runs under six Catch2 seeds, on `cab639ffd`.** The three fillet failures on record are real below `4ce78926e` and absent at and above it; **no known pre-existing failures on this branch** | regression |
 | A5 | Junction contact sheet, one render per bench model, reviewed by a person | the blind spot |
 
 ### A1 — why one render per cell does not measure it
@@ -149,10 +149,19 @@ precaution and not a correction: measured across 353 cells the OFF loses a verte
 them and changes the verdict on none. An earlier version of this file attributed several
 failing sets to the exporter; that claim is withdrawn.
 
-This also weakens, retrospectively, every green single-render result on this branch — the
-225-model corpus included. It does not invalidate them, because the flake direction is not
-known to be symmetric, but no all-green run taken one-render-per-model is stronger than the
-flake rate. The underlying fault is being hunted; until it is found and fixed, A1 cannot pass.
+**The fault is found and fixed** — an out-of-bounds read in `chainBulges()` at a seam vertex,
+`cab639ffd`. On binary md5 `11b6b3b1`: 60/60 one mesh at `$fn`=14, 40/40 at `R`=1.0 with no
+SIGBUS, 20/20 at `$fn`=12 which now exports every run, and `distinct`=1 on all 353 sweep cells
+across 1059 renders, against 14 cells at 2 before.
+
+**The repeat stays anyway.** It is now the check that would notice the read coming back, and
+`--selftest` asserts determinism on both control models rather than flakiness on one. A single
+render is still not sound, because nothing proves the next such fault will announce itself.
+
+**The A1 blocker is retired; the A1 failures are not.** Sixteen cells are not valid on the fixed
+binary, all reproducing with identical mesh counts on both binaries. Of the seventeen recorded
+before, exactly one — `rib_into_boss` at `$fn`=12 — was the memory fault. **A1 still cannot
+pass, and now fails for reasons that are geometric.**
 
 ### A3 — why the "open bead" clause is gone
 
@@ -228,12 +237,14 @@ If no, it is a release note, not work.
 | D23 — size gate drops creases on impossible misses | documented limitation |
 | D19 — subtractive scalloped ledge | parked, tag `d19-wall-recognition` |
 | unguarded union of surviving parts, `dropVolumelessParts` | **closed 2026-08-05.** Bounded at 32 survivors. The recorded cause — an unguarded `Decompose()` on a high component count — is retired as wrong on measurement; the cost is the batch union of the survivors, and `Decompose` is innocent. `cross` completes at ≤387 MB where it was SIGKILLed at 17.5 GB. All 25 bench models byte-identical on exact STL, suite 2230/88 green |
-| **the builder is nondeterministic in validity** | **open, new 2026-08-05. Blocks A1.** `rib_into_boss` returns 2–3 distinct meshes at every `$fn` tested over 8 identical runs of one binary, all rc=0, and flips validity at `$fn`=14. A1 cannot be answered by a single render, and no green single-render result on this branch is stronger than the flake rate |
+| **the builder is nondeterministic in validity** | **closed 2026-08-05.** An out-of-bounds read in `chainBulges()`: a section overrunning a seam vertex takes a negative chain parameter, and `static_cast<int>(floor(q)) % nsta` stays negative, so the builder read the 24 bytes before a station buffer. Fixed in `cab639ffd`; 164 dedicated renders and a 1059-render sweep return one mesh per cell |
+| **`rib_into_boss` SIGBUS at `R`=1.0** | **closed 2026-08-05.** Same read. 40/40 runs rc=0, one mesh, valid, χ=2 genus 0 |
 | **χ-odd invalids with no non-manifold edge and no warning** | **open, new 2026-08-05. Breaks promise 1 silently.** `tee` at r=0.9 is χ=3, `nonman=0`, zero warnings; also `tee_oblique` at r=0.2/0.3/0.8 and `cross` at r=0.3. A false acceptance with no signal but parity — the defect direction the gate names as the unacceptable one |
 | **`$fn`=8 invalidates five boss-and-plate models** | **open, new 2026-08-05.** `boss_plate`, `hole_plate`, `two_bosses`, `dome`, `pipe_into_face`, all valid at `$fn`≥10. A coarse-tessellation family the single-point bench could not see |
 | `cross` gains genus with radius | **open, new 2026-08-05.** genus 0 at r≤1.0, 2 at r=1.5, 4 at r=2.0, all valid solids. A promise question — may a fillet punch handles through the model? — not an A1 one |
 | **`rib_into_boss` SIGBUS at `R`=1.0** | **open, new 2026-08-05.** rc=138 and no output on roughly one run in six. A hard memory fault, and the likeliest cause of the nondeterminism above; under hunt with sanitizers |
-| `rib_into_boss` invalid at `$fn`=14 and 32 | **open, new 2026-08-04.** Same corner as the fin, smaller fault. Neither tessellation is one the bench renders — `expect.txt` has no `$fn` axis, so a fault appearing at some tessellations and not others is invisible to it |
+| `rib_into_boss` invalid at `$fn` 14 and 32 | **open, and no longer flaky.** `$fn`=14 is invalid 60/60, `v=222 e=660 f=442`, nonman 3, χ=4, identical at weld 1e-4/1e-6/1e-9, **0 warnings**. `$fn`=32 is invalid with nonman 4 and χ=4 — worse than the pre-fix reading, which was reading garbage |
+| ~~`rib_into_boss` invalid at `$fn`=14 and 32~~ (original) | **superseded 2026-08-05.** Same corner as the fin, smaller fault. Neither tessellation is one the bench renders — `expect.txt` has no `$fn` axis, so a fault appearing at some tessellations and not others is invisible to it |
 
 ## How D22 was closed, and the two routes that were tried and abandoned
 

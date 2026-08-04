@@ -217,6 +217,48 @@ invalid — `v=222 e=660 f=442`, 3 non-manifold edges, χ=4, on 60 of 60 runs. T
 triangles on three existing edges. The flake was hiding a real geometric defect, which now
 reproduces on demand.
 
+## 4c. The two changes measured together, 2026-08-05
+
+`4ce78926e` (the `dropVolumelessParts` cap) and `cab639ffd` (the `chainBulges` fix) were built
+and measured together for the first time on binary **md5 `11b6b3b1`**, Release + Manifold, no
+source newer than it at the start or the end of the run.
+
+**The builder is deterministic.** `rib_into_boss` at `$fn`=14: 60 identical meshes in 60 runs.
+At `R`=1.0: 40 in 40, no SIGBUS. At `$fn`=12, the cell that used to produce no output: 20 in 20,
+and it exports. Across the `$fn` axis at eight values, 8 runs each: one mesh per cell, against
+two before. Across the whole 353-cell sweep, 1059 renders: `distinct`=1 on **every** row,
+against 14 rows at 2.
+
+**Sixteen of the seventeen recorded not-valid cells are real geometric defects.** The sweep was
+re-run and diffed against the pre-fix table. 12 cells moved and **every one is
+`rib_into_boss`** — the only bench model with a seam vertex, so the only place the read could
+fire. Exactly one verdict changed: `$fn`=12, no-output → valid. 341 cells are identical in
+verdict and in every count.
+
+So the `$fn`=8 family, the four χ-odd cells, `cross` at r=0.3, `refused_neighbour` at four
+radii, and `rib_into_boss` at `$fn` 14 and 32 are all geometry, not memory. `rib_into_boss` at
+`$fn`=32 is **worse** than recorded once the garbage is gone: nonman 4 and χ=4, against nonman 2
+and χ=3.
+
+**The scope of the contamination is therefore narrower than §4b feared.** The warning there
+stands for seam-vertex models, but 341 of 353 swept cells are unchanged by the fix, so prior
+measurements on models without a seam vertex are not in doubt on this account.
+
+**The unit-suite disagreement is settled, and both reports were right about their own tree.**
+The suite is green at HEAD: 2230 assertions / 88 cases, six runs under six Catch2 seeds. The
+three disputed failures are real at `c2acefa91` and `0c0727583` and gone at `4ce78926e` and
+above — **the `dropVolumelessParts` cap fixed them**, and the out-of-bounds fix never touched
+them. It is not the Catch2 comma trap; all three names pass individually when escaped. Note
+what made the disagreement look impossible: **the identical 2230/88 totals in both reports were
+not evidence they measured the same thing**, because the assertion count does not move across
+the fix — only four outcomes do.
+
+**Two instrument faults found in the sweep harness itself**, both corrected: `--selftest`
+asserted that `rib_into_boss` must return more than one mesh, which was true when written and
+false after the fix — inverted rather than deleted, so a returning read now fails the
+instrument; and the end-of-run summary read the elapsed-seconds field as the binary column, so
+it always claimed the table mixed builds.
+
 ## 5. Open defects
 
 | defect | state |
@@ -226,7 +268,7 @@ reproduces on demand.
 | `cross` yields no mesh at stock defaults | **closed 2026-08-04.** Not an empty mesh — a 17.5 GB OOM SIGKILL before the exporter ran. D22's tail, proven by a cliff at exactly 360/19, the model's own facet angle: `min_angle` 19 and above completes in 0.2 s and is valid, 18.9 and below is killed. |
 | **unguarded union of surviving parts in `dropVolumelessParts`** | **closed 2026-08-05.** Capped at 32 survivors; above it they are composed side by side into one mesh instead of united. **The recorded diagnosis was wrong and is retired**: `Decompose()` was not the cost — forcing one on every call runs the repro in 32 MB and under a second — and a component-count cap still dies, at a union of 55 parts over 3505 vertices. The cost is the `BatchBoolean` over the survivors, which creates zero-measure contacts faster than the drop retires them and feeds a diverging mesh back into `unionCells`. The `sample` reading 1572 of 1572 in `Decompose` was measuring a mesh already grown huge by that feedback — a symptom read as the cause. The union cannot simply be removed: it welds contacts between survivors, and `selfTouching`/`Genus` in the junction tests read that welding, so removing it fails three cases. `cross` at `min_angle` 18.9→2 now completes in ≤1 s at ≤387 MB, `NoError`, genus 0. The largest union any bench model asks for is 14 parts, so on a sound model the cap is unreachable and the executed path is identical — by construction, not by measurement. |
 | **`rib_into_boss` invalid at `$fn`=14 and 32** | **open, new 2026-08-04.** Same corner as the fin, smaller fault, on the bead surface where the two beads cross. **Reframed 2026-08-05, and the recorded framing retired**: this is not "invalid at 14 and 32". It fails at a scattering of values on either axis, the failing set moves when anything else changes, and it is nondeterministic run to run at every `$fn` tested. Re-derived on exact STL against a pinned binary: invalid at `$fn` **11, 25 and 32**, valid at 8, 19, 26 and 48, and **flaky at 14** — 6 valid to 2 invalid in 8 runs. The earlier "invalid at 14 and 32" was true when taken; the code has since moved. The remnant is an **exact duplicate triangle pair with opposite orientation**, a zero-thickness membrane, present in the `fillet_tool()` solid alone, so `buildRoundSolid` produces it rather than the caller's `union()`. Its plane is a section plane of the boss base-arc chain, where consecutive cells abut. |
-| **the builder is nondeterministic in validity** | **root cause found and fixed 2026-08-05**, `cab639ffd` — an out-of-bounds read one element before a station vector. See §4b. Re-verification of the merged tree is in flight. |
+| **the builder is nondeterministic in validity** | **closed 2026-08-05**, `cab639ffd` — an out-of-bounds read one element before a station vector. See §4b for the cause and §4c for the verification: 164 dedicated renders and a 1059-render sweep return one mesh per cell. |
 | ~~the builder is nondeterministic in validity~~ (symptom record) | **superseded, kept for the evidence.** `rib_into_boss` at `$fn`=14: 2 of 40 identical runs of one unchanging binary returned a valid mesh (`v=226 e=672 f=448`), 38 returned invalid (`f=450`, nonman=3, χ=4), all rc=0. The topology moves, so this is not the known vertex-order noise. Independently reproduced on exact STL: 3 distinct md5s in 8 identical runs at `$fn`=11, 2 at 14, 3 at 25, 2 at 26, 3 at 32. See TRAPS 14 — it makes every single-render measurement on this branch, the 225-model corpus included, weaker than it reads. **`rib_into_boss` therefore cannot serve as an equality instrument for any before/after comparison.** `refused_neighbour` is deterministic and can. |
 | **`rib_into_boss` SIGBUS at `R`=1.0** | **closed 2026-08-05**, same root cause and same fix — §4b. It was a read 24 bytes below a `MALLOC_SMALL` region, faulting only when the preceding page was unmapped. 40 runs clean after the fix. |
 | D23 — size gate drops creases on impossible misses | diagnosed, unfixed. The "equal radius" framing is recorded as wrong. |
