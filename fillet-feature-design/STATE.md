@@ -193,11 +193,17 @@ were re-verified against the tree as still present on 2026-08-04.
   (`FilletBuilder.cc:3498`), once per tool node and twice per `fillet()`. No other OpenSCAD
   operator prints on success. Gate it behind `debug=`; the conditional warnings below it stay.
 - **R2** — on a build without Manifold, `fillet()` **deletes the model**.
-  `GeometryEvaluator.cc:1065`, the `#else` branch, warns and leaves `geom` null. For the four
-  tool nodes that is right; for `fillet()` it is not — the wrapper's contract is to return its
-  child blended, so with no backend it must return the child. `tests/CMakeLists.txt:1563` lists
-  the cgal disables for the four `*-tool-tests` but not for `fillet-tests`, which needs either
-  the three disables or a baseline holding in both configurations.
+  `GeometryEvaluator.cc:1065`, the `#else` branch, warns and leaves `geom` null. **Resolved
+  differently from the review's proposal, on the owner's decision:** do not pass the child
+  through — do not register the modules at all without Manifold, so calling one is an unknown-
+  module error naming the line. `tests/CMakeLists.txt:1563` lists the cgal disables for the four
+  `*-tool-tests` but not for `fillet-tests`, which needs either the three disables or a baseline
+  holding in both configurations.
+- **Experimental gating** — new, and not from the review. The five modules must register behind
+  `Feature::ExperimentalFillet` the way `roof` does (`RoofNode.cc:62`); today all five in
+  `register_builtin_fillet` (`FilletNode.cc:205`) pass no feature pointer and are
+  unconditionally available. Every regression test that invokes them then needs
+  `--enable=fillet`. Written up under Availability in `ACCEPTANCE.md`.
 - **R5** — `TEST_CASE("zzdebug rib", "[.]")` at `FilletBuilder_test.cc:1577` is a scratch test
   hidden behind a Catch2 tag, and it ships. Delete it.
 - **R7** — the comment register. Decided, not open: between a third and two fifths of

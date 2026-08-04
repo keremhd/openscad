@@ -10,6 +10,29 @@ One size per invocation, optional selection brush, Manifold backend.
 `fillet-pr/doc-page/fillet.md` is the authoritative description of what the operator does.
 `fillet-operator-plan.md` is what it was meant to do; the two have drifted since 2026-07-29.
 
+## Availability
+
+**The five modules ship behind an experimental feature.** A new
+`Feature::ExperimentalFillet("fillet", ...)` in `src/Feature.h` and `src/Feature.cc`, passed as
+the second argument to each `Builtins::init` in `register_builtin_fillet`
+(`src/core/FilletNode.cc:205`), exactly as `roof` does at `src/core/RoofNode.cc:62`. Today all
+five register unconditionally. Users opt in with `--enable=fillet` or the GUI preference.
+
+This is the right shape for a first release of a large new geometry operator with known
+documented limitations, and it makes those limitations a stated condition of use rather than a
+surprise.
+
+**And they are not registered at all on a build without Manifold.** Decided: the feature is
+simply unavailable there rather than degrading. That is cleaner than the passthrough R2
+proposed — an unregistered module is an "unknown module" error naming the line, where the
+current code warns and silently returns nothing, which for `fillet()` deletes the model.
+
+Consequences, all of which are part of this criterion:
+- Every regression test invoking the modules passes `--enable=fillet`, following the
+  `--enable=predictible-output` and `--enable=lazy-union` precedent in `tests/CMakeLists.txt`.
+- The unit tests call the builder directly and are unaffected.
+- The user documentation states the flag in its first paragraph, not in a footnote.
+
 ## Promises
 
 1. **Validity.** Any input yields a closed orientable manifold, or the crease is left
@@ -40,13 +63,13 @@ One size per invocation, optional selection brush, Manifold backend.
 
 - One size per invocation. No variable radius; no differing radii meeting at a corner.
 - No runout: a blend that stops partway along an edge stops square.
-- **Requires a build with Manifold enabled.** The runtime `--backend=cgal` is supported and
-  tested: the node builds its tool through Manifold internally and hands the result to the CGAL
-  pipeline, which is what `tests/regression/render-cgal/round-tool-tests-expected.png` is. On a
-  build *without* Manifold the tools warn and emit nothing — and `fillet()` must still return
-  its child there, which is R2 and is currently broken.
+- **Experimental: the modules require `--enable=fillet`.** See Availability above.
+- **Requires a build with Manifold enabled**, where they are not registered at all. The runtime
+  `--backend=cgal` *is* supported and tested: the node builds its tool through Manifold
+  internally and hands the result to the CGAL pipeline, which is what
+  `tests/regression/render-cgal/round-tool-tests-expected.png` is.
   `doc-page/fillet.md:291` states this wrongly as "under the CGAL backend they warn and emit
-  nothing" and must be corrected.
+  nothing" — it conflates the runtime backend with the build option, and must be corrected.
 - Re-filleting an already-blended model is not reliable.
 - **The size gate refuses conservatively.** Some creases that could geometrically be blended
   are dropped with a warning (D23). Promise 1 makes this the correct failure direction.
