@@ -189,63 +189,157 @@ back. `distinct > 1` is printed as `RUNS DISAGREE` and is itself a finding.
 
 ### What it must reproduce before it is believed
 
-`--selftest` asserts the known answers, the plumbing, and an invariant:
+`--selftest` runs 23 checks and refuses the sweep if any fails. It asserts the
+known answers, the plumbing, two invariants and the exporter comparison:
 
-- `rib_into_boss` invalid at `$fn` 14 and 32, valid at 26.
-- `refused_neighbour` invalid at r 0.2 / 0.8 / 0.9 / 1.0, valid at 0.5.
-- `-D FNSET` and `-D R` actually reach the model — otherwise every check above
-  would pass on whatever the default happens to give, and the sweep would be one
+- `rib_into_boss` invalid at `$fn` 11, 25 and 32; valid at 26 and 48.
+- `refused_neighbour` invalid at r 0.2, 0.8, 0.9, 0.95, 1.0 and 1.05; valid at
+  0.3, 0.5 and 1.2.
+- **The flaky/deterministic control pair.** `rib_into_boss` at `$fn`=32 must
+  return more than one distinct mesh across repeated runs and
+  `refused_neighbour` at r=0.9 must return exactly one. A reader that smooths
+  reruns together fails the first; a reader that invents differences fails the
+  second.
+- **The OFF/STL comparison must fire** on `refused_neighbour` at r=0.8, where
+  the OFF is known to lose a real 5.7e-7 mm distinction.
+- `-D FNSET` and `-D R` must actually reach the model — otherwise every check
+  above passes on whatever the default happens to give, and the sweep is one
   number reported eleven times.
 - **`selfproof.scad`**, the self-proving case: a tee rotated about z by exactly
   one facet is the same solid moved rigidly, so every count must be identical at
-  `ROT=0` and `ROT=1`. It is a tee rather than a lone cylinder because a cylinder
-  about z maps onto itself under a facet rotation and would pass vacuously.
+  `ROT=0` and `ROT=1`. It is a tee rather than a lone cylinder because a
+  cylinder about z maps onto itself under a facet rotation and would pass
+  vacuously.
 
-### What the two axes found, 2026-08-05
+These are **not** the expectations this file shipped with. They were re-derived
+on 2026-08-05 against a pinned binary and exact STL, and several moved. The old
+ones were not wrong when they were taken — the code moved under them and they
+were kept past their evidence. That is the failure mode this effort keeps
+hitting, so: do not restore a number here because it is written down somewhere.
 
-Two builds are involved and they are kept apart, because the binary was replaced
-by another worktree in the middle of this run.
+### The reader is exact ASCII STL, and here is why that was checked
 
-**Build A**, `OpenSCAD` mtime 2026-08-04 19:43:44 — the build the two open
-defects were recorded against. It reproduces both exactly:
+`src/io/export_off.cc:58` streams vertices with default `ostream` precision —
+**six significant figures**. `src/io/export_stl.cc` prints through
+`double_conversion::ToShortest`, which round-trips a double exactly. So the
+question was raised whether the bench has been measuring the exporter rather
+than the operator, and whether part of every failing set on record is an
+artefact.
 
-| model | axis | invalid at | reading |
-|---|---|---|---|
-| `rib_into_boss` | `$fn` | 14 | χ=4, nonman=3, weld 1e-6 |
-| `rib_into_boss` | `$fn` | 32 | χ=4, nonman=4, weld 1e-6 |
-| `refused_neighbour` | r | 0.2, 0.8, 0.9, 1.0 | χ=2, nonman=1, weld 1e-6, warnings 2 |
+**The mechanism is real, and it was proven from the file rather than argued.**
+In `refused_neighbour` at r=0.8, two vertices 5.7e-7 mm apart at a coordinate of
+1.2 print as the same line, `1.2265 -4 7.63854`, and are distinct in the STL:
 
-`rib_into_boss` at `$fn`=32 reads χ=4 nonman=4 here, where STATE.md records
-χ=3 nonman=2. The defect reproduces; the counts have moved, and the likeliest
-reason is that D22's closure changed the model's crease selection after the
-counts were taken.
+```
+1.2265011588280614  -4  7.6385372358571768
+1.2265017206799     -4  7.6385373349268155
+```
 
-**Build B**, mtime 2026-08-04 23:56:01, built from another worktree's
-*uncommitted* `FilletBuilder.cc`. Recorded because it is what the committed
-`results/sweep.tsv` was measured with, not as a statement about any commit:
+**Its consequence for this bench, measured over the whole sweep, is nil.** Of
+353 cells, 10 lose a vertex in the OFF and **0 change verdict**. The `agree`
+column carries this on every row, recomputed every run, so the day it does
+change a verdict the sweep will say so.
 
-| model | fn | r | outcome | reading |
-|---|---|---|---|---|
-| `rib_into_boss` | 14 | own (2) | INVALID | χ=4 nonman=3 warn=0 weld 1e-6, 5/5 runs |
-| `rib_into_boss` | 32 | own (2) | INVALID | χ=4 nonman=4 warn=0 weld 1e-6, 5/5 runs |
-| `rib_into_boss` | def | 1.0 | **SIGBUS** | rc=138, no output, ~1 run in 6 |
-| `refused_neighbour` | def | 0.8 | INVALID | χ=2 nonman=1 warn=2 weld 1e-6, 5/5 runs |
+Two corrections came out of checking it, and both were instrument faults on this
+side rather than exporter faults:
 
-Two things changed between the builds and both are worth someone's attention.
-`refused_neighbour` is now valid at r = 0.2, 0.9 and 1.0 and still invalid at
-0.8, so three quarters of that defect appears to have been fixed and a quarter
-not. And `rib_into_boss` at r = 1.0 now **crashes with SIGBUS** on about one run
-in six — a hard memory fault, which is also the most economical explanation of
-why the same model's face count wanders between runs.
+- The first comparison flagged 30 cells, most of them cubes. OFF writes the
+  polygons it has and STL writes triangles, so a cube reads `f=6 e=12` one way
+  and `f=12 e=18` the other, both χ=2 and both valid. `--compare` now tests the
+  verdict invariants — valid, comp, bnd, nonman, chi, genus — and reports a
+  vertex-count difference as a note rather than as a disagreement.
+- The claimed false reds are **not false**. Read from exact STL and welded at
+  1e-6, `rib_into_boss` at `$fn` 25 and 32 and `refused_neighbour` at r 0.9,
+  0.95, 1.0 and 1.05 are all invalid, and each stays invalid **across seven
+  decades of weld tolerance, 1e-4 through 1e-12**. They read valid only at
+  1e-15, which is effectively no welding at all — and an unwelded reading cannot
+  see a self-touch, because Manifold's output is 2-manifold by index
+  construction. That regime is the `bnd` mistake over again: clean on a correct
+  solid and clean on a broken one alike. The disagreement was never OFF versus
+  STL; it was welded versus unwelded.
 
-Cells whose runs disagreed with each other, all `rib_into_boss` on build B:
-`$fn`=10 (3 distinct meshes in 5 runs), `$fn`=12, `$fn`=26, r=0.8, r=1.0.
+Control, for the same table: `refused_neighbour` at r=0.5 is valid at every
+tolerance from 1e-3 to 1e-15. The instrument is not simply calling everything
+invalid.
+
+### What the two axes found
+
+353 cells, one pinned binary (`md5 21cd49a8`, built 2026-08-05 00:18), exact
+ASCII STL, weld 1e-6, 3 renders per cell aggregated to the worst outcome.
+**17 cells are not valid.**
+
+| model | fn | r | outcome | nonman | chi | warn |
+|---|---|---|---|---|---|---|
+| `boss_plate` | 8 | own | INVALID | 8 | 6 | 0 |
+| `hole_plate` | 8 | own | INVALID | 8 | 4 | 0 |
+| `two_bosses` | 8 | own | INVALID | 6 | 5 | 1 |
+| `dome` | 8 | own | INVALID | 4 | 4 | 0 |
+| `pipe_into_face` | 8 | own | INVALID | 2 | 3 | 1 |
+| `rib_into_boss` | 12 | own | **no output** | – | – | 0 |
+| `rib_into_boss` | 14 | own | INVALID | 3 | 4 | 0 |
+| `rib_into_boss` | 32 | own | INVALID | 2 | 3 | 0 |
+| `tee` | def | 0.9 | INVALID χ-odd | 0 | 3 | 0 |
+| `tee_oblique` | def | 0.2 | INVALID χ-odd | 0 | 3 | 1 |
+| `tee_oblique` | def | 0.3 | INVALID χ-odd | 0 | 3 | 1 |
+| `tee_oblique` | def | 0.8 | INVALID χ-odd | 0 | 3 | 1 |
+| `cross` | def | 0.3 | INVALID χ-odd | 1 | 3 | 1 |
+| `refused_neighbour` | def | 0.2 | INVALID | 1 | 2 | 2 |
+| `refused_neighbour` | def | 0.8 | INVALID | 1 | 2 | 2 |
+| `refused_neighbour` | def | 0.9 | INVALID | 1 | 2 | 2 |
+| `refused_neighbour` | def | 1.0 | INVALID | 1 | 2 | 2 |
+
+Four things in that table are new.
+
+**`$fn`=8 breaks five models that are clean at every other tessellation** —
+`boss_plate`, `hole_plate`, `two_bosses`, `dome`, `pipe_into_face`. All five are
+valid at 10 and above and all five are boss-on-plate or hole-in-plate shapes.
+This is a single coarse-tessellation family, and no single-point bench could
+have seen it.
+
+**Four cells are invalid with `nonman=0` and an odd χ.** `tee` at r=0.9 and
+`tee_oblique` at r 0.2, 0.3, 0.8 have no non-manifold edge at all — the proof of
+invalidity is the odd Euler characteristic alone. Three of the four carry a
+warning, so a reader who trusted the warning count would have caught them; `tee`
+at r=0.9 carries **no warning**, and is the case for keeping both instruments.
+
+**`rib_into_boss` at `$fn`=12 produces no output on some runs.** At r=1.0 the
+same model exits with rc=138 — SIGBUS — on about one run in six. A hard memory
+fault, and the most economical explanation for the nondeterminism below.
+
+**`cross` gains genus as its radius grows**: genus 0 at r ≤ 1.0, genus 2 at
+r=1.5, genus 4 at r=2.0, all reported VALID because a closed orientable surface
+of genus 4 is a valid solid. Whether a fillet is allowed to punch two extra
+handles through the model is a question for the operator's promise, not for A1,
+but nothing before this sweep would have shown it.
+
+### Every cell of `rib_into_boss` disagrees with itself
+
+On the pinned binary, at weld 1e-6, over eight identical runs per `$fn`:
+
+| `$fn` | outcome | distinct meshes in 8 runs |
+|---|---|---|
+| 8 | valid 8/8 | 2 |
+| 11 | **invalid 8/8** | 2 |
+| 14 | **valid 6/8, invalid 2/8** | 2 |
+| 19 | valid 8/8 | 2 |
+| 25 | **invalid 8/8** | 2 |
+| 26 | valid 8/8 | 2 |
+| 32 | **invalid 8/8** | 2 |
+| 48 | valid 8/8 | 2 |
+
+Every `$fn` tested returns more than one mesh. Only `$fn`=14 flips *validity*,
+which is why the selftest asserts 14 as flaky rather than as either answer.
+`refused_neighbour` is the control and is fully deterministic — 3/3 and 6/6
+identical at every radius — so the instrument is required to show one model
+flaking and the other not, and does.
 
 ## Known gaps, stated rather than left silent
-- **The full sweep has not been run.** The instrument is built and validated;
-  the binary under it was rebuilt by another worktree part-way through, so the
-  only rows recorded are the two defect models, and they are recorded against
-  one stated build. A table spanning two builds is not a table.
+- **The sweep is one binary deep.** All 353 rows are `md5 21cd49a8`. The binary
+  was replaced under this instrument four times in one session, so the table was
+  taken against a copy pinned aside; it says nothing about any other build, and
+  the `bin` column is there so that stays honest.
+- **`$fn` 11 and 25 are in the selftest but not the sweep axis.** They were
+  found while re-deriving known answers and the default axis was left alone.
 - **No STL round trip yet** — A2 check 2. It needs a wrapper that exports a model
   and re-imports it, and it is the check that proves the classifier reads the mesh
   rather than the file.

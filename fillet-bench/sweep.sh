@@ -391,5 +391,7 @@ print "binary mtimes present in $OUT (more than one means the table mixes builds
 awk -F'\t' 'NR>1 {print $17}' $OUT | sort -u | sed 's/^/  /'
 print "cells where the OFF export changed the answer (the exporter, not the geometry):"
 awk -F'\t' 'NR>1 && $16 == "NO" {print "  " $1 "  fn=" $2 "  r=" $3}' $OUT
+print "cells where genus is not 0 (a fillet that changed the topology):"
+awk -F'\t' 'NR>1 && $7 != "0" && $7 != "n/a" && $7 != "-" {print "  " $1 "  fn=" $2 "  r=" $3 "  genus=" $7 "  chi=" $6}' $OUT
 print "cells whose runs disagreed with each other:"
 awk -F'\t' 'NR>1 && $15 > 1 {print "  " $1 "  fn=" $2 "  r=" $3 "  distinct=" $15 " of " $14 " runs"}' $OUT

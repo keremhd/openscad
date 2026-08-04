@@ -213,14 +213,25 @@ def main():
         if len(out) != 2:
             print('--compare wants exactly two files (the OFF and the STL)')
             return 2
-        keys = ('valid', 'v', 'e', 'f', 'comp', 'bnd', 'nonman', 'chi', 'genus')
+        # Compare the VERDICT, not the face count. OFF writes the polygons it
+        # has and STL writes triangles, so f and e differ on any model with a
+        # quad in it -- a cube reads f=6 e=12 as OFF and f=12 e=18 as STL, and
+        # both are chi=2 and valid. Flagging that as a disagreement buried the
+        # real signal under a pile of cubes the first time this was run.
+        keys = ('valid', 'comp', 'bnd', 'nonman', 'chi', 'genus')
         a, b = out
         same = all(a.get(k) == b.get(k) for k in keys)
         for r in out:
             print(fmt(r))
-        print('AGREE' if same else 'DISAGREE', '-- OFF and STL read the same solid'
-              if same else '-- the OFF exporter changed the answer',
-              f'(tol={args.tol:g})')
+        if same:
+            note = ''
+            if a.get('v') != b.get('v'):
+                note = (f" -- but the vertex counts differ ({a['v']} vs {b['v']}): "
+                        "OFF lost a distinction the weld kept")
+            print(f'AGREE -- OFF and STL reach the same verdict{note} (tol={args.tol:g})')
+        else:
+            print('DISAGREE -- the OFF exporter changed the answer '
+                  f'(tol={args.tol:g})')
         return 0 if same else 3
 
     if args.json:
