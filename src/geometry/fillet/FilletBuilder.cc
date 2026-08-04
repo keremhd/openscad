@@ -3508,9 +3508,19 @@ std::unique_ptr<PolySet> debugSpineMarkers(const MergedMesh& m,
 // into chains, and build the tool solid along them. A diagnostic count line goes
 // out on every invocation (a plain cube yields 12 feature edges, all convex; an
 // inside corner yields a single concave edge).
+double creaseThreshold(const FilletNode& node,
+                       const std::shared_ptr<const ManifoldGeometry>& target)
+{
+  using namespace fillet::detail;
+  if (node.min_angle >= 0) return node.min_angle;
+  if (!target || target->isEmpty()) return -1.0;
+  const MergedMesh m = mergeMesh(target->getManifold().GetMeshGL64());
+  return std::max(1.5 * seamAngle(m, buildEdgeAdjacency(m.tris)), 1.0);
+}
+
 std::shared_ptr<const Geometry> buildFilletTool(
   const FilletNode& node, FilletType type, const std::shared_ptr<const ManifoldGeometry>& target,
-  const std::shared_ptr<const ManifoldGeometry>& brush)
+  const std::shared_ptr<const ManifoldGeometry>& brush, double thresholdOverride)
 {
   using namespace fillet::detail;
 
@@ -3531,7 +3541,9 @@ std::shared_ptr<const Geometry> buildFilletTool(
   // untessellated solid (seam angle 0) still classify its own corners as
   // features. min_angle= overrides all of it.
   const double thresholdDeg =
-    node.min_angle >= 0 ? node.min_angle : std::max(1.5 * seamAngle(m, adj), 1.0);
+    thresholdOverride >= 0
+      ? thresholdOverride
+      : (node.min_angle >= 0 ? node.min_angle : std::max(1.5 * seamAngle(m, adj), 1.0));
   // Face provenance (whether two faces trace back to the same source surface)
   // is only meaningful when the mesh carries more than one source id; a single-
   // id mesh (imported STL, polyhedron) can't rely on it.
