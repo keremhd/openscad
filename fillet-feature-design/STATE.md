@@ -7,6 +7,14 @@ Branch `kerem-fillet`, 19 commits ahead of `origin/kerem-fillet`. **Nothing is p
 Working tree clean. Suite **1709 assertions / 85 cases** on the pin, **2224 / 86** including the
 R3 ring test.
 
+**This file is amended in place. Do not start a new dated state or handoff document** — the
+dated chain grew 392 → 778 → 1421 lines and its cost is what retired it.
+
+Read alongside it: [`ACCEPTANCE.md`](ACCEPTANCE.md), what the feature promises and the gate it
+ships against — that is the authority on whether something is work or a release note; and
+[`TRAPS.md`](TRAPS.md), the environment traps, the nine broken instruments and the corrections
+to the record. Everything superseded is under `archive/` and stays in git regardless.
+
 ---
 
 ## 1. What is true of the code right now
@@ -165,16 +173,57 @@ Also present: `integ-all-four` (superseded integration attempt), and a number of
 `worktree-agent-*` branches sitting at `944e0cbef`, `489946544` or `faf6e1762` that were never
 advanced.
 
-**This session's documents, all on `kerem-fillet`:**
-`removal-scope.md`, `env-var-removal.md`, `chain-stations-rename.md`,
-`controls/2026-08-04-sizegate-13-13-control.md`,
-`measurements/2026-08-04-post-removal-reruns.md`, `measurements/2026-08-04-arrives-straight.md`,
-`measurements/2026-08-04-arrives-straight-renders.md`,
-`decisions/2026-08-04-arrives-straight-stays.md`,
-`reviews/2026-08-04-env-var-removal-review.md`, `reviews/2026-08-04-chain-stations-review.md`,
-`arrives-straight-images/` (8 PNGs).
+**This session's documents** are all on `kerem-fillet` and all now under `archive/`, except
+`decisions/2026-08-04-arrives-straight-stays.md`, which stays at root: the measurements,
+controls, reviews, and the `arrives-straight-images/` PNGs.
 
-The design-log files in this directory are dev artifacts and are to be deleted before merge.
+The whole of `fillet-feature-design/` is a dev artifact and is deleted before merge. Archiving
+is about what the next reader has to open, not about preservation — git holds it either way.
+
+---
+
+## 8. PR review items still open
+
+Lifted from `archive/pr-review.md` when it was archived. R3 and R4 are closed; R1, R2 and R5
+were re-verified against the tree as still present on 2026-08-04.
+
+**Blocking:**
+
+- **R1** — `buildFilletTool` echoes a mesh-statistics line unconditionally
+  (`FilletBuilder.cc:3498`), once per tool node and twice per `fillet()`. No other OpenSCAD
+  operator prints on success. Gate it behind `debug=`; the conditional warnings below it stay.
+- **R2** — on a build without Manifold, `fillet()` **deletes the model**.
+  `GeometryEvaluator.cc:1065`, the `#else` branch, warns and leaves `geom` null. For the four
+  tool nodes that is right; for `fillet()` it is not — the wrapper's contract is to return its
+  child blended, so with no backend it must return the child. `tests/CMakeLists.txt:1563` lists
+  the cgal disables for the four `*-tool-tests` but not for `fillet-tests`, which needs either
+  the three disables or a baseline holding in both configurations.
+- **R5** — `TEST_CASE("zzdebug rib", "[.]")` at `FilletBuilder_test.cc:1577` is a scratch test
+  hidden behind a Catch2 tag, and it ships. Delete it.
+- **R7** — the comment register. Decided, not open: between a third and two fifths of
+  `FilletBuilder.cc` is prose in a voice the tree does not use, and it does not ship in that
+  form. Keep, at a line or two each — the value of a non-obvious constant and why it is that
+  value; the failure a construction exists to avoid, stated as fact; an invariant a caller must
+  not break; a genuine surprise in the geometry or in Manifold. Cut rhetorical framing, the
+  narrative of alternatives tried, restatements of the code, and second-person address. Target
+  roughly a third of current volume, same pass over `FilletBuilder_internal.h`, `FilletNode.cc`
+  and the two test files. Landed commit messages are history and are not rewritten.
+
+**Worth doing:** R6 — `FilletBuilder.cc` is now **3777 lines**, up from the 2518 the review
+complained about; `FilletBuilder_internal.h` already names the six separable pieces. R8 — the
+warnings are essays; OpenSCAD warnings are one line, so keep the first sentence and the
+coordinates. R9 — `classifyEdge`'s `aFar` seeding makes a degenerate triangle answer "convex";
+`unionCells` skips `dropVolumelessParts` only on the single-cell path; `epsAt` reads
+`endSections[j.vert]` through `map::operator[]` on a read path; `FilletNode.cc` is out of
+alphabetical order in `CORE_SOURCES`.
+
+**Documentation defect, found 2026-08-04:** `fillet-pr/doc-page/fillet.md:291` says the tools
+"warn and emit nothing" under the CGAL backend. That is wrong. The fillet path never reads
+`RenderSettings::backend3D`; it is gated only on the compile-time `ENABLE_MANIFOLD`, the cgal
+test disables sit under `if(NOT ENABLE_MANIFOLD)`, and
+`tests/regression/render-cgal/round-tool-tests-expected.png` is a passing 19 KB render of real
+filleted geometry. `--backend=cgal` is supported and tested. The true limitation is a build
+without Manifold — which is R2.
 
 ---
 
