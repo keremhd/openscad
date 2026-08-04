@@ -570,3 +570,132 @@ with escaped commas and cross-checked for consistency (1709 + 515 = 2224).
   the change does not move them.
 * **No performance measurement.** Eleven guards became eleven calls to a
   `[[nodiscard]]` inline; nothing was timed.
+
+---
+
+## 3.5 The byte-identity sweep §3.4 said it never took — retaken independently
+
+§3.4 recorded the 19-of-19 md5 result for `070b8e175` as **inherited**: "one
+agent's unreviewed word", from an agent that was killed twice mid-run. This
+section is an **independent re-take**, by a different agent, from freshly built
+binaries. It does not reuse a single number from that agent.
+
+**Verdict: the inherited 19/19 is CONFIRMED.** 19 of 19 models are
+byte-identical across `070b8e175^` and HEAD.
+
+### The two binaries, and proof they are not the same binary
+
+| | revision | binary md5 | size | built |
+|---|---|---|---|---|
+| pre | `070b8e175^` = `17ed08a5d` | `b43fd7e24fa507f0d5300d63fbbb9084` | 24 306 808 | 4 aug 14:09 |
+| head | `a7a7493c0` | `2cbe5e7f4b6ccc0f451f46928325bd6c` | 24 306 824 | 14:08–14:09 |
+
+They differ by md5, by 16 bytes of size, and `cmp` reports a difference. The
+`FilletBuilder.cc.o` objects differ too (361 536 vs 362 704 bytes), so the
+change really did reach the object that was linked — this is not two links of
+one object. `libopenscadinternal.a` differs (55 124 712 vs 55 125 880).
+
+**Contamination cleared.** The session note warns that an earlier probe build
+contaminated `libopenscadinternal.a`. Both objects here were recompiled from
+git-clean content: the fillet sources were `touch`ed before the HEAD build and
+`git checkout 070b8e175^ -- src/geometry/fillet/` supplied the pre sources, and
+in both cases `make` was observed emitting the `Building CXX object
+.../FilletBuilder.cc.o` line, not merely `Built target`. Existence, size and
+mtime of every artefact were confirmed with `ls`, never from make's output.
+Target built was `OpenSCADExe`. Both binaries were smoke-tested with
+`--version` from their saved copies before use. The working tree was clean
+before and after; `git status --porcelain` is empty and no file under `src/` was
+edited.
+
+**Mtimes.** Sources 14:08 (head) / 14:09 (pre); objects, archive and both
+`OpenSCAD.app/Contents/MacOS/OpenSCAD` binaries 14:08 and 14:09 respectively.
+Every binary is newer than the sources it was built from.
+
+### Known-answer validation of the instrument
+
+Two, one of them 19-wide.
+
+1. **Single model, independent origin.** `rib` under the pre binary exports to
+   `4af898e719553dd42db5080e9b987be1` — the exact `cur` md5 recorded in
+   `controls/2026-08-04-sizegate-13-13-control.md` three days ago and in §0.
+2. **All nineteen.** `070b8e175^` *is* `17ed08a5d`, and `17ed08a5d` is a
+   docs-only commit (`git show --stat`: one file, `reviews/…-review.md`). So the
+   19-row "after step 2" table in §2.3 is precisely the expected pre-change
+   baseline. **All 19 of this sweep's pre-change md5s reproduce that table
+   exactly**, checked by `diff` of the two sorted lists, not by eye. The model
+   sources, the exporter invocation, the binary and the md5 pipeline therefore
+   all reproduce numbers taken independently by an earlier agent.
+
+**Negative control.** A run of identity checks that never fires is worth
+nothing, so the detector was fired on purpose: `cmp` on `pre/boss.stl` vs
+`head/rib.stl` reports a difference, and `cmp` on the two binaries reports a
+difference. The DIFFERS branch works.
+
+**Harness.** `$BIN -o out/$tag/$m.stl $m.scad`, exactly the form in
+`audit-chain-verts:work/ab/controls.sh`. Real files, never `-o /dev/null` (which
+makes OpenSCAD skip the render). No `timeout(1)`, which does not exist on this
+machine. Empty or missing output is reported as `FAILED`, so a silent
+non-export could not have been counted as a pass; 19 of 19 rows carried a real
+non-empty file. Sources recovered with `git show` from
+`audit-chain-verts:work/audit/` (the five `m_*`) and `work/ab/` (the fourteen
+controls); none of the 19 has an `include`/`use`, so each is self-contained.
+Every row was checkpointed to a CSV as it completed.
+
+### The 19 models
+
+| model | md5 at `070b8e175^` | md5 at HEAD | `cmp` |
+|---|---|---|---|
+| boss | 32022214c4c7f81e2de8c2e9ac25dcb5 | identical | identical |
+| corner | c3d3a98c5c08012e02aeab97c2eaec15 | identical | identical |
+| ctrl_boss | 630a462ace733cba4ea10e2b15d34775 | identical | identical |
+| ctrl1 | 32022214c4c7f81e2de8c2e9ac25dcb5 | identical | identical |
+| ctrl2 | f51c531d99e20d7fb0afff419b3ce83e | identical | identical |
+| ctrl3 | c2abb1cb75c22f4ef42d868173c6d486 | identical | identical |
+| ctrl4 | 2739fd21af4f63aea33527f7e6187232 | identical | identical |
+| ctrl5 | ae43dfd5216de40145cf8d292efaba60 | identical | identical |
+| grid | c5f36622d4ae1623dc08936dd5ce4adb | identical | identical |
+| grid100 | 7244484e6968a12e7e48150658c5fbf5 | identical | identical |
+| m_boss | f089c75d17fc086f519c083c484c213b | identical | identical |
+| m_bosscut | b4611b9016083776cec89a74aafac7ea | identical | identical |
+| m_hp | fc1ffa734b2dfeec19d7d067ac77cf7e | identical | identical |
+| m_reaches_junction | db82b890de69ec78ca7f5535d84778df | identical | identical |
+| m_twoboss | 614d2724cda88e50d9a9a0412d2294f4 | identical | identical |
+| pocket | fc13e94c2ec693d251ac786270880953 | identical | identical |
+| rhomb | b723db2f13bf48f07dfe965331705315 | identical | identical |
+| rib | 4af898e719553dd42db5080e9b987be1 | identical | identical |
+| slab | b0d8059ce90042c00e7dc223a49351ed | identical | identical |
+
+**19 / 19 byte-identical**, by `md5` and independently by `cmp` on the files.
+No model differed, so no re-run for nondeterminism was needed — and none of
+these 19 is in the nondeterministic class anyway (neither `box_L_fn96_r1` nor
+`box_T_fn96_r1`, the two the recorded list of 15 omits, is in this set).
+`boss` and `ctrl1` share an md5 because they are the same shape written twice,
+as §0 says they should.
+
+### Warnings
+
+**One warning across all 38 exports, and it is the same on both sides:** `rib`
+emits `radius 2 does not fit 2 of the 3 crease(s) selected; the worst is at
+[12.28, -3, 5] … by 1.4. Those creases are dropped; the size is never clamped`.
+This is the expected skip-and-still-export behaviour, it is pre-existing, and it
+is byte-for-byte the same string before and after. No other model warned.
+
+Stronger than md5: the **entire console output** of all 19 models is identical
+between the two binaries once the wall-clock `rendering time` line is removed —
+including every `ECHO: fillet_tool:` line with its vertex, triangle, surface,
+edge and crease-selection counts. The change did not move a single reported
+number, not just a single exported byte.
+
+### What this re-take did NOT check
+
+* **The unit-test suite was not re-run.** Only `OpenSCADExe` was built at each
+  revision; `OpenSCADUnitTests` was not. §3.3's 2224/86 is untouched here.
+* **`ctest -R fillet` not run.** §3.3 already records 21/21 and already records
+  that it is largely blind to fillet geometry.
+* **Only these 19 models.** Chosen to be comparable to the inherited claim, not
+  because they are a sweep of the 225-model corpus.
+* **No environment variation** — the fillet env vars are gone, per §0.
+* **Not a re-derivation of `openEnds`'s correctness.** This is an output
+  measurement only; §3.1 and §3.2 hold the reasoning and the 1139-refusal probe.
+  This section confirms the *claim* those sections had to inherit.
+* **`arrivesStraight` untouched**, per the owner's decision.
