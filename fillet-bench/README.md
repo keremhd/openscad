@@ -138,11 +138,114 @@ Neither is a gate check; both are rendered because the manual points at them.
   between and no reason to prefer either, so a clean render here is evidence that
   nothing is reading the mesh.
 
-## Known gaps, stated rather than left silent
+## The two axes — `sweep.sh`
 
-- **No radius sweep.** Each model carries one size. Sweeping it needs `R`
-  parameterised at the top of each model and a second axis in `expect.txt`; the
-  size gate's behaviour across radii is exactly what that would show.
+`sheet.sh` renders one point per model. `sweep.sh` walks two axes around it,
+numbers only, no PNG and no montage — which is what makes it cheap enough to run
+over a matrix.
+
+```sh
+./sweep.sh --selftest             known answers only, about two minutes
+./sweep.sh                        the whole cross, resuming
+./sweep.sh --models rib --repeat 5
+./sweep.sh --fn 14,26,32 --r 0.2,0.9
+```
+
+Every model now carries a top-level `R = <its own radius>;` alongside `FNSET`,
+so `-D R=0.9` moves the size the same way `-D FNSET=14` moves the tessellation.
+The defaults are the values the models already used: the single-point bench
+results do not move, and that was checked rather than assumed — all 24 models
+were rendered before and after the edit and every mesh statistic is identical.
+
+The sweep is a **cross, not a grid**: the `$fn` axis is walked at the model's own
+radius and the radius axis at stock defaults, because the full product is 24 × 11
+× 9 renders and most of it is redundant. `--grid` asks for the product anyway on
+a filtered model. Planar models get no `$fn` axis at all — `expect.txt` marks
+them `-`, and sweeping `$fn` over a planar model tests nothing (one whole
+reported series in this effort was vacuous that way).
+
+Every row is appended to `results/sweep.tsv` as it completes and a re-run skips
+rows already there, so a run killed by the stall watchdog leaves everything it
+finished. Every row states its weld tolerance, its warning count, how many times
+the cell was rendered, and **the mtime of the binary that produced it** — a
+results file that mixes two builds says so instead of reading as one table. That
+column is not hypothetical: the binary was replaced under this instrument once
+already.
+
+### It is rendered more than once per cell, and that is a measured requirement
+
+`rib_into_boss` at `$fn`=14 returned a **valid** mesh on 2 of 40 identical
+invocations of one unchanging binary, and an invalid one on the other 38. The
+good runs are not vertex-order noise, which the record already knew about — they
+are a different mesh, `v=226 e=672 f=448` against the usual `v=226 e=672 f=450`,
+two faces fewer and no non-manifold edge. A second flavour of the same fault
+appeared under the earlier binary as `v=228 f=452`.
+
+So a single render per cell would report a real fault as clean roughly once every
+thirty cells. `sweep.sh` renders each cell `--repeat` times (default 3),
+aggregates to the **worst** outcome — a solid that is invalid on any run is not a
+valid solid — and records `distinct`, the number of different meshes that came
+back. `distinct > 1` is printed as `RUNS DISAGREE` and is itself a finding.
+
+### What it must reproduce before it is believed
+
+`--selftest` asserts the known answers, the plumbing, and an invariant:
+
+- `rib_into_boss` invalid at `$fn` 14 and 32, valid at 26.
+- `refused_neighbour` invalid at r 0.2 / 0.8 / 0.9 / 1.0, valid at 0.5.
+- `-D FNSET` and `-D R` actually reach the model — otherwise every check above
+  would pass on whatever the default happens to give, and the sweep would be one
+  number reported eleven times.
+- **`selfproof.scad`**, the self-proving case: a tee rotated about z by exactly
+  one facet is the same solid moved rigidly, so every count must be identical at
+  `ROT=0` and `ROT=1`. It is a tee rather than a lone cylinder because a cylinder
+  about z maps onto itself under a facet rotation and would pass vacuously.
+
+### What the two axes found, 2026-08-05
+
+Two builds are involved and they are kept apart, because the binary was replaced
+by another worktree in the middle of this run.
+
+**Build A**, `OpenSCAD` mtime 2026-08-04 19:43:44 — the build the two open
+defects were recorded against. It reproduces both exactly:
+
+| model | axis | invalid at | reading |
+|---|---|---|---|
+| `rib_into_boss` | `$fn` | 14 | χ=4, nonman=3, weld 1e-6 |
+| `rib_into_boss` | `$fn` | 32 | χ=4, nonman=4, weld 1e-6 |
+| `refused_neighbour` | r | 0.2, 0.8, 0.9, 1.0 | χ=2, nonman=1, weld 1e-6, warnings 2 |
+
+`rib_into_boss` at `$fn`=32 reads χ=4 nonman=4 here, where STATE.md records
+χ=3 nonman=2. The defect reproduces; the counts have moved, and the likeliest
+reason is that D22's closure changed the model's crease selection after the
+counts were taken.
+
+**Build B**, mtime 2026-08-04 23:56:01, built from another worktree's
+*uncommitted* `FilletBuilder.cc`. Recorded because it is what the committed
+`results/sweep.tsv` was measured with, not as a statement about any commit:
+
+| model | fn | r | outcome | reading |
+|---|---|---|---|---|
+| `rib_into_boss` | 14 | own (2) | INVALID | χ=4 nonman=3 warn=0 weld 1e-6, 5/5 runs |
+| `rib_into_boss` | 32 | own (2) | INVALID | χ=4 nonman=4 warn=0 weld 1e-6, 5/5 runs |
+| `rib_into_boss` | def | 1.0 | **SIGBUS** | rc=138, no output, ~1 run in 6 |
+| `refused_neighbour` | def | 0.8 | INVALID | χ=2 nonman=1 warn=2 weld 1e-6, 5/5 runs |
+
+Two things changed between the builds and both are worth someone's attention.
+`refused_neighbour` is now valid at r = 0.2, 0.9 and 1.0 and still invalid at
+0.8, so three quarters of that defect appears to have been fixed and a quarter
+not. And `rib_into_boss` at r = 1.0 now **crashes with SIGBUS** on about one run
+in six — a hard memory fault, which is also the most economical explanation of
+why the same model's face count wanders between runs.
+
+Cells whose runs disagreed with each other, all `rib_into_boss` on build B:
+`$fn`=10 (3 distinct meshes in 5 runs), `$fn`=12, `$fn`=26, r=0.8, r=1.0.
+
+## Known gaps, stated rather than left silent
+- **The full sweep has not been run.** The instrument is built and validated;
+  the binary under it was rebuilt by another worktree part-way through, so the
+  only rows recorded are the two defect models, and they are recorded against
+  one stated build. A table spanning two builds is not a table.
 - **No STL round trip yet** — A2 check 2. It needs a wrapper that exports a model
   and re-imports it, and it is the check that proves the classifier reads the mesh
   rather than the file.

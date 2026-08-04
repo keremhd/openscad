@@ -9,6 +9,7 @@
 #   ./sweep.sh --fn 14,26,32                override the $fn axis
 #   ./sweep.sh --r 0.2,0.9                  override the radius axis
 #   ./sweep.sh --models cross --grid        full fn x r product for one model
+#   ./sweep.sh --repeat 5                   renders per cell (default 3)
 #   ./sweep.sh --fresh                      start the results file over
 #
 # WHY THIS EXISTS. expect.txt carries one $fn and one radius per model, so a
@@ -37,6 +38,7 @@ cd "${0:A:h}"
 BIN=${BIN:-../build/OpenSCAD.app/Contents/MacOS/OpenSCAD}
 FLAGS=${FLAGS:---enable=fillet}   # the modules are experimental; without this every model is an unknown-module error
 TOL=${TOL:-1e-6}
+REPEAT=${REPEAT:-3}                # renders per cell; the builder is nondeterministic, see emit()
 CAP=${CAP:-240}                   # seconds per render; an unguarded Decompose() can take the machine down
 OUT=${OUT:-results/sweep.tsv}
 WORK=${WORK:-results/work}
@@ -54,6 +56,7 @@ while (( $# )); do
     --fn)       FN_AXIS=(${(s:,:)2}); shift 2 ;;
     --r)        R_AXIS=(${(s:,:)2}); shift 2 ;;
     --tol)      TOL=$2; shift 2 ;;
+    --repeat)   REPEAT=$2; shift 2 ;;
     --out)      OUT=$2; shift 2 ;;
     --grid)     GRID=1; shift ;;
     --fresh)    FRESH=1; shift ;;
@@ -71,6 +74,7 @@ print "binary: $BIN"
 print "        built $(stat -f '%Sm' "$BIN")"
 print "flags:  $FLAGS --backend=manifold"
 print "weld:   $TOL"
+print "runs:   $REPEAT per cell"
 stale=(${(f)"$(find ../src \( -name '*.cc' -o -name '*.h' \) -newer "$BIN" 2>/dev/null)"})
 if (( ${#stale} )); then
   print "*** ${#stale} SOURCE FILES ARE NEWER THAN THE BINARY -- these numbers are about the old build ***"
@@ -80,10 +84,16 @@ else
 fi
 print ""
 
+# Trap 1 again, per row rather than per run: the binary has been replaced under a
+# running sweep in this effort. Every row carries the mtime of the binary that
+# produced it, so a results file that mixes two builds says so instead of
+# reading as one coherent table.
+BINSTAMP=$(stat -f '%m' "$BIN")
+
 mkdir -p ${OUT:h} $WORK
 (( FRESH )) && rm -f $OUT
 if [[ ! -f $OUT ]]; then
-  print "# model\tfn\tr\tvalid\tnonman\tchi\tgenus\tcomp\tv\te\tf\twarn\ttol\tsecs" > $OUT
+  print "# model\tfn\tr\tvalid\tnonman\tchi\tgenus\tcomp\tv\te\tf\twarn\ttol\truns\tdistinct\tsecs\tbin" > $OUT
 fi
 
 # --- one render + one reading ------------------------------------------------
@@ -132,17 +142,46 @@ run_one() {
   [[ -n $REPLY_VALID ]] || REPLY_VALID=UNREADABLE
 }
 
-emit() {  # model fn r  -- render, print, checkpoint. Skips a row already done.
+# A cell is rendered REPEAT times, not once. This is not caution, it is a
+# measured requirement: rib_into_boss at $fn=14 returned a VALID mesh on 2 of 55
+# identical invocations of the same binary and came back INVALID on the other 53,
+# and the two good readings were two DIFFERENT meshes (v=228 f=452 and
+# v=226 f=448) against the usual v=226 f=450. That is not vertex-order noise,
+# which is what the record already knew about; the topology itself moves. One
+# run per cell would therefore have reported a fault as clean about once every
+# thirty cells.
+#
+# Runs are aggregated to the WORST outcome, because a solid that is invalid on
+# any run is not a valid solid, and the disagreement is recorded rather than
+# discarded: `runs` is how many were rendered, `distinct` how many different
+# meshes came back. distinct > 1 is itself a finding.
+emit() {  # model fn r  -- render REPEAT times, print, checkpoint. Skips a done row.
   local model=$1 fn=$2 r=$3
   if grep -q "^$model	$fn	$r	" $OUT 2>/dev/null; then
     print "  = $model fn=$fn r=$r (already in $OUT)"
     return
   fi
-  run_one $model $fn $r
-  local row="$model	$fn	$r	$REPLY_VALID	$REPLY_NONMAN	$REPLY_CHI	$REPLY_GENUS	$REPLY_COMP	$REPLY_V	$REPLY_E	$REPLY_F	$REPLY_WARN	$TOL	$REPLY_SECS"
+  local -a seen
+  local worst="" wnonman wchi wgenus wcomp wv we wf wwarn
+  local t0=$SECONDS i
+  for i in $(seq 1 $REPEAT); do
+    run_one $model $fn $r
+    local sig="$REPLY_VALID v=$REPLY_V e=$REPLY_E f=$REPLY_F chi=$REPLY_CHI nonman=$REPLY_NONMAN comp=$REPLY_COMP"
+    [[ ${seen[(Ie)$sig]} -eq 0 ]] && seen+=($sig)
+    # Keep the first run, then let any non-VALID run displace it.
+    if [[ -z $worst || ( $worst == VALID && $REPLY_VALID != VALID ) \
+          || ( $worst == INVALID && ( $REPLY_VALID == NOOUT || $REPLY_VALID == TIMEOUT ) ) ]]; then
+      worst=$REPLY_VALID; wnonman=$REPLY_NONMAN; wchi=$REPLY_CHI; wgenus=$REPLY_GENUS
+      wcomp=$REPLY_COMP; wv=$REPLY_V; we=$REPLY_E; wf=$REPLY_F; wwarn=$REPLY_WARN
+    fi
+  done
+  local distinct=${#seen}
+  local secs=$((SECONDS - t0))
+  local row="$model	$fn	$r	$worst	$wnonman	$wchi	$wgenus	$wcomp	$wv	$we	$wf	$wwarn	$TOL	$REPEAT	$distinct	$secs	$BINSTAMP"
   print -r -- "$row" >> $OUT
-  printf "  %-18s fn=%-4s r=%-5s %-9s nonman=%-3s chi=%-3s genus=%-4s warn=%-3s tol=%s %ss\n" \
-    $model $fn $r $REPLY_VALID $REPLY_NONMAN $REPLY_CHI $REPLY_GENUS $REPLY_WARN $TOL $REPLY_SECS
+  printf "  %-18s fn=%-4s r=%-5s %-9s nonman=%-3s chi=%-3s genus=%-4s warn=%-3s tol=%s runs=%s distinct=%s %ss%s\n" \
+    $model $fn $r $worst $wnonman $wchi $wgenus $wwarn $TOL $REPEAT $distinct $secs \
+    "$( (( distinct > 1 )) && print '  <-- RUNS DISAGREE' )"
 }
 
 # --- the instrument's own acceptance test ------------------------------------
@@ -150,14 +189,24 @@ emit() {  # model fn r  -- render, print, checkpoint. Skips a row already done.
 # known answers up front and refuses to be trusted without them.
 if (( SELFTEST )); then
   fails=0
+  # Aggregated over REPEAT runs exactly as emit() does, and for the same reason:
+  # a single run of rib_into_boss at $fn=14 comes back clean about once in
+  # thirty, and a selftest that fails one time in thirty is not a selftest. This
+  # asymmetry is deliberate -- an INVALID expectation is met if ANY run is
+  # invalid, a VALID expectation only if EVERY run is.
   check() {  # label expected-VALID/INVALID model fn r [extra]
     local label=$1 want=$2; shift 2
-    run_one "$@"
-    local got=$REPLY_VALID
-    if [[ $got == $want* ]]; then
-      print "  PASS  $label -> $got nonman=$REPLY_NONMAN chi=$REPLY_CHI tol=$TOL"
+    local worst="" nm chi n
+    for n in $(seq 1 $REPEAT); do
+      run_one "$@"
+      if [[ -z $worst || ( $worst == VALID && $REPLY_VALID != VALID ) ]]; then
+        worst=$REPLY_VALID; nm=$REPLY_NONMAN; chi=$REPLY_CHI
+      fi
+    done
+    if [[ $worst == $want* ]]; then
+      print "  PASS  $label -> $worst nonman=$nm chi=$chi tol=$TOL ($REPEAT runs)"
     else
-      print "  FAIL  $label -> $got (wanted $want) nonman=$REPLY_NONMAN chi=$REPLY_CHI tol=$TOL"
+      print "  FAIL  $label -> $worst (wanted $want) nonman=$nm chi=$chi tol=$TOL ($REPEAT runs)"
       (( fails++ ))
     fi
   }
@@ -247,6 +296,10 @@ for m in $models; do
   done
 done
 
-print "\ndone. $(( $(wc -l < $OUT) - 1 )) rows in $OUT, weld tolerance $TOL"
+print "\ndone. $(( $(wc -l < $OUT) - 1 )) rows in $OUT, weld tolerance $TOL, $REPEAT runs per cell"
 print "invalid rows:"
-awk -F'\t' 'NR>1 && $4 != "VALID" {print "  " $1 "  fn=" $2 "  r=" $3 "  " $4 "  nonman=" $5 "  chi=" $6 "  warn=" $12 "  tol=" $13}' $OUT
+awk -F'\t' 'NR>1 && $4 != "VALID" {print "  " $1 "  fn=" $2 "  r=" $3 "  " $4 "  nonman=" $5 "  chi=" $6 "  warn=" $12 "  tol=" $13 "  runs=" $14 "  distinct=" $15}' $OUT
+print "binary mtimes present in $OUT (more than one means the table mixes builds):"
+awk -F'\t' 'NR>1 {print $17}' $OUT | sort -u | sed 's/^/  /'
+print "cells whose runs disagreed with each other:"
+awk -F'\t' 'NR>1 && $15 > 1 {print "  " $1 "  fn=" $2 "  r=" $3 "  distinct=" $15 " of " $14 " runs"}' $OUT

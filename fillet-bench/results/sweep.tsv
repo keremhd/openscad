@@ -1,0 +1,9 @@
+# model	fn	r	valid	nonman	chi	genus	comp	v	e	f	warn	tol	runs	distinct	secs	bin
+refused_neighbour	def	def	VALID	0	2	0	1	356	1062	708	2	1e-6	3	1	3	1785876961
+refused_neighbour	def	0.2	VALID	0	2	0	1	356	1062	708	2	1e-6	3	1	3	1785876961
+refused_neighbour	def	0.3	VALID	0	2	0	1	355	1059	706	2	1e-6	3	1	4	1785876961
+refused_neighbour	def	0.8	INVALID	1	2	n/a	1	357	1067	712	2	1e-6	3	1	3	1785876961
+refused_neighbour	def	0.9	VALID	0	2	0	1	359	1071	714	2	1e-6	3	1	4	1785876961
+refused_neighbour	def	1.0	VALID	0	2	0	1	359	1071	714	2	1e-6	3	1	3	1785876961
+refused_neighbour	def	1.5	VALID	0	2	0	1	356	1062	708	2	1e-6	3	1	3	1785876961
+refused_neighbour	def	2.0	VALID	0	2	0	1	459	1371	914	2	1e-6	3	1	4	1785876961
