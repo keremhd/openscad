@@ -17,8 +17,8 @@
 # invisible to the bench. Two open defects are exactly that shape:
 # rib_into_boss is invalid at several $fn and valid at others, and
 # refused_neighbour is non-manifold at r 0.2/0.8/0.9/0.95/1.0/1.05 and valid at
-# 0.3, 0.5 and 1.2. --selftest asserts both, a facet-rotation invariant, and the
-# flaky/deterministic control pair, before any sweep here is worth reading.
+# 0.3, 0.5 and 1.2. --selftest asserts both, a facet-rotation invariant, and
+# that both models are deterministic, before any sweep here is worth reading.
 #
 # IT READS EXACT ASCII STL, not OFF. export_off.cc streams at the default six
 # significant figures and has been caught merging two vertices 5.7e-7 mm apart.
@@ -172,14 +172,16 @@ run_one() {
   [[ -n $REPLY_VALID ]] || REPLY_VALID=UNREADABLE
 }
 
-# A cell is rendered REPEAT times, not once. This is not caution, it is a
-# measured requirement: rib_into_boss at $fn=14 returned a VALID mesh on 2 of 55
+# A cell is rendered REPEAT times, not once. That was a measured requirement
+# before 2026-08-05: rib_into_boss at $fn=14 returned a VALID mesh on 2 of 55
 # identical invocations of the same binary and came back INVALID on the other 53,
 # and the two good readings were two DIFFERENT meshes (v=228 f=452 and
-# v=226 f=448) against the usual v=226 f=450. That is not vertex-order noise,
-# which is what the record already knew about; the topology itself moves. One
-# run per cell would therefore have reported a fault as clean about once every
-# thirty cells.
+# v=226 f=448) against the usual v=226 f=450 -- the topology moved, not just the
+# vertex order, so one run per cell reported a fault as clean about once every
+# thirty cells. The cause was an out-of-bounds read in chainBulges() and it is
+# fixed; $fn=14 is now 60/60 one mesh. The repeat is KEPT anyway, because it is
+# what would detect the read coming back, and because `distinct` is then a
+# measurement rather than an assumption.
 #
 # Runs are aggregated to the WORST outcome, because a solid that is invalid on
 # any run is not a valid solid, and the disagreement is recorded rather than
@@ -269,16 +271,21 @@ if (( SELFTEST )); then
   check "refused_neighbour r=0.5"  VALID   refused_neighbour def 0.5
   check "refused_neighbour r=1.2"  VALID   refused_neighbour def 1.2
 
-  # The two models are a matched pair and the instrument must tell them apart.
-  # One flakes and the other does not, so a reader that smooths reruns together
-  # and a reader that invents differences both fail here.
-  print "the flaky/deterministic control pair"
-  # Asserting "this model flakes" is a statistical claim and needs enough runs
-  # to be one. rib_into_boss at $fn=32 splits about 6/2, so three runs agree by
-  # chance roughly two times in five -- the first version of this check failed
-  # itself that way. It now stops the moment a second mesh appears, so the usual
-  # cost is two or three renders, and only declares the model deterministic
-  # after 16 runs have all agreed (about a 1 in 100 false alarm).
+  # THE BUILDER IS NOW DETERMINISTIC, and this pair is what proves it.
+  # rib_into_boss used to return two or three distinct meshes over eight runs at
+  # every $fn tested; the cause was an out-of-bounds read in chainBulges() --
+  # a section overrunning a seam vertex took a negative chain parameter and
+  # `static_cast<int>(floor(q)) % nsta` stayed negative, so the builder read the
+  # 24 bytes before a station buffer and used whatever the allocator had left
+  # there. Fixed 2026-08-05; measured after the fix at 60/60 identical meshes at
+  # $fn=14 and 40/40 at R=1.0, all rc=0, no SIGBUS.
+  #
+  # So the assertion is INVERTED from what this file used to carry: both models
+  # must now be deterministic, and a second mesh appearing here means the read
+  # is back (or a new one is). This check is the reason the sweep's `distinct`
+  # column can be believed. 16 runs is enough that the old 6/2 split would be
+  # caught essentially every time.
+  print "the determinism pair -- neither model may return two meshes"
   spread() {  # maxruns model fn r -- distinct meshes, early exit once >1
     local maxn=$1; shift
     local -a sigs; local n sig
@@ -291,10 +298,10 @@ if (( SELFTEST )); then
     REPLY_SPREAD=${#sigs}; REPLY_RUNS=$n
   }
   spread 16 rib_into_boss 32 def
-  if (( REPLY_SPREAD > 1 )); then
-    print "  PASS  rib_into_boss fn=32 gave $REPLY_SPREAD distinct meshes within $REPLY_RUNS runs, as it should"
+  if (( REPLY_SPREAD == 1 )); then
+    print "  PASS  rib_into_boss fn=32 gave one mesh across $REPLY_RUNS runs, as it must since the seam-vertex read was fixed"
   else
-    print "  FAIL  rib_into_boss fn=32 looks deterministic (1 mesh in $REPLY_RUNS runs) -- it is not; something is caching, or the reader is blind"
+    print "  FAIL  rib_into_boss fn=32 gave $REPLY_SPREAD distinct meshes in $REPLY_RUNS runs -- the builder is reading uninitialised memory again; every number below is void"
     (( fails++ ))
   fi
   spread $REPEAT refused_neighbour def 0.9
@@ -404,8 +411,11 @@ done
 print "\ndone. $(( $(wc -l < $OUT) - 1 )) rows in $OUT, weld tolerance $TOL, $REPEAT runs per cell"
 print "invalid rows:"
 awk -F'\t' 'NR>1 && $4 != "VALID" {print "  " $1 "  fn=" $2 "  r=" $3 "  " $4 "  nonman=" $5 "  chi=" $6 "  warn=" $12 "  tol=" $13 "  runs=" $14 "  distinct=" $15}' $OUT
-print "binary mtimes present in $OUT (more than one means the table mixes builds):"
-awk -F'\t' 'NR>1 {print $17}' $OUT | sort -u | sed 's/^/  /'
+print "binaries present in $OUT (more than one means the table mixes builds):"
+# Field 18, not 17: the row is model fn r valid nonman chi genus comp v e f warn
+# tol runs distinct agree secs bin, and 17 is the elapsed seconds -- which made
+# this line report one "binary" per distinct render time, i.e. always several.
+awk -F'\t' 'NR>1 {print $18}' $OUT | sort -u | sed 's/^/  /'
 print "cells where the OFF export changed the answer (the exporter, not the geometry):"
 awk -F'\t' 'NR>1 && $16 == "NO" {print "  " $1 "  fn=" $2 "  r=" $3}' $OUT
 print "cells where genus is not 0 (a fillet that changed the topology):"
