@@ -365,3 +365,85 @@ models the change does not touch). Its pass is recorded and not leaned on.
 * **No performance measurement.** `std::map<int,std::vector<int>>` becoming
   `std::map<int,int>` should be cheaper and the field deletion shrinks
   `ChainContact`; neither was timed.
+
+---
+
+# 3. Step 3 — `openEnds()` verification (`070b8e175`)
+
+Independent verification of "Fold the closed-chain guard into the end-vertex
+query so it survives NDEBUG". The agent that made the change was killed before
+it could verify; this section proves or disproves it. Nothing here re-does the
+change.
+
+## 3.1 Is the change complete and correct on its own?
+
+Read from `git show 070b8e175`, then re-derived against the tree at that SHA.
+
+**The guard cannot be bypassed.** `stations` is still `private` (declared under
+`private:` at the foot of `struct Chain`). `openEnds()` is the only member that
+returns a station's mesh vertex to a caller: `stationCount()` returns a count,
+`param()` a parameter, `point()` a position, `inEdge()`/`outEdge()`/`rawMid()`
+mesh *edges* off `rawRun()`. The privacy a previous reviewer established as the
+structural barrier is intact and was not weakened — `openEnds` widened nothing,
+it replaced one accessor with a narrower one.
+
+One nuance the commit message overstates. It says `openEnds` is "the only door
+to a station's mesh vertex from outside the struct". `rawRun()` is a second door
+in the letter of it: it returns `stations` when `raw` is empty. It is not a door
+in substance — `raw` is empty only on a chain nothing has resampled, and such a
+chain has one station per crease vertex with no `-1` in it. The `-1` the guard
+exists to withhold is reachable only through a resampled chain, and a resampled
+chain always has `raw` set. The guarantee holds; the sentence claiming it is
+one word too absolute.
+
+**The header prose is now true under `-DNDEBUG`.** The old note named the
+assertion as the thing making a ring's last station unreachable. It now names
+the return value, and says so explicitly ("a guard that a caller could forget,
+or that a build could compile out, would not do"). That statement is
+build-configuration independent, which is exactly what the old one was not.
+
+**Duplicated guards removed: eleven call sites**, matching the commit message.
+Counted on the pre-change file (`git show 070b8e175^`):
+
+| pre-change line | guard as written | after |
+|---|---|---|
+| 1129 `checkChainSizes` | `closed \|\| stationCount() < 2` | folded |
+| 2149 `dropUncoveredCorners` arms | `closed \|\| stationCount() < 2` | folded |
+| 2156 `dropUncoveredCorners` touching | `closed \|\| stationCount() < 2` | folded |
+| 2210 `dropUncoveredCorners` keeping | `!closed && n >= 2` | folded |
+| 2462 `chainJunctions` | `closed \|\| stationCount() < 2` | folded |
+| 2723 `buildRoundSolid` arrivesBent | `closed \|\| stationCount() < 2` | folded |
+| 2804 `buildRoundSolid` trim | `closed \|\| n < 2` (n = `sec.size()`) | half folded |
+| 3027 `buildRoundSolid` endsAt | `closed \|\| stationCount() < 2` | folded |
+| 3033 `buildRoundSolid` shortening | `closed` | folded |
+| 3179 `chainsAt` | `closed \|\| stationCount() < 2` | folded |
+| 3194 `servedEnd` | `closed \|\| stationCount() < 2` | folded |
+
+Nine fold entirely; the two whose count comes from `sections[ci].size()` (2804,
+3033) keep that half, as the commit says. Both are on the list a reviewer
+deliberately left as latent and were not otherwise touched.
+
+**Each removal checked safe.** Two classes of risk, both closed:
+
+* *Sites 2804 and 3033 now also refuse `stationCount() < 2`, which they did not
+  before.* This is redundant, not a behaviour change. `sections[ci]` comes from
+  `roundSections`, whose length is `spineFrames`' length, which is the station
+  count; so at 2804 `n < 2` and `stationCount() < 2` are the same test. The
+  rebuild at 3025 can lengthen `sections[ci]` past the station count, but a
+  chain only reaches that rebuild through the 2804 guard, which a
+  one-station chain never passes — so at 3033 a chain with `sec.size() >= 2`
+  always has `stationCount() >= 2` too. No chain changes side.
+* *`endTouched` and `endAnchored` moved their refusal ahead of
+  `if (chain.keep.empty()) return true;`.* This IS a behaviour change in the
+  abstract: a closed chain with an empty `keep` used to answer `true` and now
+  answers `false`. It is unreachable. `endTouched` has exactly one caller
+  (2177), `endAnchored` three (2180, 2485, 2486), and all four sit inside loops
+  that have already refused a closed or short chain — before the change via the
+  open-coded guard, after it via `openEnds`. No reachable answer moves, which is
+  what the commit claims.
+
+`endVert` has no remaining occurrence anywhere in `src/` or `tests/`. No caller
+was left on the old path.
+
+**Verdict: complete and correct on its own,** with the one overstated sentence
+above noted and not repaired here.
