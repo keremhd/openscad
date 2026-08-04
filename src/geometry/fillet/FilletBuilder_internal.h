@@ -109,12 +109,13 @@ struct ClassCounts
 // edge would be a crease to one and a flat seam to another.
 //
 // Ties are rejected, not accepted. An exact tie is reachable — min_angle= can
-// name any value, and the default threshold sits exactly on the wall seams of a
-// cylinder($fn=8) — and there the dihedrals of a tessellated surface land a few
-// ulp either side of the threshold, splitting edges that are identical by
-// symmetry. Rejecting keeps a prism a prism; accepting would round every facet
-// of one. The margin is four orders above that ulp noise and far below any angle
-// a caller chose on purpose.
+// name any value, including one a surface's own facets turn by — and there the
+// dihedrals of a tessellated surface land a few ulp either side of the
+// threshold, splitting edges that are identical by symmetry. Rejecting keeps a
+// prism a prism; accepting would round every facet of one. The margin is four
+// orders above that ulp noise and far below any angle a caller chose on purpose.
+// The default threshold is deliberately kept off every common facet angle so
+// that no unnamed threshold ever lands here.
 inline bool isFeatureAngle(double dihedralDeg, double thresholdDeg)
 {
   return dihedralDeg >= thresholdDeg * (1 + 1e-9);
