@@ -49,6 +49,10 @@ const Feature Feature::ExperimentalDiscretizationByError(
 const Feature Feature::ExperimentalAiFeatures("ai-features",
                                               "Enable AI features (Note: AI integration is under "
                                               "development and does not connect to external APIs yet).");
+const Feature Feature::ExperimentalFillet(
+  "fillet",
+  "Enable the <code>fillet()</code>, <code>fillet_tool()</code>, <code>round_tool()</code>, "
+  "<code>chamfer_tool()</code> and <code>bevel_tool()</code> modules.");
 
 #ifdef ENABLE_PYTHON
 const Feature Feature::ExperimentalPythonEngine(

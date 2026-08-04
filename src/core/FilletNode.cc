@@ -200,28 +200,37 @@ std::string FilletNode::toString() const
   return stream.str();
 }
 
+// Without Manifold there is no tool builder at all, so the modules are left
+// unregistered rather than registered and inert: an unregistered module is an
+// unknown-module error naming the line, where a module that evaluates to no
+// geometry silently deletes the model fillet() was applied to.
+#ifdef ENABLE_MANIFOLD
 void register_builtin_fillet()
 {
-  Builtins::init("fillet_tool", new BuiltinModule(builtin_fillet_tool),
+  Builtins::init("fillet_tool", new BuiltinModule(builtin_fillet_tool, &Feature::ExperimentalFillet),
                  {
                    "fillet_tool(r = number)",
                  });
-  Builtins::init("round_tool", new BuiltinModule(builtin_round_tool),
+  Builtins::init("round_tool", new BuiltinModule(builtin_round_tool, &Feature::ExperimentalFillet),
                  {
                    "round_tool(r = number)",
                  });
-  Builtins::init("chamfer_tool", new BuiltinModule(builtin_chamfer_tool),
+  Builtins::init("chamfer_tool",
+                 new BuiltinModule(builtin_chamfer_tool, &Feature::ExperimentalFillet),
                  {
                    "chamfer_tool(t = number)",
                  });
-  Builtins::init("bevel_tool", new BuiltinModule(builtin_bevel_tool),
+  Builtins::init("bevel_tool", new BuiltinModule(builtin_bevel_tool, &Feature::ExperimentalFillet),
                  {
                    "bevel_tool(t = number)",
                  });
-  Builtins::init("fillet", new BuiltinModule(builtin_fillet),
+  Builtins::init("fillet", new BuiltinModule(builtin_fillet, &Feature::ExperimentalFillet),
                  {
                    "fillet(r = number)",
                    "fillet(r = number, inner = bool, outer = bool, min_angle = number, "
                    "disable_preview = bool)",
                  });
 }
+#else
+void register_builtin_fillet() {}
+#endif  // ENABLE_MANIFOLD

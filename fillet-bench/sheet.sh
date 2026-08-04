@@ -15,7 +15,7 @@ set -u
 cd "${0:A:h}"
 
 BIN=${BIN:-../build/OpenSCAD.app/Contents/MacOS/OpenSCAD}
-FLAGS=${FLAGS:-}          # becomes --enable=fillet once the feature is gated
+FLAGS=${FLAGS:---enable=fillet}   # the modules are experimental; without this every model is an unknown-module error
 TILE_W=${TILE_W:-700}
 TILE_H=${TILE_H:-560}
 COLS=3

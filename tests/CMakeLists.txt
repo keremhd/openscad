@@ -267,6 +267,13 @@ if(EXAMPLES_DIR)
 endif(EXAMPLES_DIR)
 
 file(GLOB FEATURES_3D_FILES   ${TEST_SCAD_DIR}/3D/features/*.scad)
+list(REMOVE_ITEM FEATURES_3D_FILES # -> EXPERIMENTAL_FILLET_*_FILES, they need --enable=fillet
+  ${TEST_SCAD_DIR}/3D/features/bevel-tool-tests.scad
+  ${TEST_SCAD_DIR}/3D/features/chamfer-tool-tests.scad
+  ${TEST_SCAD_DIR}/3D/features/fillet-tests.scad
+  ${TEST_SCAD_DIR}/3D/features/fillet-tool-tests.scad
+  ${TEST_SCAD_DIR}/3D/features/round-tool-tests.scad
+)
 file(GLOB DEPRECATED_3D_FILES ${TEST_SCAD_DIR}/3D/deprecated/*.scad)
 file(GLOB ISSUES_3D_FILES     ${TEST_SCAD_DIR}/3D/issues/*.scad)
 file(GLOB SCAD_AMF_FILES           ${TEST_SCAD_DIR}/amf/*.scad)
@@ -622,15 +629,8 @@ list(APPEND RENDER_DIFFERENT_EXPECTATIONS
   # Manifold can represent the very thin slice
   ${TEST_SCAD_DIR}/3D/issues/issue1165.scad
 
-  # The fillet tools offset the tool a hair past each wall so it crosses the
-  # surface transversally instead of lying on it. Manifold takes those slivers;
-  # converting them to a Nef polyhedron trips a CGAL assertion and discards
-  # facets, so the CGAL render shows the cut faces inverted. The tool itself
-  # is built by the same Manifold code either way — only the CGAL backend's
-  # rendering of it differs, and pinning that with its own baseline keeps the
-  # difference visible instead of hiding the case from one backend.
-  ${TEST_SCAD_DIR}/3D/features/bevel-tool-tests.scad
-  ${TEST_SCAD_DIR}/3D/features/round-tool-tests.scad
+  # The fillet tool files are in EXPERIMENTAL_FILLET_CGAL_DIFF_FILES below;
+  # they need --enable=fillet, so they cannot ride the generic lists.
 )
 if(EXAMPLES_DIR)
   list(APPEND RENDER_DIFFERENT_EXPECTATIONS
@@ -1248,6 +1248,49 @@ if(EXAMPLES_DIR)
 endif(EXAMPLES_DIR)
 
 #
+# --enable=fillet tests
+#
+# The five fillet modules register behind Feature::ExperimentalFillet, so every
+# file invoking one is an unknown-module error without the flag — and they are
+# not registered at all in a build without Manifold, which is why the whole
+# block is conditional rather than disabled test by test afterwards.
+if (ENABLE_MANIFOLD)
+list(APPEND EXPERIMENTAL_FILLET_FILES
+  ${TEST_SCAD_DIR}/3D/features/chamfer-tool-tests.scad
+  ${TEST_SCAD_DIR}/3D/features/fillet-tests.scad
+  ${TEST_SCAD_DIR}/3D/features/fillet-tool-tests.scad
+)
+# The fillet tools offset the tool a hair past each wall so it crosses the
+# surface transversally instead of lying on it. Manifold takes those slivers;
+# converting them to a Nef polyhedron trips a CGAL assertion and discards
+# facets, so the CGAL render shows the cut faces inverted. The tool itself is
+# built by the same Manifold code either way — only the CGAL backend's rendering
+# of it differs, and pinning that with its own baseline keeps the difference
+# visible instead of hiding the case from one backend.
+list(APPEND EXPERIMENTAL_FILLET_CGAL_DIFF_FILES
+  ${TEST_SCAD_DIR}/3D/features/bevel-tool-tests.scad
+  ${TEST_SCAD_DIR}/3D/features/round-tool-tests.scad
+)
+set(EXPERIMENTAL_FILLET_ALL_FILES ${EXPERIMENTAL_FILLET_FILES} ${EXPERIMENTAL_FILLET_CGAL_DIFF_FILES})
+
+add_cmdline_test(dump                     EXPERIMENTAL OPENSCAD SUFFIX csg FILES ${EXPERIMENTAL_FILLET_ALL_FILES} ARGS --enable=fillet)
+add_cmdline_test(render-cgal              EXPERIMENTAL OPENSCAD SUFFIX png FILES ${EXPERIMENTAL_FILLET_FILES} EXPECTEDDIR render ARGS --render --enable=fillet --backend=cgal)
+add_cmdline_test(render-cgal              EXPERIMENTAL OPENSCAD SUFFIX png FILES ${EXPERIMENTAL_FILLET_CGAL_DIFF_FILES} ARGS --render --enable=fillet --backend=cgal)
+if (ENABLE_MANIFOLD_TESTS)
+add_cmdline_test(render-manifold          EXPERIMENTAL OPENSCAD SUFFIX png FILES ${EXPERIMENTAL_FILLET_FILES} EXPECTEDDIR render ARGS --render --enable=fillet --backend=manifold)
+add_cmdline_test(render-manifold          EXPERIMENTAL OPENSCAD SUFFIX png FILES ${EXPERIMENTAL_FILLET_CGAL_DIFF_FILES} ARGS --render --enable=fillet --backend=manifold)
+endif()
+add_cmdline_test(preview-cgal             EXPERIMENTAL OPENSCAD SUFFIX png FILES ${EXPERIMENTAL_FILLET_ALL_FILES} EXPECTEDDIR preview ARGS --enable=fillet --backend=cgal)
+if (ENABLE_MANIFOLD_TESTS)
+add_cmdline_test(preview-manifold         EXPERIMENTAL OPENSCAD SUFFIX png FILES ${EXPERIMENTAL_FILLET_ALL_FILES} EXPECTEDDIR preview ARGS --enable=fillet --backend=manifold)
+endif()
+add_cmdline_test(throwntogether-cgal      EXPERIMENTAL OPENSCAD SUFFIX png FILES ${EXPERIMENTAL_FILLET_ALL_FILES} EXPECTEDDIR throwntogether ARGS --preview=throwntogether --enable=fillet --backend=cgal)
+add_cmdline_test(throwntogether-manifold  EXPERIMENTAL OPENSCAD SUFFIX png FILES ${EXPERIMENTAL_FILLET_ALL_FILES} EXPECTEDDIR throwntogether ARGS --preview=throwntogether --enable=fillet --backend=manifold)
+add_cmdline_test(render-csg-cgal          EXPERIMENTAL SCRIPT ${EXPORT_IMPORT_PNGTEST_PY} SUFFIX png FILES ${EXPERIMENTAL_FILLET_FILES} EXPECTEDDIR render ARGS ${OPENSCAD_EXE_ARG} --format=csg --render --enable=fillet --backend=cgal)
+add_cmdline_test(render-csg-cgal          EXPERIMENTAL SCRIPT ${EXPORT_IMPORT_PNGTEST_PY} SUFFIX png FILES ${EXPERIMENTAL_FILLET_CGAL_DIFF_FILES} EXPECTEDDIR render-cgal ARGS ${OPENSCAD_EXE_ARG} --format=csg --render --enable=fillet --backend=cgal)
+endif(ENABLE_MANIFOLD)
+
+#
 # --enable=import-function tests
 #
 list(APPEND EXPERIMENTAL_IMPORT_FILES
@@ -1560,21 +1603,8 @@ if(NOT ENABLE_MANIFOLD)
     lazyunion-render_lazyunion-difference-for
     render-manifold_roof
 
-    # The fillet tools are built on Manifold and warn-and-emit-nothing without
-    # it, so their baselines show an untouched model in such a build. The .csg
-    # dump still runs: the nodes parse and serialise regardless of backend.
-    render-cgal_chamfer-tool-tests
-    preview-cgal_chamfer-tool-tests
-    throwntogether-cgal_chamfer-tool-tests
-    render-cgal_bevel-tool-tests
-    preview-cgal_bevel-tool-tests
-    throwntogether-cgal_bevel-tool-tests
-    render-cgal_fillet-tool-tests
-    preview-cgal_fillet-tool-tests
-    throwntogether-cgal_fillet-tool-tests
-    render-cgal_round-tool-tests
-    preview-cgal_round-tool-tests
-    throwntogether-cgal_round-tool-tests
+    # The fillet tests are not created at all without Manifold; see the
+    # --enable=fillet block above.
   )
 endif()
 
