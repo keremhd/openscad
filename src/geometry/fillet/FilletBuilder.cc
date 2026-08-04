@@ -1532,24 +1532,40 @@ std::vector<std::vector<SpineBulge>> chainBulges(const MergedMesh& m,
   const double nraw = static_cast<double>(run.size());
   const double nsta = static_cast<double>(chain.at.size());
 
+  const int nstaI = static_cast<int>(nsta);
+
+  // The station segment a chain parameter falls in, and where along it. A
+  // section that overran a seam vertex sits OUTSIDE its chain's own parameter
+  // range: negative at the front end, past the last station at the back. The
+  // segment such a section extrapolates is the chain's end segment, so on an
+  // open chain the index is clamped there and the fraction is left to run
+  // outside [0, 1]. Taken modulo instead, a negative index reads a station
+  // vector from before its first element, and one past the end wraps onto the
+  // chord from the last station back to the first.
+  auto segmentOf = [&](double q, double& f) {
+    int i = static_cast<int>(std::floor(q));
+    if (chain.closed) i -= static_cast<int>(std::floor(static_cast<double>(i) / nsta)) * nstaI;
+    else i = std::clamp(i, 0, std::max(0, nstaI - 2));
+    f = q - static_cast<double>(i);
+    return i;
+  };
+
   // Chain parameter -> crease parameter, and -> the point the sections are
   // lofted between, which is the chord of the two stations either side rather
   // than the crease itself.
   auto rawParam = [&](double q) {
-    const double k = std::floor(q);
-    const double f = q - k;
-    const int i = static_cast<int>(k);
-    const double a = chain.param(i % static_cast<int>(nsta));
-    double b = chain.param((i + 1) % static_cast<int>(nsta));
+    double f = 0.0;
+    const int i = segmentOf(q, f);
+    const double a = chain.param(i);
+    double b = chain.param((i + 1) % nstaI);
     if (b <= a) b += nraw;
     return a + f * (b - a);
   };
   auto stationPoint = [&](double q) {
-    const double k = std::floor(q);
-    const double f = q - k;
-    const int i = static_cast<int>(k);
-    const Vector3d& a = chain.point(m.pos, i % static_cast<int>(nsta));
-    const Vector3d& b = chain.point(m.pos, (i + 1) % static_cast<int>(nsta));
+    double f = 0.0;
+    const int i = segmentOf(q, f);
+    const Vector3d& a = chain.point(m.pos, i);
+    const Vector3d& b = chain.point(m.pos, (i + 1) % nstaI);
     return (a + f * (b - a)).eval();
   };
   // Crease parameter -> chain parameter: the inverse of the piecewise-linear map
