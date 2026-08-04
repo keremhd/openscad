@@ -3,9 +3,11 @@
 A description of where the work stands, not a plan. Written to be forked from: it says what is
 true, what is proven and by what evidence, and what is believed but unproven.
 
-Branch `kerem-fillet`, 19 commits ahead of `origin/kerem-fillet`. **Nothing is pushed.**
-Working tree clean. Suite **1709 assertions / 85 cases** on the pin, **2224 / 86** including the
-R3 ring test.
+Branch `kerem-fillet`. **Nothing is pushed.** Suite **2230 assertions / 88 cases**.
+
+The recorded pin of "1709 / 85" was stale for some time before it was noticed: the tree
+measured 2224 / 86 by stash on 2026-08-04, so the figure the gate was written against had not
+been true for a while. A pin nobody re-measures is a comment, not a check.
 
 **This file is amended in place. Do not start a new dated state or handoff document** — the
 dated chain grew 392 → 778 → 1421 lines and its cost is what retired it.
@@ -29,8 +31,17 @@ deleted:
 | seam overrun | the constant **0.10·r** |
 | `seamRoom` / retreat fallback | on (an earlier review's "delete three mechanisms" conclusion is recorded as wrong) |
 | size gate blind-crease branch (D21) | **on** (`asksBlindCreases == true`) |
-| `arrivesStraight` | **live** — see §4 |
+| `arrivesStraight` | **deleted 2026-08-04** — see §4 |
 | resample and gate diagnostics | deleted |
+
+**The crease threshold is a constant, `kDefaultCreaseThresholdDeg = 46.0`**
+(`FilletBuilder_internal.h`). No render variable and no mesh statistic is read; `min_angle`
+overrides it as before. `seamAngle()` and its clustering, `creaseThreshold()`, and
+`buildFilletTool`'s `thresholdOverride` parameter are all gone, as is the workaround that
+measured `fillet()`'s threshold once on the child and handed it to both passes — that was
+C++-only privilege a SCAD author could not express, and `fillet()` is required to be pure
+sugar over the four tool modules. `CurveDiscretizer::getMaxSeamAngle()` now has **no
+production caller**; only a test helper uses it.
 
 `SEAT` / `WALLFACE` never had a reader on this branch; D19 is parked at tag `d19-wall-recognition`.
 
@@ -94,7 +105,42 @@ a reviewer with its own probe, `grid100`=100 predicted in advance, `rib`=0).
 
 ---
 
-## 4. `arrivesStraight` — decided, on a weaker basis than the decision file first implied
+## 4. `arrivesStraight` — deleted 2026-08-04
+
+Record: `decisions/2026-08-04-arrives-straight-goes.md`, which supersedes `…-stays.md`.
+
+**Two things the earlier record got wrong, both found by instrumenting rather than reading.**
+
+First, there is no seated ball at a curved arrival. The predicate was documented as handing
+the vertex back to an older seated-ball construction; instrumented at `bcurve.scad`'s two
+curved-arrival vertices, `chainJunctions` finds **no junction at either**, and it is
+structural — the crease that leaves such a vertex unfilleted is one a brush cut, and the same
+brush withholds the corner through `noCorner`. So the vertex fell to the plain
+stop-a-hair-short branch, whose own comment already describes the outcome: both beads reach
+the same point of the sharp edge tangent to the wall they share, meet at no angle, and the
+boolean resolves that into a knife edge. **The fin was that knife edge**, and the predicate
+was choosing between the overrun and nothing.
+
+Second, the regression that justified keeping it does not reproduce. `box_step_fn24/48/96_r3`
+are byte-identical with and without the predicate, χ=2, genus 0, zero non-manifold. `box_step`
+is two cubes with no curved crease, so the predicate returns true at every end and cannot act
+at all. The recorded genus 0→−2, −1→−4, −5→−15 was read through the `$fa`=12 threshold
+artefact: misclassified tessellation seams manufactured curved arrivals the model does not
+have. **Fixing the classifier dissolved the evidence, and the decision fell with it.**
+
+`bcurve.scad` at `$fn`=64: χ 5→2, edges on >2 faces 5→0, genus −1.5→0. Swept `$fn` 8→80 in
+steps of 2, **16 of 37 tessellations invalid before, 2 after**.
+
+**Measured and rejected:** running the overrun along the arc through the last three spine
+points rather than along the chord. It removes the stated first-order departure from the wall
+and measures *worse* — 19 of 37 invalid, with tunnels at `$fn` 58/64/66. Past the seam vertex
+the arc's continuation is buried inside the solid the *other* bead sits on, so following it
+carries the overrun away from the bead it must overlap. The chord's outward drift is what
+carries it there; the apparent defect was doing the work. Building the corner ball was not
+tried and should not be — an unfilleted crease leaves these vertices, which is exactly when a
+ball is wrong.
+
+## 4a. The superseded record, kept because both framings were believed
 
 Full record: `decisions/2026-08-04-arrives-straight-stays.md`,
 `measurements/2026-08-04-arrives-straight.md`, `measurements/2026-08-04-arrives-straight-renders.md`.
@@ -132,17 +178,25 @@ building, so a comparison against it has no value.
 
 | defect | state |
 |---|---|
-| **seated-bead fallback at a curved arrival** | **new, found this session.** Produces a non-manifold fin, odd χ. Not tracked by D22/D23/D24. |
-| D22 — crease threshold cannot see `$fs` | diagnosed, unfixed. Root cause `src/core/CurveDiscretizer.h:52`. **Reclassified 2026-08-04: it produces invalid solids, not burrs.** `tee`, `tee_oblique`, `tee_small` all come back with odd Euler characteristic and non-manifold edges at stock defaults, and valid at an explicit `$fn`. See `fillet-bench/README.md`. |
-| `cross` yields no mesh at stock defaults | **new, found 2026-08-04 by the bench.** Undiagnosed. Tile `S1-T09`; at `$fn`=19 the model is invalid with two components. Selects 374 convex edges of 757 at an 18° threshold, then refuses 136 of 298. |
+| seated-bead fallback at a curved arrival | **closed 2026-08-04.** See §4. |
+| D22 — crease threshold reads render settings | **closed 2026-08-04** by replacing the derivation with the constant 46°. |
+| `cross` yields no mesh at stock defaults | **closed 2026-08-04.** Not an empty mesh — a 17.5 GB OOM SIGKILL before the exporter ran. D22's tail, proven by a cliff at exactly 360/19, the model's own facet angle: `min_angle` 19 and above completes in 0.2 s and is valid, 18.9 and below is killed. |
+| **unguarded `Decompose()` on the finished solid** | **open, new 2026-08-04.** `FilletBuilder.cc:3400`. Materialises a full mesh per component, so any high component count turns an invalid-mesh bug into a machine-killer — `sample(1)` put 1572 of 1572 main-thread samples there. The `unionCells` comment at `:1421` already names the hazard ("cost 112 s and 17 GB on a plate of a hundred bosses"); the final call is that path, unguarded. Fixing the threshold stopped `cross` reaching it; the path is still unsafe. |
+| **`rib_into_boss` invalid at `$fn`=14 and 32** | **open, new 2026-08-04.** χ=4/3 non-manifold and χ=3/2 non-manifold, weld 1e-6. Same corner as the fin, smaller fault, on the bead surface where the two beads cross. |
 | D23 — size gate drops creases on impossible misses | diagnosed, unfixed. The "equal radius" framing is recorded as wrong. |
-| D24 — bead truncated and left open at a refused neighbour | diagnosed, unfixed. All-planar repro. |
+| D24 — bead truncated and left open at a refused neighbour | diagnosed, unfixed. All-planar repro. **But the bench reads `bnd=0` on all 35 tiles**, including tiles where the size gate refuses four chains, so it may be masked rather than live. Under investigation. |
 | D19 — subtractive scalloped ledge | parked at tag `d19-wall-recognition` (`fe8c8d9d1`). |
 
-**The corpus is blind to the family D22–D24 belong to**: all 225 models write an explicit `$fn`, and
-no pass has looked at a junction render. This session demonstrated the cost — the corpus called the
-`arrivesStraight` branch clean, and one rendered junction found a fin with odd Euler characteristic
-sitting inside it.
+**The corpus is blind to the family these belong to**: all 225 models write an explicit `$fn`, and
+no pass has looked at a junction render. This session demonstrated the cost twice — the corpus
+called the `arrivesStraight` branch clean and one rendered junction found a fin with odd Euler
+characteristic inside it; and `box_step`'s recorded genus regressions turned out to be artefacts
+of the same blind spot.
+
+**The bench has the same blind spot one axis over.** `expect.txt` carries one `$fn` per model,
+so a fault that appears at some tessellations and not others is invisible to it — which is
+exactly how `rib_into_boss` at `$fn`=14 and 32 survives a green bench. A `$fn` axis is the
+single highest-value addition to the instrument.
 
 ---
 
@@ -189,6 +243,13 @@ Lifted from `archive/pr-review.md` when it was archived. R3 and R4 are closed; R
 were re-verified against the tree as still present on 2026-08-04.
 
 **Blocking:**
+
+**None of these are implemented yet.** Commit `39557c022`, "Ship the fillet modules behind an
+experimental flag, and drop them without Manifold", touched only `ACCEPTANCE.md` and
+`STATE.md` — it wrote the criterion, not the code. `Feature::ExperimentalFillet` does not
+exist in `src/Feature.h` or `src/Feature.cc`, and `register_builtin_fillet` still registers
+all five modules unconditionally. A commit message in the imperative reads as done; check the
+diffstat.
 
 - **R1** — `buildFilletTool` echoes a mesh-statistics line unconditionally
   (`FilletBuilder.cc:3498`), once per tool node and twice per `fillet()`. No other OpenSCAD
