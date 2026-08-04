@@ -1,0 +1,9 @@
+// A through hole in a plate: two convex rims on a curved wall, rounded.
+FNSET = 0; $fn = FNSET;
+module part() {
+    difference() {
+        cube([40, 40, 10], center = true);
+        cylinder(d = 14, h = 30, center = true);
+    }
+}
+difference() { part(); round_tool(r = 1.5) part(); }

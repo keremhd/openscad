@@ -1,0 +1,32 @@
+# model                fn      notes
+#
+# fn is the fragment count the model actually achieves at stock defaults, from
+#   fragments = ceil(max(min(360/$fa, 2*pi*r/$fs), 5))
+# with $fa = 12 and $fs = 2, taken at the model's dominant radius. A2 check 1
+# renders the model bare and again with $fn forced to this number: the same
+# solid must come back, with the same warnings.
+#
+# fn = "-" means the model carries no curvature, so A2 is vacuous for it and
+# only A1 and A3 apply.
+#
+tee                     16
+tee_oblique             16
+tee_small               10      $fs binds hardest here
+tee_large               30      above ~19 mm dia, $fa takes over
+cross                   19
+boss_plate              26
+two_bosses              26
+pipe_into_face          19
+dome                    30      sphere d=24
+hole_plate              22
+bevel_boss              29
+cyl_control             30      CONTROL, expect clean
+lbracket                -
+box_step                -
+rib                     -
+thin_slab               -
+pocket                  -
+chamfer_box             -
+brush_one_edge          -
+cube_control            -       CONTROL, expect clean
+mixed_fn                skip    documentation case; needs min_angle by design
