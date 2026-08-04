@@ -15,10 +15,20 @@
 # WHY THIS EXISTS. expect.txt carries one $fn and one radius per model, so a
 # fault that appears at some tessellations or some sizes and not others is
 # invisible to the bench. Two open defects are exactly that shape:
-# rib_into_boss is invalid at $fn 14 and 32 and valid at 26, and
-# refused_neighbour is non-manifold at r 0.2/0.8/0.9/1.0 and valid at 0.5.
-# --selftest asserts both, plus a facet-rotation invariant, before any sweep is
-# worth reading.
+# rib_into_boss is invalid at several $fn and valid at others, and
+# refused_neighbour is non-manifold at r 0.2/0.8/0.9/0.95/1.0/1.05 and valid at
+# 0.3, 0.5 and 1.2. --selftest asserts both, a facet-rotation invariant, and the
+# flaky/deterministic control pair, before any sweep here is worth reading.
+#
+# IT READS EXACT ASCII STL, not OFF. export_off.cc streams at the default six
+# significant figures and has been caught merging two vertices 5.7e-7 mm apart.
+# The OFF is exported and read anyway so the loss is visible in the `agree`
+# column rather than silent. Measured, it changes no verdict -- but that is a
+# finding, not an assumption, and it is re-measured on every row.
+#
+# PIN THE BINARY. It was replaced under this instrument four times in one
+# session: cp -Rp the build aside and point BIN at the copy. Every row records
+# the md5 of the binary that produced it.
 #
 # THE SHAPE OF THE SWEEP is a cross, not a grid: the $fn axis is walked at the
 # model's own radius and the radius axis at stock defaults. The full product is
@@ -73,6 +83,7 @@ done
 print "binary: $BIN"
 print "        built $(stat -f '%Sm' "$BIN")"
 print "flags:  $FLAGS --backend=manifold"
+print "reader: exact ASCII STL, OFF read alongside and compared"
 print "weld:   $TOL"
 print "runs:   $REPEAT per cell"
 stale=(${(f)"$(find ../src \( -name '*.cc' -o -name '*.h' \) -newer "$BIN" 2>/dev/null)"})
@@ -84,16 +95,18 @@ else
 fi
 print ""
 
-# Trap 1 again, per row rather than per run: the binary has been replaced under a
-# running sweep in this effort. Every row carries the mtime of the binary that
-# produced it, so a results file that mixes two builds says so instead of
-# reading as one coherent table.
-BINSTAMP=$(stat -f '%m' "$BIN")
+# Trap 1 again, per row rather than per run: the binary was replaced under this
+# instrument FOUR times in one session by other worktrees. Every row carries the
+# md5 of the binary that produced it -- md5 rather than mtime, because a rebuild
+# of identical bytes is the same instrument and a copy is not a different one.
+# A results file that mixes two builds now says so instead of reading as one
+# coherent table. Pin a build by copying it aside and setting BIN to the copy.
+BINSTAMP=$(md5 -q "$BIN" | cut -c1-8)
 
 mkdir -p ${OUT:h} $WORK
 (( FRESH )) && rm -f $OUT
 if [[ ! -f $OUT ]]; then
-  print "# model\tfn\tr\tvalid\tnonman\tchi\tgenus\tcomp\tv\te\tf\twarn\ttol\truns\tdistinct\tsecs\tbin" > $OUT
+  print "# model\tfn\tr\tvalid\tnonman\tchi\tgenus\tcomp\tv\te\tf\twarn\ttol\truns\tdistinct\tagree\tsecs\tbin" > $OUT
 fi
 
 # --- one render + one reading ------------------------------------------------
@@ -103,17 +116,20 @@ run_one() {
   local model=$1 fn=$2 r=$3 extra=${4:-}
   local tag=${model}_fn${fn}_r${r}${extra:+_$extra}
   tag=${tag//[^A-Za-z0-9_.-]/_}
-  local off=$WORK/$tag.off log=$WORK/$tag.log
+  local off=$WORK/$tag.off stl=$WORK/$tag.stl log=$WORK/$tag.log
   local args=()
   [[ $fn == def ]] || args+=(-D FNSET=$fn)
   [[ $r  == def ]] || args+=(-D R=$r)
   [[ -n $extra ]]  && args+=(-D $extra)
 
-  rm -f $off
+  rm -f $off $stl
   local t0=$SECONDS
+  # ONE render, BOTH formats. OpenSCAD accepts repeated -o, so the OFF and the
+  # STL are the same solid rather than two renders of a model that may not
+  # render the same twice -- which matters here, because rib_into_boss does not.
   # No timeout(1) on this machine (instrument 8), so cap it by hand: a render
   # that will not finish is a row, not a hung batch.
-  ${=BIN} $=FLAGS --backend=manifold --render $args -o $off models/$model.scad > $log 2>&1 &
+  ${=BIN} $=FLAGS --backend=manifold --render $args -o $off -o $stl models/$model.scad > $log 2>&1 &
   local pid=$!
   local waited=0
   while kill -0 $pid 2>/dev/null; do
@@ -128,14 +144,28 @@ run_one() {
   # exports a plausible mesh. An export succeeding proves nothing; read the log.
   REPLY_WARN=$(grep -c "WARNING:" $log 2>/dev/null); REPLY_WARN=${REPLY_WARN:-0}
 
-  if [[ ! -s $off ]]; then
+  if [[ ! -s $stl ]]; then
     REPLY_VALID=NOOUT; REPLY_NONMAN=-; REPLY_CHI=-; REPLY_GENUS=-
-    REPLY_COMP=-; REPLY_V=-; REPLY_E=-; REPLY_F=-
+    REPLY_COMP=-; REPLY_V=-; REPLY_E=-; REPLY_F=-; REPLY_AGREE=-
     (( waited >= CAP )) && REPLY_VALID=TIMEOUT
     return
   fi
-  local line=$(python3 mesh.py --tol $TOL $off 2>&1)
-  REPLY_VALID=$(print -r -- "$line" | sed -n 's/.*off: \([A-Z-]*\).*/\1/p')
+  # THE STL IS THE READING. export_stl.cc prints through ToShortest, an exact
+  # double round trip; export_off.cc streams at the default six significant
+  # figures and has been shown to merge two vertices 5.7e-7 mm apart at a
+  # coordinate of 1.2. The OFF is still read, and any disagreement is recorded
+  # rather than left silent -- see the `agree` column and README.
+  if [[ -s $off ]]; then
+    python3 mesh.py --compare --tol $TOL $off $stl > $WORK/$tag.cmp 2>&1
+    if grep -q '^AGREE' $WORK/$tag.cmp; then REPLY_AGREE=yes; else REPLY_AGREE=NO; fi
+  else
+    REPLY_AGREE=-
+  fi
+  local line=$(python3 mesh.py --tol $TOL $stl 2>&1)
+  # awk, not sed: BSD sed has no \| alternation, and a pattern anchored on
+  # "off:" silently stopped matching the moment the reader moved to STL --
+  # which showed up as UNREADABLE on every row rather than as an error.
+  REPLY_VALID=$(print -r -- "$line" | awk '{print $2}')
   get() { print -r -- "$line" | sed -n "s/.* $1=\([^ ]*\).*/\1/p"; }
   REPLY_NONMAN=$(get nonman); REPLY_CHI=$(get chi); REPLY_GENUS=$(get genus)
   REPLY_COMP=$(get comp); REPLY_V=$(get v); REPLY_E=$(get e); REPLY_F=$(get f)
@@ -162,7 +192,7 @@ emit() {  # model fn r  -- render REPEAT times, print, checkpoint. Skips a done 
     return
   fi
   local -a seen
-  local worst="" wnonman wchi wgenus wcomp wv we wf wwarn
+  local worst="" wnonman wchi wgenus wcomp wv we wf wwarn wagree=yes
   local t0=$SECONDS i
   for i in $(seq 1 $REPEAT); do
     run_one $model $fn $r
@@ -174,14 +204,15 @@ emit() {  # model fn r  -- render REPEAT times, print, checkpoint. Skips a done 
       worst=$REPLY_VALID; wnonman=$REPLY_NONMAN; wchi=$REPLY_CHI; wgenus=$REPLY_GENUS
       wcomp=$REPLY_COMP; wv=$REPLY_V; we=$REPLY_E; wf=$REPLY_F; wwarn=$REPLY_WARN
     fi
+    [[ $REPLY_AGREE == NO ]] && wagree=NO
   done
   local distinct=${#seen}
   local secs=$((SECONDS - t0))
-  local row="$model	$fn	$r	$worst	$wnonman	$wchi	$wgenus	$wcomp	$wv	$we	$wf	$wwarn	$TOL	$REPEAT	$distinct	$secs	$BINSTAMP"
+  local row="$model	$fn	$r	$worst	$wnonman	$wchi	$wgenus	$wcomp	$wv	$we	$wf	$wwarn	$TOL	$REPEAT	$distinct	$wagree	$secs	$BINSTAMP"
   print -r -- "$row" >> $OUT
-  printf "  %-18s fn=%-4s r=%-5s %-9s nonman=%-3s chi=%-3s genus=%-4s warn=%-3s tol=%s runs=%s distinct=%s %ss%s\n" \
-    $model $fn $r $worst $wnonman $wchi $wgenus $wwarn $TOL $REPEAT $distinct $secs \
-    "$( (( distinct > 1 )) && print '  <-- RUNS DISAGREE' )"
+  printf "  %-18s fn=%-4s r=%-5s %-9s nonman=%-3s chi=%-3s genus=%-4s warn=%-3s tol=%s runs=%s distinct=%s off=%s %ss%s\n" \
+    $model $fn $r $worst $wnonman $wchi $wgenus $wwarn $TOL $REPEAT $distinct $wagree $secs \
+    "$( (( distinct > 1 )) && print '  <-- RUNS DISAGREE' )$( [[ $wagree == NO ]] && print '  <-- OFF/STL DISAGREE' )"
 }
 
 # --- the instrument's own acceptance test ------------------------------------
@@ -211,16 +242,73 @@ if (( SELFTEST )); then
     fi
   }
 
-  print "known answers -- rib_into_boss across \$fn"
-  check "rib_into_boss fn=14" INVALID rib_into_boss 14 def
-  check "rib_into_boss fn=26" VALID   rib_into_boss 26 def
+  # KNOWN ANSWERS, re-derived 2026-08-05 on a pinned binary and read from exact
+  # ASCII STL. They are NOT the numbers this file shipped with, and the change
+  # was not a correction of the instrument -- the code moved under it and the old
+  # expectations were kept past their evidence. Do not restore a number here
+  # because it is written down somewhere.
+  #
+  # Every one of these is a DISTRIBUTION, not a value: rib_into_boss returns two
+  # or three different meshes across eight identical runs at every $fn tested.
+  # Only $fn=14 flips validity (6 valid / 2 invalid in 8), so it is not asserted
+  # as either answer -- it is asserted as flaky, below.
+  print "known answers -- rib_into_boss across \$fn (nondeterministic model)"
+  check "rib_into_boss fn=11" INVALID rib_into_boss 11 def
+  check "rib_into_boss fn=25" INVALID rib_into_boss 25 def
   check "rib_into_boss fn=32" INVALID rib_into_boss 32 def
-  print "known answers -- refused_neighbour across r"
-  check "refused_neighbour r=0.2" INVALID refused_neighbour def 0.2
-  check "refused_neighbour r=0.5" VALID   refused_neighbour def 0.5
-  check "refused_neighbour r=0.8" INVALID refused_neighbour def 0.8
-  check "refused_neighbour r=0.9" INVALID refused_neighbour def 0.9
-  check "refused_neighbour r=1.0" INVALID refused_neighbour def 1.0
+  check "rib_into_boss fn=26" VALID   rib_into_boss 26 def
+  check "rib_into_boss fn=48" VALID   rib_into_boss 48 def
+  print "known answers -- refused_neighbour across r (deterministic model)"
+  check "refused_neighbour r=0.2"  INVALID refused_neighbour def 0.2
+  check "refused_neighbour r=0.8"  INVALID refused_neighbour def 0.8
+  check "refused_neighbour r=0.9"  INVALID refused_neighbour def 0.9
+  check "refused_neighbour r=0.95" INVALID refused_neighbour def 0.95
+  check "refused_neighbour r=1.0"  INVALID refused_neighbour def 1.0
+  check "refused_neighbour r=1.05" INVALID refused_neighbour def 1.05
+  check "refused_neighbour r=0.3"  VALID   refused_neighbour def 0.3
+  check "refused_neighbour r=0.5"  VALID   refused_neighbour def 0.5
+  check "refused_neighbour r=1.2"  VALID   refused_neighbour def 1.2
+
+  # The two models are a matched pair and the instrument must tell them apart.
+  # One flakes and the other does not, so a reader that smooths reruns together
+  # and a reader that invents differences both fail here.
+  print "the flaky/deterministic control pair"
+  spread() {  # model fn r -- how many distinct meshes in REPEAT runs
+    local -a sigs; local n sig
+    for n in $(seq 1 $REPEAT); do
+      run_one "$@"
+      sig="v=$REPLY_V e=$REPLY_E f=$REPLY_F"
+      [[ ${sigs[(Ie)$sig]} -eq 0 ]] && sigs+=($sig)
+    done
+    REPLY_SPREAD=${#sigs}
+  }
+  spread rib_into_boss 32 def
+  if (( REPLY_SPREAD > 1 )); then
+    print "  PASS  rib_into_boss fn=32 gave $REPLY_SPREAD distinct meshes in $REPEAT runs, as it should"
+  else
+    print "  FAIL  rib_into_boss fn=32 looks deterministic ($REPLY_SPREAD mesh in $REPEAT runs) -- it is not; something is caching, or the reader is blind"
+    (( fails++ ))
+  fi
+  spread refused_neighbour def 0.9
+  if (( REPLY_SPREAD == 1 )); then
+    print "  PASS  refused_neighbour r=0.9 was deterministic across $REPEAT runs, as it should be"
+  else
+    print "  FAIL  refused_neighbour r=0.9 gave $REPLY_SPREAD distinct meshes -- it has been 3/3 and 6/6 identical; the reader is inventing differences"
+    (( fails++ ))
+  fi
+
+  # The exporter check, run on a case where the OFF is known to lose a real
+  # distinction: two vertices 5.7e-7 mm apart print identically at six
+  # significant figures. The verdict is unchanged, and that is the point -- the
+  # loss is real and its consequence for A1, measured, is nil.
+  print "the OFF exporter loses precision, and it must be visible when it does"
+  run_one refused_neighbour def 0.8
+  if [[ $REPLY_AGREE == NO ]]; then
+    print "  PASS  refused_neighbour r=0.8: OFF and STL disagree on counts and the harness says so"
+  else
+    print "  FAIL  refused_neighbour r=0.8: OFF/STL disagreement not detected (agree=$REPLY_AGREE) -- the comparison is not wired up"
+    (( fails++ ))
+  fi
 
   # The axes must actually arrive. If -D were being dropped, every check above
   # would still pass on whichever answer the default happens to give, and the
@@ -301,5 +389,7 @@ print "invalid rows:"
 awk -F'\t' 'NR>1 && $4 != "VALID" {print "  " $1 "  fn=" $2 "  r=" $3 "  " $4 "  nonman=" $5 "  chi=" $6 "  warn=" $12 "  tol=" $13 "  runs=" $14 "  distinct=" $15}' $OUT
 print "binary mtimes present in $OUT (more than one means the table mixes builds):"
 awk -F'\t' 'NR>1 {print $17}' $OUT | sort -u | sed 's/^/  /'
+print "cells where the OFF export changed the answer (the exporter, not the geometry):"
+awk -F'\t' 'NR>1 && $16 == "NO" {print "  " $1 "  fn=" $2 "  r=" $3}' $OUT
 print "cells whose runs disagreed with each other:"
 awk -F'\t' 'NR>1 && $15 > 1 {print "  " $1 "  fn=" $2 "  r=" $3 "  distinct=" $15 " of " $14 " runs"}' $OUT
