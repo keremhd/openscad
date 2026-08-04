@@ -2254,25 +2254,24 @@ std::vector<int> dropUncoveredCorners(const MergedMesh& m, std::vector<Chain>& c
 // a seam at every facet boundary.
 std::set<EdgeKey> filletedEdges(const std::vector<Chain>& chains)
 {
-  // A station is a mesh vertex only when it was put there by the crease walk. A
-  // chain whose stations have been placed along the spine instead — at equal arc
-  // length, say — carries -1 wherever a station falls between two mesh vertices,
-  // and the pair either side of one is not a mesh edge at all. Reading such a
-  // pair as an EdgeKey would index the mesh at -1; skipping it is the only
-  // honest answer this function can give from `verts` alone. Where a chain can
-  // carry interpolated stations, what this wants is the mesh run underneath it,
-  // and the caller has to hand that over rather than the station list.
-  // The mesh run underneath is exactly what `rawRun()` is, and every chain
-  // carries it, so ask that rather than skipping the pairs that cannot be read.
-  // Skipping is safe but not right: it drops the filleted edges either side of
-  // an interpolated station, and a crease read as unfilleted when it is in fact
-  // filleted makes a seam vertex out of one that is not.
+  // Of the crease, not of the stations. A chain's stations may have been placed
+  // along the spine rather than on its vertices, and the pair either side of such
+  // a station is not a mesh edge at all. `rawRun()` is the crease as the mesh has
+  // it and holds nothing else, so every pair of it is an edge and there is no
+  // pair to skip. Skipping would be worse than reading the wrong thing: it drops
+  // the filleted edges either side of an interpolated station, and a crease read
+  // as unfilleted when it is in fact filleted makes a seam vertex out of one that
+  // is not.
   std::set<EdgeKey> out;
   for (const Chain& c : chains) {
     const std::vector<int>& run = c.rawRun();
-    for (size_t i = 0; i + 1 < run.size(); ++i) {
-      const int a = run[i], b = run[i + 1];
-      if (a < 0 || b < 0) continue;
+    const size_t n = run.size();
+    // A ring's closing edge is one of its edges like any other. Leaving it out
+    // said that a fully filleted ring left one crease sharp at its own first
+    // vertex, which is the opposite of what the set is for.
+    const size_t last = c.closed && n > 2 ? n : (n < 1 ? 0 : n - 1);
+    for (size_t i = 0; i < last; ++i) {
+      const int a = run[i], b = run[(i + 1) % n];
       out.insert(EdgeKey{std::min(a, b), std::max(a, b)});
     }
   }
@@ -2455,13 +2454,16 @@ std::vector<Junction> chainJunctions(const MergedMesh& m,
   // cell fills the valley, and it is solved against every wall at the vertex
   // either way, so the wall of the crease that is missing is already one of the
   // ball's constraints.
-  std::map<int, std::vector<int>> ends;  // vertex -> the next station along each end
+  // How many chain ends land on each vertex, and nothing more. Recording the
+  // station beside each end is what this used to do and it must not: a chain
+  // whose stations were placed along the spine carries no mesh vertex there, so
+  // the entry would be -1 and the next reader of it would index the mesh at -1.
+  // Where the neighbouring mesh vertex is genuinely wanted it is rawRun()[1].
+  std::map<int, int> ends;  // vertex -> how many chain ends land on it
   for (const Chain& chain : chains) {
     if (chain.closed || chain.verts.size() < 2) continue;
-    if (endAnchored(m, chain, /*front=*/true, r))
-      ends[chain.verts.front()].push_back(chain.verts[1]);
-    if (endAnchored(m, chain, /*front=*/false, r))
-      ends[chain.verts.back()].push_back(chain.verts[chain.verts.size() - 2]);
+    if (endAnchored(m, chain, /*front=*/true, r)) ++ends[chain.verts.front()];
+    if (endAnchored(m, chain, /*front=*/false, r)) ++ends[chain.verts.back()];
   }
 
   // Every triangle that touches a vertex, so a junction can be asked about the
@@ -2473,8 +2475,8 @@ std::vector<Junction> chainJunctions(const MergedMesh& m,
   const double dir = concave ? 1.0 : -1.0;
 
   std::vector<Junction> out;
-  for (const auto& [v, nbrs] : ends) {
-    if (nbrs.size() < 2 || noCorner.count(v) != 0) continue;
+  for (const auto& [v, arriving] : ends) {
+    if (arriving < 2 || noCorner.count(v) != 0) continue;
 
     Junction j;
     j.vert = v;

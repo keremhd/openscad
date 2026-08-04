@@ -167,10 +167,21 @@ using SpineInterval = std::pair<double, double>;
 // replaced in that case, so an unresampled chain is built from bit-identical
 // inputs.
 //
-// The two ends are always exact mesh vertices, resampled or not. Chains are cut
-// at every vertex of crease-degree other than two, so a junction is a chain end
-// by construction, and the whole of the junction, brush-coverage and corner-cell
-// bookkeeping identifies ends by their mesh vertex.
+// An OPEN chain's two ends are exact mesh vertices, resampled or not. Chains are
+// cut at every vertex of crease-degree other than two, so a junction is a chain
+// end by construction, and the whole of the junction, brush-coverage and
+// corner-cell bookkeeping identifies ends by their mesh vertex.
+//
+// A CLOSED chain has one pinned station and it is `verts[0]`. A ring has no last
+// station to pin — station count-1 is placed by arc length like any other — so
+// `verts.back()` on a resampled ring IS -1, and `verts.front()` is the only index
+// of it that can be read as a mesh vertex. Every consumer of `verts.back()` in
+// this builder therefore skips closed chains first, and must go on doing so.
+//
+// `verts.size()` equals `rawRun().size()` today, because the resampler emits as
+// many stations as the crease has segments. Nothing enforces that. If the station
+// count ever stops matching, every `verts.size()` here silently changes meaning,
+// so read `rawCount()` when the question is about the crease.
 struct Chain
 {
   std::vector<int> verts;
