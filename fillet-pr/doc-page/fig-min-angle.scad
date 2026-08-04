@@ -1,4 +1,4 @@
-// Figure: min_angle= and the derived threshold.
+// Figure: min_angle= against the default 46-degree threshold.
 //
 // An edge counts as a feature when it turns by more than 1.5x the caller's own
 // facet angle. At $fn = 24 that is 22.5 degrees, so a cylinder tessellated at
@@ -11,7 +11,7 @@ $fn = 24;
 
 module post() cylinder(r = 10, h = 14);
 
-// Left: the derived threshold. Only the two rims are rounded.
+// Left: the default threshold. Only the two rims are rounded.
 difference() {
     post();
     round_tool(r = 2) post();

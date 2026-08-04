@@ -4,7 +4,9 @@
 [`../README.md`](../README.md).*
 
 Adds five modules that blend the edges of a solid without being told where those
-edges are:
+edges are. All five register behind `Feature::ExperimentalFillet`, so they need
+`--enable=fillet`, and they are not registered at all in a build without
+Manifold:
 
 ```openscad
 fillet(r = 3) my_model();
@@ -139,11 +141,13 @@ goes through the same code as an imported mesh.
 give every two-face edge a dihedral angle and a sign. An edge is a **feature**
 when it turns by more than a threshold, and tessellation otherwise.
 
-The threshold is derived rather than fixed: **1.5 × the caller's own facet
-angle**. An edge is a feature of the shape when it turns more sharply than the
-tessellation's own facets do, which is what lets a cylinder keep smooth sides at
-any `$fn` while a real 90° corner is found on any model. `min_angle=` overrides
-it.
+The threshold is a constant, **46°**, and reads neither the render variables nor
+the mesh. A solid does not carry the settings that made it, so the same shape has
+to classify the same way whether it was built at `$fn = 48`, imported from an STL
+or resized — and only a constant can promise that. 46 sits just above 45, the
+facet angle of `cylinder($fn = 8)`, so an octagon's wall seams stay seams.
+`min_angle=` replaces it, and is the documented answer for a model with a genuine
+crease shallower than 46°.
 
 ![Classification overlay](fig-classify.png)
 

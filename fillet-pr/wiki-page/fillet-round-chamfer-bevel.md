@@ -5,7 +5,9 @@ merge; the text is meant to be pasted into the wiki, and the images uploaded
 alongside it.*
 
 These operators take a solid, find its edges themselves, and round or cut them
-back.
+back. **They are experimental**: run OpenSCAD with `--enable=fillet`, or tick
+`fillet` under Preferences → Features, or a call to any of them is an unknown
+module.
 
 ```openscad
 fillet(r = 3) my_model();
@@ -84,10 +86,12 @@ a convex edge is an outside corner. `fillet_tool` and `chamfer_tool` follow the
 concave ones, `round_tool` and `bevel_tool` the convex ones.
 
 **How sharply it turns.** An edge counts as a feature of the shape when it turns
-by more than 1.5× the facet angle *you* are working at — 22.5° at `$fn = 24`.
-Below that it is read as tessellation and left alone, which is what keeps a
-cylinder's sides smooth while its rims get rounded. `min_angle = <degrees>`
-overrides this when it picks the wrong edges.
+by more than **46°**. Below that it is read as tessellation and left alone, which
+is what keeps a cylinder's sides smooth while its rims get rounded. The number is
+a constant — not derived from `$fn`, `$fa` or `$fs`, and not measured off the
+mesh — so a solid classifies the same however it was built. `min_angle =
+<degrees>` replaces it, and is what you reach for when your model has a real
+crease shallower than 46°.
 
 ## Picking particular edges: brushes
 
