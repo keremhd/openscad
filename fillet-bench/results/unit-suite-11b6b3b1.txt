@@ -1,0 +1,31 @@
+# The unit suite on the merged tree, and why two agents disagreed about it
+#
+# All four builds below are Release + Manifold, same machine, same Catch2, same
+# test sources -- src/geometry/fillet/{FilletBuilder,FilletCompare}_test.cc are
+# byte-identical across every commit named here. Only FilletBuilder.cc moves.
+#
+#   commit      what it is                                 unit-test binary md5  result
+#   c2acefa91   base of the ASAN worktree                   8604440a7bbfe52d..    88 cases: 85 passed 3 FAILED / 2230 assertions: 2226 passed 4 failed
+#   0c0727583   drop volumeless parts on the mesh           8604440a7bbfe52d..    88 cases: 85 passed 3 FAILED / 2230 assertions: 2226 passed 4 failed
+#   9706c26ce   = c2acefa91 + 0c0727583 + 4ce78926e         e991028864a7931f..    88 cases: ALL PASSED, 2230 assertions   (3 runs, 3/3)
+#   cab639ffd   + the chainBulges seam-vertex fix (HEAD)    bf19fc1a21100295..    88 cases: ALL PASSED, 2230 assertions   (6 runs, 6/6)
+#
+# THE THREE FAILURES ARE REAL, AND THEY ARE FIXED BY 4ce78926e
+# ("Cap the union of surviving parts in dropVolumelessParts"), not by the
+# out-of-bounds fix. They are:
+#   FilletBuilder_test.cc:2585  junction: a corner two creases still reach is closed at every opening angle
+#                               (selfTouching(tool) == 0 -> 1 == 0)
+#   FilletCompare_test.cc:485   in "a corner sheds nothing of what it stands past its walls"       (case at :451)
+#   FilletCompare_test.cc:686   in "round_tool: asymmetric junctions of valence four, five and six" (case at :642)
+#
+# So both reports were right about the tree each measured, and neither was right
+# about the branch: one measured at or below 0c0727583, the other at or above
+# 4ce78926e. The identical 2230/88 totals in both reports are not evidence that
+# the same thing was measured -- the assertion count does not move across the
+# fix, only four of its outcomes do. This is NOT the Catch2 comma-splitting trap
+# (instrument 9): all three names run and pass individually on HEAD when their
+# commas are escaped, and the failures reproduce 3/3 on the older binary.
+#
+# There are therefore NO known pre-existing unit failures on kerem-fillet.
+# Nothing here is nondeterministic: Catch2 reseeds its RNG every run (six
+# different seeds on HEAD, three on each older binary) and the verdict never moved.
