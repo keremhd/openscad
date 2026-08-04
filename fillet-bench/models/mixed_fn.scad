@@ -5,7 +5,8 @@
 // the mesh would have to pick one of the two scales here and would fail on the
 // other. What min_angle is for is now shown by shallow_crease.
 FNSET = 0;
-fillet(r = 1) union() {
+R = 1;
+fillet(r = R) union() {
     cylinder(d = 12, h = 20, $fn = 48);
     translate([0, 0, 10]) rotate([0, 90, 0]) cylinder(d = 12, h = 12, $fn = 10);
 }

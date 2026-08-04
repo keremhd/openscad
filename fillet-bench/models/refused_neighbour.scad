@@ -8,7 +8,8 @@
 // built bead therefore runs into a vertex a refused crease also leaves, which is
 // A3's case: the refusal must not leave that bead truncated and open.
 FNSET = 0; $fn = FNSET;
-fillet(r = 0.5) union() {
+R = 0.5;
+fillet(r = R) union() {
     cube(15, center = true);
     translate([0, 0, 10]) rotate([0, 80, 0]) translate([-4, -4, 0]) cube([8, 8, 10]);
 }

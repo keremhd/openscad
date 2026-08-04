@@ -1,7 +1,8 @@
 // A hemisphere seated on a plate: a curved wall meeting a flat one all the way
 // round, with no straight arrival anywhere on the crease.
 FNSET = 0; $fn = FNSET;
-fillet(r = 1.5) union() {
+R = 1.5;
+fillet(r = R) union() {
     cube([40, 40, 6], center = true);
     translate([0, 0, 3]) difference() {
         sphere(d = 24);

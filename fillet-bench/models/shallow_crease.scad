@@ -15,6 +15,7 @@
 // contact-sheet tile, and the plate is 20 thick so that r = 4 fits between its
 // own top and bottom creases rather than being refused for crowding.
 FNSET = 0; $fn = FNSET;
+R = 4;
 
 // tan(15) * 60 = 16.077: the arm rise that puts the fold at 30 degrees.
 CHEVRON = [[0, 0], [60, 16.077], [120, 0], [120, 20], [60, 36.077], [0, 20]];
@@ -23,5 +24,5 @@ module plate() {
     rotate([90, 0, 0]) linear_extrude(height = 40) polygon(CHEVRON);
 }
 
-fillet(r = 4) plate();
-translate([0, 55, 0]) fillet(r = 4, min_angle = 25) plate();
+fillet(r = R) plate();
+translate([0, 55, 0]) fillet(r = R, min_angle = 25) plate();

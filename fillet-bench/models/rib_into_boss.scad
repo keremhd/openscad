@@ -4,6 +4,7 @@
 // tessellated base ARC -- a curved arrival. No other bench model reaches one:
 // every seam vertex elsewhere is a corner of a planar crease.
 FNSET = 0; $fn = FNSET;
+R = 2;
 module part() {
     union() {
         translate([-30, -30, 0]) cube([60, 60, 5]);
@@ -16,5 +17,5 @@ module part() {
 module brush() translate([-200, -200, 4]) cube([400, 400, 1.5]);
 union() {
     part();
-    fillet_tool(r = 2) { part(); brush(); }
+    fillet_tool(r = R) { part(); brush(); }
 }
