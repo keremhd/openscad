@@ -172,20 +172,33 @@ results file that mixes two builds says so instead of reading as one table. That
 column is not hypothetical: the binary was replaced under this instrument once
 already.
 
-### It is rendered more than once per cell, and that is a measured requirement
+### It is rendered more than once per cell — once because it had to be, now because it is the check
 
 `rib_into_boss` at `$fn`=14 returned a **valid** mesh on 2 of 40 identical
 invocations of one unchanging binary, and an invalid one on the other 38. The
-good runs are not vertex-order noise, which the record already knew about — they
-are a different mesh, `v=226 e=672 f=448` against the usual `v=226 e=672 f=450`,
+good runs were not vertex-order noise, which the record already knew about — they
+were a different mesh, `v=226 e=672 f=448` against the usual `v=226 e=672 f=450`,
 two faces fewer and no non-manifold edge. A second flavour of the same fault
-appeared under the earlier binary as `v=228 f=452`.
+appeared under an earlier binary as `v=228 f=452`. A single render per cell would
+therefore report a real fault as clean roughly once every thirty cells.
 
-So a single render per cell would report a real fault as clean roughly once every
-thirty cells. `sweep.sh` renders each cell `--repeat` times (default 3),
-aggregates to the **worst** outcome — a solid that is invalid on any run is not a
-valid solid — and records `distinct`, the number of different meshes that came
-back. `distinct > 1` is printed as `RUNS DISAGREE` and is itself a finding.
+**That is fixed.** The cause was an out-of-bounds read in `chainBulges()`: a
+section overrunning a seam vertex takes a negative chain parameter, and
+`static_cast<int>(floor(q)) % nsta` stays negative, so the builder read the 24
+bytes *before* a station buffer and used whatever the allocator had left there.
+Every measurement on this branch taken on a model with a seam vertex was reading
+that. Measured after the fix on binary `md5 11b6b3b1`, exact ASCII STL, weld
+1e-6: **60 identical meshes in 60 runs at `$fn`=14, 40 in 40 at `R`=1.0** (no
+SIGBUS, all rc=0), and one mesh in 8 runs at each of `$fn` 8, 11, 14, 19, 25, 26,
+32 and 48 — 164 renders, one mesh per cell, in `results/determinism-11b6b3b1.txt`
+and `results/rib-fn-axis-11b6b3b1.tsv`.
+
+The repeat is **kept anyway**, and `--selftest` now asserts the opposite of what
+it used to: `distinct > 1` on either control model means the read is back. So
+`sweep.sh` still renders each cell `--repeat` times (default 3), aggregates to
+the **worst** outcome — a solid that is invalid on any run is not a valid solid —
+and records `distinct`, the number of different meshes that came back.
+`distinct > 1` is printed as `RUNS DISAGREE` and is a finding, not noise.
 
 ### What it must reproduce before it is believed
 
@@ -195,11 +208,11 @@ known answers, the plumbing, two invariants and the exporter comparison:
 - `rib_into_boss` invalid at `$fn` 11, 25 and 32; valid at 26 and 48.
 - `refused_neighbour` invalid at r 0.2, 0.8, 0.9, 0.95, 1.0 and 1.05; valid at
   0.3, 0.5 and 1.2.
-- **The flaky/deterministic control pair.** `rib_into_boss` at `$fn`=32 must
-  return more than one distinct mesh across repeated runs and
-  `refused_neighbour` at r=0.9 must return exactly one. A reader that smooths
-  reruns together fails the first; a reader that invents differences fails the
-  second.
+- **The determinism pair.** `rib_into_boss` at `$fn`=32 must return exactly one
+  mesh across 16 runs and `refused_neighbour` at r=0.9 exactly one across three.
+  Until 2026-08-05 this check demanded the *opposite* of the first model, and
+  correctly: it flaked. It no longer does, and a second mesh appearing here now
+  means the seam-vertex read is back — in which case nothing below is readable.
 - **The OFF/STL comparison must fire** on `refused_neighbour` at r=0.8, where
   the OFF is known to lose a real 5.7e-7 mm distinction.
 - `-D FNSET` and `-D R` must actually reach the model — otherwise every check
