@@ -277,9 +277,11 @@ invalid.
 
 ### What the two axes found
 
-353 cells, one pinned binary (`md5 21cd49a8`, built 2026-08-05 00:18), exact
-ASCII STL, weld 1e-6, 3 renders per cell aggregated to the worst outcome.
-**17 cells are not valid.**
+353 cells, one pinned binary (`md5 11b6b3b1`, built 2026-08-05 01:08 at
+`cab639ffd`, with both the `dropVolumelessParts` cap and the `chainBulges`
+seam-vertex fix), exact ASCII STL, weld 1e-6, 3 renders per cell aggregated to
+the worst outcome. **16 cells are not valid**, and **no cell disagreed with
+itself** — `distinct` is 1 on all 353, against 14 cells at 2 before the fix.
 
 | model | fn | r | outcome | nonman | chi | warn |
 |---|---|---|---|---|---|---|
@@ -288,9 +290,8 @@ ASCII STL, weld 1e-6, 3 renders per cell aggregated to the worst outcome.
 | `two_bosses` | 8 | own | INVALID | 6 | 5 | 1 |
 | `dome` | 8 | own | INVALID | 4 | 4 | 0 |
 | `pipe_into_face` | 8 | own | INVALID | 2 | 3 | 1 |
-| `rib_into_boss` | 12 | own | **no output** | – | – | 0 |
 | `rib_into_boss` | 14 | own | INVALID | 3 | 4 | 0 |
-| `rib_into_boss` | 32 | own | INVALID | 2 | 3 | 0 |
+| `rib_into_boss` | 32 | own | INVALID | 4 | 4 | 0 |
 | `tee` | def | 0.9 | INVALID χ-odd | 0 | 3 | 0 |
 | `tee_oblique` | def | 0.2 | INVALID χ-odd | 0 | 3 | 1 |
 | `tee_oblique` | def | 0.3 | INVALID χ-odd | 0 | 3 | 1 |
@@ -301,7 +302,32 @@ ASCII STL, weld 1e-6, 3 renders per cell aggregated to the worst outcome.
 | `refused_neighbour` | def | 0.9 | INVALID | 1 | 2 | 2 |
 | `refused_neighbour` | def | 1.0 | INVALID | 1 | 2 | 2 |
 
-Four things in that table are new.
+### Which of these were the memory bug: one of them
+
+The same 353 cells were swept before the seam-vertex fix (`results/sweep-21cd49a8.tsv`)
+and after (`results/sweep-11b6b3b1.tsv`); the full diff is in
+`results/sweep-compare-21cd49a8-vs-11b6b3b1.txt`. **12 cells moved, and all 12
+are `rib_into_boss`** — the only bench model with a seam vertex, which is the
+only place the out-of-bounds read could fire.
+
+- **One verdict changed**: `rib_into_boss` at `$fn`=12 was *no output* and is now
+  VALID, `v=173 e=513 f=342`, χ=2, genus 0 — 20 identical runs, 0 warnings.
+- **Eleven cells kept their verdict and moved their mesh**, all `rib_into_boss`,
+  typically a handful of vertices (`v=226 e=672 f=448` → `v=222 e=660 f=440` at
+  the default radius). The pre-fix numbers were computed partly from whatever
+  the allocator had left in the 24 bytes before a station buffer.
+- **341 cells are identical in verdict *and* in every mesh count.** The read was
+  reachable only through a seam vertex, so the rest of the table was never
+  affected, and the pre-fix sweep's readings on those 341 stand.
+
+So of the seventeen cells the earlier sweep recorded as not valid, **exactly one
+was the memory bug**. The `$fn`=8 family, the four χ-odd cells, `cross` at r=0.3,
+`refused_neighbour` at four radii and `rib_into_boss` at `$fn` 14 and 32 all
+reproduce on the fixed binary and are real geometric defects. `rib_into_boss` at
+`$fn`=32 is *worse* than recorded once the garbage is gone: nonman 4 and χ=4,
+against nonman 2 and χ=3.
+
+Three things in the table are new.
 
 **`$fn`=8 breaks five models that are clean at every other tessellation** —
 `boss_plate`, `hole_plate`, `two_bosses`, `dome`, `pipe_into_face`. All five are
@@ -315,42 +341,51 @@ invalidity is the odd Euler characteristic alone. Three of the four carry a
 warning, so a reader who trusted the warning count would have caught them; `tee`
 at r=0.9 carries **no warning**, and is the case for keeping both instruments.
 
-**`rib_into_boss` at `$fn`=12 produces no output on some runs.** At r=1.0 the
-same model exits with rc=138 — SIGBUS — on about one run in six. A hard memory
-fault, and the most economical explanation for the nondeterminism below.
-
 **`cross` gains genus as its radius grows**: genus 0 at r ≤ 1.0, genus 2 at
 r=1.5, genus 4 at r=2.0, all reported VALID because a closed orientable surface
 of genus 4 is a valid solid. Whether a fillet is allowed to punch two extra
 handles through the model is a question for the operator's promise, not for A1,
 but nothing before this sweep would have shown it.
 
-### Every cell of `rib_into_boss` disagrees with itself
+### `rib_into_boss` no longer disagrees with itself
 
-On the pinned binary, at weld 1e-6, over eight identical runs per `$fn`:
+It used to, at every `$fn` tested: two distinct meshes in eight identical runs
+at 8, 11, 14, 19, 25, 26, 32 and 48, with `$fn`=14 flipping validity 6/2. That
+table is the pre-fix one and is kept in the git history; on binary `md5
+11b6b3b1`, at weld 1e-6, over eight identical runs per `$fn`
+(`results/rib-fn-axis-11b6b3b1.tsv`):
 
 | `$fn` | outcome | distinct meshes in 8 runs |
 |---|---|---|
-| 8 | valid 8/8 | 2 |
-| 11 | **invalid 8/8** | 2 |
-| 14 | **valid 6/8, invalid 2/8** | 2 |
-| 19 | valid 8/8 | 2 |
-| 25 | **invalid 8/8** | 2 |
-| 26 | valid 8/8 | 2 |
-| 32 | **invalid 8/8** | 2 |
-| 48 | valid 8/8 | 2 |
+| 8 | valid 8/8 | 1 |
+| 11 | **invalid 8/8** | 1 |
+| 14 | **invalid 8/8** | 1 |
+| 19 | valid 8/8 | 1 |
+| 25 | **invalid 8/8** | 1 |
+| 26 | valid 8/8 | 1 |
+| 32 | **invalid 8/8** | 1 |
+| 48 | valid 8/8 | 1 |
 
-Every `$fn` tested returns more than one mesh. Only `$fn`=14 flips *validity*,
-which is why the selftest asserts 14 as flaky rather than as either answer.
-`refused_neighbour` is the control and is fully deterministic — 3/3 and 6/6
-identical at every radius — so the instrument is required to show one model
-flaking and the other not, and does.
+`$fn`=14 is invalid, not flaky: 8/8 here and 60/60 in a dedicated run
+(`v=222 e=660 f=442`, nonman 3, χ=4, identical at weld 1e-4, 1e-6 and 1e-9, no
+warnings). `R`=1.0, which used to exit SIGBUS about one run in six, is 40/40
+identical, VALID, rc=0 throughout. `refused_neighbour` remains the deterministic
+control it always was, so the pair still separates a real difference from a
+reader inventing one — it now does it by agreeing rather than by disagreeing.
 
 ## Known gaps, stated rather than left silent
-- **The sweep is one binary deep.** All 353 rows are `md5 21cd49a8`. The binary
-  was replaced under this instrument four times in one session, so the table was
-  taken against a copy pinned aside; it says nothing about any other build, and
-  the `bin` column is there so that stays honest.
+- **The sweep is one binary deep.** All 353 rows of `results/sweep.tsv` are
+  `md5 11b6b3b1`; the pre-fix table in `results/sweep-21cd49a8.tsv` is all
+  `21cd49a8`. The binary was replaced under this instrument four times in one
+  session, so each table was taken against a copy pinned aside; neither says
+  anything about any other build, and the `bin` column is there so that stays
+  honest. `results/sweep.tsv` is deliberately the *current* table, because a
+  default re-run resumes into that file and would otherwise silently skip every
+  cell and report the old binary's answers as if they were this one's.
+- **The `cross` no-output case and the `$fn`=8 family were not re-derived
+  cell-by-cell**, only re-swept: they reproduce identically on the fixed binary,
+  which is what rules the memory bug out as their cause, but nothing here
+  explains them.
 - **`$fn` 11 and 25 are in the selftest but not the sweep axis.** They were
   found while re-deriving known answers and the default axis was left alone.
 - **No STL round trip yet** — A2 check 2. It needs a wrapper that exports a model
