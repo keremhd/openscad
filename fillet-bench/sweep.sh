@@ -273,40 +273,57 @@ if (( SELFTEST )); then
   # One flakes and the other does not, so a reader that smooths reruns together
   # and a reader that invents differences both fail here.
   print "the flaky/deterministic control pair"
-  spread() {  # model fn r -- how many distinct meshes in REPEAT runs
+  # Asserting "this model flakes" is a statistical claim and needs enough runs
+  # to be one. rib_into_boss at $fn=32 splits about 6/2, so three runs agree by
+  # chance roughly two times in five -- the first version of this check failed
+  # itself that way. It now stops the moment a second mesh appears, so the usual
+  # cost is two or three renders, and only declares the model deterministic
+  # after 16 runs have all agreed (about a 1 in 100 false alarm).
+  spread() {  # maxruns model fn r -- distinct meshes, early exit once >1
+    local maxn=$1; shift
     local -a sigs; local n sig
-    for n in $(seq 1 $REPEAT); do
+    for n in $(seq 1 $maxn); do
       run_one "$@"
       sig="v=$REPLY_V e=$REPLY_E f=$REPLY_F"
       [[ ${sigs[(Ie)$sig]} -eq 0 ]] && sigs+=($sig)
+      (( ${#sigs} > 1 )) && break
     done
-    REPLY_SPREAD=${#sigs}
+    REPLY_SPREAD=${#sigs}; REPLY_RUNS=$n
   }
-  spread rib_into_boss 32 def
+  spread 16 rib_into_boss 32 def
   if (( REPLY_SPREAD > 1 )); then
-    print "  PASS  rib_into_boss fn=32 gave $REPLY_SPREAD distinct meshes in $REPEAT runs, as it should"
+    print "  PASS  rib_into_boss fn=32 gave $REPLY_SPREAD distinct meshes within $REPLY_RUNS runs, as it should"
   else
-    print "  FAIL  rib_into_boss fn=32 looks deterministic ($REPLY_SPREAD mesh in $REPEAT runs) -- it is not; something is caching, or the reader is blind"
+    print "  FAIL  rib_into_boss fn=32 looks deterministic (1 mesh in $REPLY_RUNS runs) -- it is not; something is caching, or the reader is blind"
     (( fails++ ))
   fi
-  spread refused_neighbour def 0.9
+  spread $REPEAT refused_neighbour def 0.9
   if (( REPLY_SPREAD == 1 )); then
-    print "  PASS  refused_neighbour r=0.9 was deterministic across $REPEAT runs, as it should be"
+    print "  PASS  refused_neighbour r=0.9 was deterministic across $REPLY_RUNS runs, as it should be"
   else
     print "  FAIL  refused_neighbour r=0.9 gave $REPLY_SPREAD distinct meshes -- it has been 3/3 and 6/6 identical; the reader is inventing differences"
     (( fails++ ))
   fi
 
-  # The exporter check, run on a case where the OFF is known to lose a real
+  # The exporter check, on a case where the OFF is known to lose a real
   # distinction: two vertices 5.7e-7 mm apart print identically at six
-  # significant figures. The verdict is unchanged, and that is the point -- the
-  # loss is real and its consequence for A1, measured, is nil.
-  print "the OFF exporter loses precision, and it must be visible when it does"
+  # significant figures. Two things must both hold -- the loss must be SEEN,
+  # and the verdict must be UNCHANGED. That pair is the whole finding about the
+  # OFF exporter, and if either half stops holding the sweep needs re-reading.
+  print "the OFF exporter loses precision; it must be seen, and must not change the verdict"
   run_one refused_neighbour def 0.8
-  if [[ $REPLY_AGREE == NO ]]; then
-    print "  PASS  refused_neighbour r=0.8: OFF and STL disagree on counts and the harness says so"
+  cmp_out=$(python3 mesh.py --compare --tol $TOL \
+      $WORK/refused_neighbour_fndef_r0.8.off $WORK/refused_neighbour_fndef_r0.8.stl 2>&1)
+  if [[ $cmp_out == *"vertex counts differ"* ]]; then
+    print "  PASS  refused_neighbour r=0.8: the OFF loses a vertex and the harness sees it"
   else
-    print "  FAIL  refused_neighbour r=0.8: OFF/STL disagreement not detected (agree=$REPLY_AGREE) -- the comparison is not wired up"
+    print "  FAIL  refused_neighbour r=0.8: the known precision loss was not detected -- the comparison is not wired up"
+    (( fails++ ))
+  fi
+  if [[ $REPLY_AGREE == yes ]]; then
+    print "  PASS  refused_neighbour r=0.8: OFF and STL still reach the same verdict"
+  else
+    print "  FAIL  refused_neighbour r=0.8: OFF and STL now disagree on the VERDICT (agree=$REPLY_AGREE) -- the exporter has started changing answers; re-read the sweep"
     (( fails++ ))
   fi
 
