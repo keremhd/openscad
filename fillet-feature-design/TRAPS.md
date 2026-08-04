@@ -68,7 +68,23 @@ refusal counts beside every number. One reported win was byte-identical inertnes
     compare verdicts, never face counts.
 17. **BSD `sed` has no `\|` alternation.** A pattern anchored on `off:` silently stopped
     matching when the reader moved to STL, and every row read `UNREADABLE` rather than erroring.
-18. **A measurement is only comparable within one binary.** Three builds existed on 2026-08-04
+18. **AddressSanitizer does not run on this machine.** Any `-fsanitize=address` binary — down to
+    `int main(){return 0;}` — hangs before `main`, spinning in
+    `libSystem_initializer → __malloc_init → wrap_malloc_default_zone` inside
+    `libclang_rt.asan_osx_dynamic.dylib`. macOS 26.5, Apple clang 17.0.0; `MallocNanoZone=0`
+    does not help, and there is no Homebrew LLVM and no valgrind here. Building it costs about
+    12 minutes for nothing. Use instead `-fsanitize=undefined
+    -D_LIBCPP_HARDENING_MODE=_LIBCPP_HARDENING_MODE_EXTENSIVE`, which bounds-checks
+    `vector::operator[]` and traps with rc=133. **Verify the hardening is live on a three-line
+    test first** — it is a define, and a build that silently dropped it looks exactly like a
+    clean run.
+19. **A macOS `.ips` crash report carries `vmRegionInfo`, and it names the fault class.**
+    "N bytes before the start of a MALLOC_SMALL region" is an out-of-bounds index, not a stack
+    overflow or heap corruption, and N divided by the element size is the index. That one line
+    pinned the `chainBulges` fault to `pos[-1]` before any code was read. `lldb` on a
+    RelWithDebInfo OpenSCAD is not a substitute — it did not finish loading symbols in ten
+    minutes.
+20. **A measurement is only comparable within one binary.** Three builds existed on 2026-08-04
     between 19:43 and 00:04, and a sweep begun under the first would have silently mixed them.
     Record the binary's mtime on every row, and re-check it at the end of a run.
 16. **`ctest -R fillet` passing is necessary, never sufficient.** The shell-level `fillet-tests`
@@ -90,6 +106,7 @@ refusal counts beside every number. One reported win was byte-identical inertnes
 | 8 | `timeout(1)` | does not exist on this machine; made an export loop report 19/19 FAILED |
 | 9 | Catch2 name splitting | splits on commas, so an unescaped exclusion excludes nothing and silently reports the full total |
 | 11 | "exact STL calls these valid", 2026-08-05 | reproducible, and the diagnosis drawn from it was still wrong. The OFF's six-figure precision is real, but the disagreement was **welded against unwelded**, not OFF against STL. Every claimed false red is invalid on exact STL across weld 1e-4…1e-12 and reads valid only at 1e-15, i.e. effectively unwelded — which is instrument #10 over again, since Manifold's output is 2-manifold by index construction and an unwelded reader cannot see a self-touch. Attributed to the format what belonged to the tolerance |
+| 14 | **every reading on a seam-vertex model taken before `cab639ffd`** | `chainBulges` read `param(-1)` and `point(pos, -1)` on any chain whose bead overran a seam vertex, so the geometry was built partly from whatever the allocator had left before the buffer. `rib_into_boss` returned two topologies and three byte-orders from one unchanging binary. The largest instrument failure of the effort: it is not a script but the operator itself, and it silently contaminated an unknown share of the 225-model corpus |
 | 12 | `sweep.sh --compare`, first version | compared face counts, but OFF writes polygons and STL triangles, so a plain cube reads `f=6` one way and `f=12` the other. Flagged 30 cells including cubes and buried the real signal |
 | 13 | `sweep.sh` flakiness assertion, first version | asserted a 6-valid/2-invalid distribution over 3 runs, so the check failed itself about two times in five. An instrument for a random process needs its own power analysis |
 | 10 | `bnd` as the D24 / A3 instrument | identically zero on every Manifold-backend export, by a parity argument, so it reads clean on a correct solid and on a broken one alike. `fillet-bench/README.md` gives the argument |

@@ -174,6 +174,49 @@ building, so a comparison against it has no value.
 
 ---
 
+## 4b. The builder read one element before a vector — found and fixed 2026-08-05
+
+This is the most consequential finding of the session, because of what it does to everything
+measured before it.
+
+`chainBulges()` mapped a chain parameter to a station segment with
+`static_cast<int>(floor(q)) % nsta`. A section that overruns a seam vertex sits **outside** its
+chain's parameter range — negative at the front end, put there deliberately by the runout with a
+negative `back` — and C's `%` on a negative operand stays negative. So `chain.param(-1)` and
+`chain.point(pos, -1)` read one element before the start of a `std::vector`.
+
+`Vector3d` is 24 bytes, and every one of nine SIGBUS reports on disk faults at
+`KERN_PROTECTION_FAILURE` **exactly 24 bytes below the start of a `MALLOC_SMALL` region**, in
+`chainBulges`. Where the preceding page happened to be mapped, the read silently returned
+whatever was there instead of faulting. **That is where every nondeterministic `rib_into_boss`
+mesh came from** — not vertex-order noise, but a different geometry built from allocator
+residue.
+
+A probe on the release build confirmed it directly: two chains, `i = -1`, on every run.
+
+There is a second, silent face of the same bug at the back end: the overrun puts `q` past the
+last station, `(i+1) % nsta` wraps to station 0, and the chord is taken from the last station
+back to the first — in range, so no fault, and geometrically meaningless.
+
+**Fixed** at `cab639ffd` (cherry-picked from `fillet-chainbulges-oob`, `a4473e904`). An open
+chain's segment index is clamped to its end segment and the fraction is left to run outside
+[0,1], which extrapolates the segment the overrun section actually lies along; a closed chain
+wraps with a floor-modulo. For any `q` in range both branches return the previous answer, so it
+is a no-op except where the old code was out of bounds.
+
+Proof, on the fix author's build: `$fn`=14, 60 identical runs, one mesh; `R`=1.0, 40 runs, one
+mesh and no fault; `$fn` 10/12/26 and `R`=0.8, 20 runs each, one mesh each. Under UBSan with a
+hardened libc++ the pre-fix build trapped 20 of 20 and the fixed build 0 of 25.
+
+**What this costs the record: every measurement taken on a model with a seam vertex, before
+this fix, is suspect.** The value used was whatever the allocator had left in the 24 bytes
+before a station buffer. That includes an unknown share of the 225-model corpus.
+
+**It does not explain everything.** `rib_into_boss` at `$fn`=14 is now deterministic and still
+invalid — `v=222 e=660 f=442`, 3 non-manifold edges, χ=4, on 60 of 60 runs. Two surplus
+triangles on three existing edges. The flake was hiding a real geometric defect, which now
+reproduces on demand.
+
 ## 5. Open defects
 
 | defect | state |
@@ -183,8 +226,9 @@ building, so a comparison against it has no value.
 | `cross` yields no mesh at stock defaults | **closed 2026-08-04.** Not an empty mesh — a 17.5 GB OOM SIGKILL before the exporter ran. D22's tail, proven by a cliff at exactly 360/19, the model's own facet angle: `min_angle` 19 and above completes in 0.2 s and is valid, 18.9 and below is killed. |
 | **unguarded union of surviving parts in `dropVolumelessParts`** | **closed 2026-08-05.** Capped at 32 survivors; above it they are composed side by side into one mesh instead of united. **The recorded diagnosis was wrong and is retired**: `Decompose()` was not the cost — forcing one on every call runs the repro in 32 MB and under a second — and a component-count cap still dies, at a union of 55 parts over 3505 vertices. The cost is the `BatchBoolean` over the survivors, which creates zero-measure contacts faster than the drop retires them and feeds a diverging mesh back into `unionCells`. The `sample` reading 1572 of 1572 in `Decompose` was measuring a mesh already grown huge by that feedback — a symptom read as the cause. The union cannot simply be removed: it welds contacts between survivors, and `selfTouching`/`Genus` in the junction tests read that welding, so removing it fails three cases. `cross` at `min_angle` 18.9→2 now completes in ≤1 s at ≤387 MB, `NoError`, genus 0. The largest union any bench model asks for is 14 parts, so on a sound model the cap is unreachable and the executed path is identical — by construction, not by measurement. |
 | **`rib_into_boss` invalid at `$fn`=14 and 32** | **open, new 2026-08-04.** Same corner as the fin, smaller fault, on the bead surface where the two beads cross. **Reframed 2026-08-05, and the recorded framing retired**: this is not "invalid at 14 and 32". It fails at a scattering of values on either axis, the failing set moves when anything else changes, and it is nondeterministic run to run at every `$fn` tested. Re-derived on exact STL against a pinned binary: invalid at `$fn` **11, 25 and 32**, valid at 8, 19, 26 and 48, and **flaky at 14** — 6 valid to 2 invalid in 8 runs. The earlier "invalid at 14 and 32" was true when taken; the code has since moved. The remnant is an **exact duplicate triangle pair with opposite orientation**, a zero-thickness membrane, present in the `fillet_tool()` solid alone, so `buildRoundSolid` produces it rather than the caller's `union()`. Its plane is a section plane of the boss base-arc chain, where consecutive cells abut. |
-| **the builder is nondeterministic in validity** | **open, new 2026-08-05.** `rib_into_boss` at `$fn`=14: 2 of 40 identical runs of one unchanging binary returned a valid mesh (`v=226 e=672 f=448`), 38 returned invalid (`f=450`, nonman=3, χ=4), all rc=0. The topology moves, so this is not the known vertex-order noise. Independently reproduced on exact STL: 3 distinct md5s in 8 identical runs at `$fn`=11, 2 at 14, 3 at 25, 2 at 26, 3 at 32. See TRAPS 14 — it makes every single-render measurement on this branch, the 225-model corpus included, weaker than it reads. **`rib_into_boss` therefore cannot serve as an equality instrument for any before/after comparison.** `refused_neighbour` is deterministic and can. |
-| **`rib_into_boss` SIGBUS at `R`=1.0** | **open, new 2026-08-05.** rc=138, no output, about one run in six. A hard memory fault, and the most economical explanation for the nondeterminism above. Observed on the 2026-08-04 23:56 build carrying an uncommitted `FilletBuilder.cc`; needs confirming against a committed tree. |
+| **the builder is nondeterministic in validity** | **root cause found and fixed 2026-08-05**, `cab639ffd` — an out-of-bounds read one element before a station vector. See §4b. Re-verification of the merged tree is in flight. |
+| ~~the builder is nondeterministic in validity~~ (symptom record) | **superseded, kept for the evidence.** `rib_into_boss` at `$fn`=14: 2 of 40 identical runs of one unchanging binary returned a valid mesh (`v=226 e=672 f=448`), 38 returned invalid (`f=450`, nonman=3, χ=4), all rc=0. The topology moves, so this is not the known vertex-order noise. Independently reproduced on exact STL: 3 distinct md5s in 8 identical runs at `$fn`=11, 2 at 14, 3 at 25, 2 at 26, 3 at 32. See TRAPS 14 — it makes every single-render measurement on this branch, the 225-model corpus included, weaker than it reads. **`rib_into_boss` therefore cannot serve as an equality instrument for any before/after comparison.** `refused_neighbour` is deterministic and can. |
+| **`rib_into_boss` SIGBUS at `R`=1.0** | **closed 2026-08-05**, same root cause and same fix — §4b. It was a read 24 bytes below a `MALLOC_SMALL` region, faulting only when the preceding page was unmapped. 40 runs clean after the fix. |
 | D23 — size gate drops creases on impossible misses | diagnosed, unfixed. The "equal radius" framing is recorded as wrong. |
 | D24 — bead truncated and left open at a refused neighbour | **closed 2026-08-04, does not reproduce.** Record: `decisions/2026-08-04-d24-does-not-reproduce.md`. Symptom is a blunt bead end, not a hole. |
 | **`refused_neighbour` non-manifold at r = 0.2, 0.8, 0.9, 1.0** | **open, new 2026-08-04. Breaks promise 1.** A 0.34 µm sliver on 4 faces at r=0.9, stable across weld 1e-4…1e-9, on the concave bead's tangency boundary — the oblique junction, not the refusal. The bench carries r=0.5, which is valid. **2026-08-05, reproduced and extended.** This model is **fully deterministic** (3 of 3 and 6 of 6 identical exports), so the nondeterminism above is not involved. On exact STL against a pinned binary the original record reproduces exactly and gains two values: invalid at r = **0.2, 0.8, 0.9, 0.95, 1.0, 1.05**, valid at 0.3, 0.5, 1.2, 1.5, 2.0, and invalid across weld 1e-4…1e-12. A separate low-radius regime at r = 0.05 and 0.10 carries one warning and far more built geometry. The set is a scattering at every resolution probed: 0.7999 and 0.8 fail while 0.79999, 0.80001 and 0.8001 pass. The bad edge sits at x=0.440817, z=7.5 exactly, y=±(4−r)+δ — where **one bead's spine crosses the neighbouring bead's tangency line**, the one point at which both bead surfaces are tangent to the same wall and so to each other. A sliver wedge of area ~1.5e-7, not a duplicate triangle. Confirmed not the refusal: refusals sit at x=7.5. |
