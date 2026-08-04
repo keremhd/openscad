@@ -1405,100 +1405,56 @@ double wallOvershoot(const MergedMesh& m, const std::map<EdgeKey, std::vector<in
 // inputs that touch on a set of zero measure. Manifold copes, but it leaves one
 // degenerate four-triangle shell behind per such contact: no volume, no effect
 // on any boolean, and a nonsense genus for anything that inspects the result.
-// Keep only the components that enclose material.
-//
-// Done on the mesh rather than by decomposing and re-uniting the survivors.
-// Re-uniting them with a boolean is what a solid carrying many separate beads
-// cannot afford: on a cross whose every facet seam is a crease it reached 11 GB
-// in two seconds and the process was killed. Measured, the decomposition itself
-// is not the cost - forcing one on every call here costs 32 MB on that model -
-// and a cap on the component count does not help, because the union that kills
-// it is one of 55 parts over 3505 vertices. Removing the dropped components'
-// triangles keeps the survivors exactly as the boolean pipeline left them.
-manifold::Manifold dropVolumelessParts(manifold::Manifold solid)
+// Keep only the components that enclose material, and re-unite the survivors so
+// that where two of them touch the contact is resolved rather than left as two
+// shells meeting: the junction tests read genus and self-touching off this.
+
+// Above this many surviving components the union is skipped and they are simply
+// carried side by side into one mesh. Uniting them is what a solid carrying many
+// separate beads cannot afford: a cross whose every facet seam is a crease
+// reaches unions of 63 and 64 parts, and on those it took 11 GB in two seconds
+// before the process was killed - the union creates fresh zero-measure contacts
+// faster than this function retires them. The decomposition is not the cost;
+// forcing one on every call costs 32 MB on that model. The largest union a bench
+// model asks for is 14 parts, so the cap is not reached by a sound model.
+constexpr size_t kMaxUnitedParts = 32;
+
+// The parts are disjoint components, so carrying them into one mesh is the union
+// already - minus the welding of any zero-measure contact between two of them,
+// which is the price paid for staying within reach on a mesh this fragmented.
+// They are components of one solid, so they carry one property count between
+// them and the vertex blocks concatenate.
+manifold::Manifold composeParts(const std::vector<manifold::Manifold>& parts)
 {
-  const manifold::MeshGL64 mesh = solid.GetMeshGL64();
-  const uint64_t numProp = mesh.numProp;
-  const uint64_t numVert = numProp ? mesh.vertProperties.size() / numProp : 0;
-  const uint64_t numTri = mesh.triVerts.size() / 3;
-  if (numVert == 0 || numTri == 0) return solid;
-
-  std::vector<uint64_t> root(numVert);
-  for (uint64_t v = 0; v < numVert; ++v) root[v] = v;
-  auto find = [&root](uint64_t v) {
-    while (root[v] != v) {
-      root[v] = root[root[v]];
-      v = root[v];
-    }
-    return v;
-  };
-  auto unite = [&root, &find](uint64_t a, uint64_t b) {
-    a = find(a);
-    b = find(b);
-    if (a != b) root[a] = b;
-  };
-
-  // A single spatial vertex appears once per run it touches, and it is the merge
-  // vectors, not the positions, that say which of those indices are one vertex.
-  for (uint64_t i = 0; i < mesh.mergeFromVert.size(); ++i)
-    unite(mesh.mergeFromVert[i], mesh.mergeToVert[i]);
-  for (uint64_t t = 0; t < numTri; ++t) {
-    unite(mesh.triVerts[3 * t], mesh.triVerts[3 * t + 1]);
-    unite(mesh.triVerts[3 * t + 1], mesh.triVerts[3 * t + 2]);
-  }
-
-  // Six times the signed volume, per component; the factor cancels in the ratio.
-  std::vector<double> vol(numVert, 0.0);
-  double total = 0.0;
-  const auto pos = [&mesh, numProp](uint64_t v) {
-    return Vector3d(mesh.vertProperties[v * numProp], mesh.vertProperties[v * numProp + 1],
-                    mesh.vertProperties[v * numProp + 2]);
-  };
-  for (uint64_t t = 0; t < numTri; ++t) {
-    const double six = pos(mesh.triVerts[3 * t])
-                         .dot(pos(mesh.triVerts[3 * t + 1]).cross(pos(mesh.triVerts[3 * t + 2])));
-    vol[find(mesh.triVerts[3 * t])] += six;
-    total += six;
-  }
-
-  const double keepAbove = 1e-9 * std::abs(total);
-  const auto kept = [&vol, &find, keepAbove](uint64_t v) {
-    return std::abs(vol[find(v)]) > keepAbove;
-  };
-
-  uint64_t keptTri = 0;
-  for (uint64_t t = 0; t < numTri; ++t)
-    if (kept(mesh.triVerts[3 * t])) ++keptTri;
-  if (keptTri == numTri) return solid;
-  if (keptTri == 0) return {};
-
-  // The dropped components are whole connected components, so removing their
-  // triangles and vertices leaves the survivors closed and untouched.
-  constexpr uint64_t kNone = std::numeric_limits<uint64_t>::max();
-  std::vector<uint64_t> newIndex(numVert, kNone);
   manifold::MeshGL64 out;
-  out.numProp = mesh.numProp;
-  // The baseline tolerance from the bounding box, not the accumulated one: the
-  // rebuild must not collapse edges the boolean pipeline chose to keep.
-  out.tolerance = 0.0;
-  for (uint64_t v = 0; v < numVert; ++v) {
-    if (!kept(v)) continue;
-    newIndex[v] = out.vertProperties.size() / numProp;
-    out.vertProperties.insert(out.vertProperties.end(),
-                              mesh.vertProperties.begin() + v * numProp,
-                              mesh.vertProperties.begin() + (v + 1) * numProp);
-  }
-  out.triVerts.reserve(keptTri * 3);
-  for (uint64_t t = 0; t < numTri; ++t) {
-    if (!kept(mesh.triVerts[3 * t])) continue;
-    for (int k = 0; k < 3; ++k) out.triVerts.push_back(newIndex[mesh.triVerts[3 * t + k]]);
-  }
-  for (uint64_t i = 0; i < mesh.mergeFromVert.size(); ++i) {
-    if (newIndex[mesh.mergeFromVert[i]] == kNone) continue;
-    out.mergeFromVert.push_back(newIndex[mesh.mergeFromVert[i]]);
-    out.mergeToVert.push_back(newIndex[mesh.mergeToVert[i]]);
+  out.numProp = parts.front().GetMeshGL64().numProp;
+  for (const manifold::Manifold& part : parts) {
+    const manifold::MeshGL64 mesh = part.GetMeshGL64();
+    const uint64_t base = out.vertProperties.size() / out.numProp;
+    out.vertProperties.insert(out.vertProperties.end(), mesh.vertProperties.begin(),
+                              mesh.vertProperties.end());
+    for (const uint64_t v : mesh.triVerts) out.triVerts.push_back(base + v);
+    for (const uint64_t v : mesh.mergeFromVert) out.mergeFromVert.push_back(base + v);
+    for (const uint64_t v : mesh.mergeToVert) out.mergeToVert.push_back(base + v);
   }
   return manifold::Manifold(out);
+}
+
+manifold::Manifold dropVolumelessParts(manifold::Manifold solid)
+{
+  std::vector<manifold::Manifold> parts = solid.Decompose();
+  if (parts.size() < 2) return solid;
+
+  const double keepAbove = 1e-9 * std::abs(solid.Volume());
+  std::vector<manifold::Manifold> solidParts;
+  for (auto& part : parts)
+    if (std::abs(part.Volume()) > keepAbove) solidParts.push_back(std::move(part));
+
+  if (solidParts.empty()) return {};
+  if (solidParts.size() == 1) return solidParts.front();
+  if (solidParts.size() == parts.size()) return solid;
+  if (solidParts.size() > kMaxUnitedParts) return composeParts(solidParts);
+  return manifold::Manifold::BatchBoolean(solidParts, manifold::OpType::Add);
 }
 
 // Union in a tree, dropping each pair's volumeless shells as it is made rather
