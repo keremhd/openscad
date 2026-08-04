@@ -3455,18 +3455,19 @@ std::shared_ptr<const Geometry> buildFilletTool(
   const ClassCounts c = classifyEdges(m, adj, thresholdDeg, useProvenance);
 
   const size_t selected = wantConcave ? c.featureConcave : c.featureConvex;
-  LOG(message_group::Echo, node.modinst->location(), "",
-      "%1$s: mesh %2$d verts (%3$d merged), %4$d tris, %5$d surfaces; "
-      "%6$d edges (%7$d two-face, %8$d non-manifold); feature edges %9$d "
-      "(concave %10$d, convex %11$d, %12$d same-surface); selects %13$d %14$s "
-      "edge(s) at %15$.1f deg",
-      node.name(), static_cast<int>(m.numRawVert), static_cast<int>(m.pos.size()),
-      static_cast<int>(m.tris.size()), static_cast<int>(m.distinctIDs.size()),
-      static_cast<int>(adj.size()), static_cast<int>(c.twoFace),
-      static_cast<int>(c.nonManifold), static_cast<int>(c.feature),
-      static_cast<int>(c.featureConcave), static_cast<int>(c.featureConvex),
-      static_cast<int>(c.featureSameSurface), static_cast<int>(selected),
-      wantConcave ? "concave" : "convex", thresholdDeg);
+  if (node.debug)
+    LOG(message_group::Echo, node.modinst->location(), "",
+        "%1$s: mesh %2$d verts (%3$d merged), %4$d tris, %5$d surfaces; "
+        "%6$d edges (%7$d two-face, %8$d non-manifold); feature edges %9$d "
+        "(concave %10$d, convex %11$d, %12$d same-surface); selects %13$d %14$s "
+        "edge(s) at %15$.1f deg",
+        node.name(), static_cast<int>(m.numRawVert), static_cast<int>(m.pos.size()),
+        static_cast<int>(m.tris.size()), static_cast<int>(m.distinctIDs.size()),
+        static_cast<int>(adj.size()), static_cast<int>(c.twoFace),
+        static_cast<int>(c.nonManifold), static_cast<int>(c.feature),
+        static_cast<int>(c.featureConcave), static_cast<int>(c.featureConvex),
+        static_cast<int>(c.featureSameSurface), static_cast<int>(selected),
+        wantConcave ? "concave" : "convex", thresholdDeg);
 
   const std::vector<EdgeKey> selectedKeys = selectedEdges(m, adj, thresholdDeg, wantConcave);
   std::vector<Chain> chains = buildChains(m, selectedKeys);
