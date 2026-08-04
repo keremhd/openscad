@@ -129,7 +129,8 @@ If no, it is a release note, not work.
 | item | verdict |
 |---|---|
 | curved-arrival fin — non-manifold, odd χ, inside the `arrivesStraight` fallback | **blocks** (A1) |
-| D22 — classifier reads `$fa`/`$fn` | **blocks** (A2). Both recorded fix directions are disqualified: each keeps the classifier reading render settings. Smaller than it looks — `min_angle` carries the ambiguous cases |
+| D22 — classifier reads `$fa`/`$fn` | **blocks A1 *and* A2.** Measured 2026-08-04 on the bench: `tee`, `tee_oblique` and `tee_small` are **invalid solids at stock defaults** — odd Euler characteristic, non-manifold edges — and valid at an explicit `$fn`. It was recorded as burrs on rims, a cosmetic fault; it is a validity fault. Both recorded fix directions remain disqualified. Still smaller than it looks: `min_angle` carries the ambiguous cases |
+| `cross` produces no mesh at all at stock defaults | **blocks A1.** Found 2026-08-04, undiagnosed. `fillet-bench` tile `S1-T09`; at `$fn`=19 the same model is invalid with two components. Probably D22's tail, not proven to be |
 | D24 — bead truncated and left open at a refused neighbour | **blocks** (A3) |
 | D23 — size gate drops creases on impossible misses | documented limitation |
 | D19 — subtractive scalloped ledge | parked, tag `d19-wall-recognition` |

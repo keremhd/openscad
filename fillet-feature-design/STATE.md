@@ -133,7 +133,8 @@ building, so a comparison against it has no value.
 | defect | state |
 |---|---|
 | **seated-bead fallback at a curved arrival** | **new, found this session.** Produces a non-manifold fin, odd χ. Not tracked by D22/D23/D24. |
-| D22 — crease threshold cannot see `$fs` | diagnosed, unfixed. Root cause `src/core/CurveDiscretizer.h:52`. Fires on stock defaults. |
+| D22 — crease threshold cannot see `$fs` | diagnosed, unfixed. Root cause `src/core/CurveDiscretizer.h:52`. **Reclassified 2026-08-04: it produces invalid solids, not burrs.** `tee`, `tee_oblique`, `tee_small` all come back with odd Euler characteristic and non-manifold edges at stock defaults, and valid at an explicit `$fn`. See `fillet-bench/README.md`. |
+| `cross` yields no mesh at stock defaults | **new, found 2026-08-04 by the bench.** Undiagnosed. Tile `S1-T09`; at `$fn`=19 the model is invalid with two components. Selects 374 convex edges of 757 at an 18° threshold, then refuses 136 of 298. |
 | D23 — size gate drops creases on impossible misses | diagnosed, unfixed. The "equal radius" framing is recorded as wrong. |
 | D24 — bead truncated and left open at a refused neighbour | diagnosed, unfixed. All-planar repro. |
 | D19 — subtractive scalloped ledge | parked at tag `d19-wall-recognition` (`fe8c8d9d1`). |
