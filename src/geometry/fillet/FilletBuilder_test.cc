@@ -494,12 +494,12 @@ TEST_CASE("threshold: the default is a constant, not read from anything")
     const auto cyl = manifold::Manifold::Cylinder(1.0, 1.0, 1.0, fn, false);
     CHECK(classifyAuto(cyl).feature == static_cast<size_t>(2 * fn));
   }
-  // The constant sits off every facet angle a low $fn produces, so no prism's
-  // classification is decided inside the tie margin.
-  for (const int fn : {7, 8, 9, 10, 12}) {
-    CAPTURE(fn);
-    CHECK(std::abs(360.0 / fn - kDefaultCreaseThresholdDeg) > 2.0);
-  }
+  // Where the constant sits, stated as the behaviour it buys: strictly between
+  // the facet angle of a 7-gon and that of an 8-gon, so every prism from $fn=8
+  // up keeps its walls, and none of their facet angles lands on the threshold
+  // where the tie margin would decide the answer.
+  CHECK(kDefaultCreaseThresholdDeg > 360.0 / 8);
+  CHECK(kDefaultCreaseThresholdDeg < 360.0 / 7);
 }
 
 TEST_CASE("threshold: an untessellated solid classifies its own corners")
@@ -542,9 +542,9 @@ TEST_CASE("threshold: cylinder side seams are rejected at every tessellation")
 {
   // A cylinder's side seams turn 360/$fn and its rims turn 90, so a threshold
   // between the two takes the rims alone. $fn=8 is the coarsest tessellation the
-  // default threshold still calls flat: its seams turn 45, three degrees under
-  // the constant, and an octagonal prism keeps its eight walls. A threshold
-  // below 45 rounds every facet of one.
+  // default threshold still calls flat: its seams turn 45, under the constant,
+  // and an octagonal prism keeps its eight walls. A threshold below 45 rounds
+  // every facet of one; at $fn=7 the seams turn 51.43 and are rounded.
   for (const int fn : {8, 16, 64}) {
     CAPTURE(fn);
     const auto cyl = manifold::Manifold::Cylinder(1.0, 1.0, 1.0, fn, false);

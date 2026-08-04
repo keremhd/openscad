@@ -127,18 +127,23 @@ inline bool isFeatureAngle(double dihedralDeg, double thresholdDeg)
 // alone, identical whether the solid arrived at stock defaults, at an explicit
 // $fn, or through an STL round trip.
 //
-// 48 clears every tessellation seam a bench model produces (the widest measured
+// 46 clears every tessellation seam a bench model produces (the widest measured
 // is 36 degrees, on a 10 mm cylinder at stock defaults) while sitting below the
-// steep part of every real intersection curve, and it leaves the 45-degree wall
-// seams of a cylinder($fn=8) classified as seams.
+// steep part of every real intersection curve.
 //
-// It sits off every facet angle a low $fn produces — 51.43 at 7, 45 at 8, 40 at
-// 9, 36 at 10 — by at least 3 degrees. A threshold equal to a facet angle would
-// decide a whole prism's classification on where its computed dihedrals land
-// relative to the tie margin, and measured facet angles are not exact: a
-// sphere's latitude rings read about 0.065 degrees off nominal, and a resize()d
-// mesh drifts further.
-inline constexpr double kDefaultCreaseThresholdDeg = 48.0;
+// It is bounded on both sides by measurement. Below: the wall seams of a
+// cylinder($fn=8) turn 45, and a threshold under that rounds every facet of an
+// octagonal prism. Equalling 45 is no better than falling under it, because then
+// a prism's classification turns on where its computed dihedrals land against
+// the tie margin, and measured facet angles are not exact — a sphere's latitude
+// rings read about 0.065 degrees off nominal. Above: a tee of two equal
+// cylinders carries a concave intersection curve whose dihedrals run 15.86,
+// 46.26, 72.02, 87.82; a threshold over 46.27 drops the 46.26 quartet, which
+// cuts the 16-edge chain into seven fragments and leaves four of them too short
+// for the size gate. Selecting a crease chain whole matters more than margin:
+// the gap the threshold sits in, 15.86 to 46.26, is the widest in that
+// distribution.
+inline constexpr double kDefaultCreaseThresholdDeg = 46.0;
 
 // Walk the adjacency, classify every two-face edge, and tally the counts. Edges
 // with a dihedral below thresholdDeg are treated as seams and skipped. Same-
