@@ -30,3 +30,4 @@ chamfer_box             -
 brush_one_edge          -
 cube_control            -       CONTROL, expect clean
 mixed_fn                skip    documentation case; needs min_angle by design
+rib_into_boss           26      cylinder r=8; the curved-arrival seam vertex
