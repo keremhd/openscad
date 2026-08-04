@@ -7,6 +7,12 @@ OpenSCAD can round or cut back the edges of a solid it is given. The operators
 read the mesh and find the edges themselves, so they work on anything that is a
 solid — a CSG tree, an imported STL, the output of `hull()` or `minkowski()`.
 
+**These modules are experimental.** They are only available with
+`--enable=fillet` on the command line, or with `fillet` ticked under Preferences
+→ Features in the GUI. Without it a call to any of them is an unknown module.
+The limitations at the foot of this page are the reason, and they are a
+condition of use rather than a surprise.
+
 There are five modules. One is sugar over the other four.
 
 | Module | Shape of the blend | Sign of the edge | How it is used |
@@ -89,7 +95,7 @@ has to be handed in at each call.
 | `r` | — | blend radius |
 | `inner` | `true` | build the concave half |
 | `outer` | `true` | build the convex half |
-| `min_angle` | auto | override the feature-angle threshold, in degrees |
+| `min_angle` | 46 | the feature-angle threshold, in degrees |
 | `disable_preview` | `true` | pass the child through unchanged under F5 |
 
 ### Preview
@@ -125,31 +131,44 @@ Child 0 is the target. Children 1 and later are **selection brushes**.
 An edge is treated when it turns by more than a threshold, and when its sign
 matches the tool. Everything else is left alone.
 
-The threshold is derived from the resolution the *caller* is working at:
-**1.5 × the caller's own facet angle**. At `$fn = 24` that is 22.5°, at
-`$fn = 32` it is 16.9°. The reasoning is that an edge is a feature of the shape
-when it turns more sharply than the tessellation's own facets do — so a cylinder
-drawn at the same resolution keeps smooth sides, while a real 90° corner is
-found on any model at any resolution.
+**The threshold is a constant, 46°.** It is not derived from `$fn`, `$fa` or
+`$fs`, and it is not measured off the mesh. A solid does not carry the settings
+that made it — it may be a union of primitives built at different `$fn`, an
+imported STL with no `$fn` at all, or a mesh that has been through `resize()` —
+so the same shape must classify the same way however it arrived, and only a
+constant can promise that. `$fn`, `$fa` and `$fs` still control the tessellation
+of the blend surfaces the operators *build*; they are not inputs to the choice
+of which edges to build on.
 
-Every invocation echoes what it decided:
+46° sits just above 45°, which is the facet angle of `cylinder($fn = 8)`, so an
+octagonal prism's wall seams stay seams. Below that — a `$fn` of 7 or coarser,
+whose facets turn by 51.4° — the wall seams are treated as features.
+
+`debug = true` echoes what the classifier decided:
 
 ```
 ECHO: round_tool: mesh 104 verts (104 merged), 204 tris, 2 surfaces; 306 edges
       (306 two-face, 0 non-manifold); feature edges 108 (concave 48, convex 60,
-      60 same-surface); selects 60 convex edge(s) at 18.0 deg
+      60 same-surface); selects 60 convex edge(s) at 46.0 deg
 ```
 
 ### min_angle
 
-`min_angle = <degrees>` overrides the derived threshold. It is the escape hatch
-when the automatic value picks the wrong edges — most often when a curved
-surface is tessellated more coarsely than the caller's own resolution, so its
-seams read as real edges.
+`min_angle = <degrees>` replaces the 46° constant, and it is **the answer for a
+crease shallower than that**. A constant threshold has to pick one number, and a
+model with a genuine 30° corner — an oblique branch, a shallow chamfer already
+cut, a swept form that meets its wall at a slant — will not have that corner
+found by default. `min_angle = 25` finds it. This is what the parameter is for,
+not a fine adjustment: it is an explicit statement about your model, where the
+default is a statement about models in general.
+
+It works in the other direction too. Raising `min_angle` above 46° drops shallow
+creases you would rather leave alone, and lowering it below a curved surface's
+facet angle deliberately treats every tessellation seam as a feature.
 
 ![min_angle](fig-min-angle.png)
 
-*Left: the derived threshold at `$fn = 24`, which rejects the cylinder's 15°
+*Left: the default 46° threshold at `$fn = 24`, which rejects the cylinder's 15°
 seams and rounds only the two rims. Right: `min_angle = 10`, below the seam
 angle, so every vertical seam is now a feature and the post comes back fluted.*
 
@@ -288,5 +307,16 @@ solid, so it is for looking at, not for building with.
   corner, are not expressible.
 - **No runout.** A blend that stops partway along an edge stops square, not
   tapered.
-- **Manifold backend.** The tools are built on Manifold; under the CGAL backend
-  they warn and emit nothing.
+- **Experimental.** The five modules require `--enable=fillet`, as the first
+  paragraph of this page says.
+- **A build without Manifold.** The tool solids are built through Manifold, so in
+  a build configured without it the five modules are not registered at all and a
+  call to one is an unknown-module error. The runtime `--backend=cgal` is a
+  different thing and is fully supported: the node builds its tool through
+  Manifold internally and hands the result to whichever backend is rendering.
+- **The size check refuses conservatively.** Some creases that could
+  geometrically carry the blend are dropped with the warning above. A refusal is
+  the safe error; a blend that produces a self-intersecting solid is not.
+- **A crease shallower than 46° is not blended unless `min_angle` says so.** See
+  min_angle above. This is the price of a threshold that does not read the mesh.
+- **Re-filleting an already-blended model is not reliable.** See above.
