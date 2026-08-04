@@ -1407,12 +1407,14 @@ double wallOvershoot(const MergedMesh& m, const std::map<EdgeKey, std::vector<in
 // on any boolean, and a nonsense genus for anything that inspects the result.
 // Keep only the components that enclose material.
 //
-// Manifold::Decompose() is not used for this. It allocates a vector the length
-// of the whole vertex list and scans every triangle once per component, and
-// materialises a mesh per component, so its cost is (components x mesh size):
-// on a solid whose creases each leave a separate bead it reached 11 GB in two
-// seconds and the process was killed. Labelling the components on the mesh and
-// dropping the volumeless ones' triangles is linear whatever the count.
+// Done on the mesh rather than by decomposing and re-uniting the survivors.
+// Re-uniting them with a boolean is what a solid carrying many separate beads
+// cannot afford: on a cross whose every facet seam is a crease it reached 11 GB
+// in two seconds and the process was killed. Measured, the decomposition itself
+// is not the cost - forcing one on every call here costs 32 MB on that model -
+// and a cap on the component count does not help, because the union that kills
+// it is one of 55 parts over 3505 vertices. Removing the dropped components'
+// triangles keeps the survivors exactly as the boolean pipeline left them.
 manifold::Manifold dropVolumelessParts(manifold::Manifold solid)
 {
   const manifold::MeshGL64 mesh = solid.GetMeshGL64();
@@ -1476,7 +1478,9 @@ manifold::Manifold dropVolumelessParts(manifold::Manifold solid)
   std::vector<uint64_t> newIndex(numVert, kNone);
   manifold::MeshGL64 out;
   out.numProp = mesh.numProp;
-  out.tolerance = mesh.tolerance;
+  // The baseline tolerance from the bounding box, not the accumulated one: the
+  // rebuild must not collapse edges the boolean pipeline chose to keep.
+  out.tolerance = 0.0;
   for (uint64_t v = 0; v < numVert; ++v) {
     if (!kept(v)) continue;
     newIndex[v] = out.vertProperties.size() / numProp;
