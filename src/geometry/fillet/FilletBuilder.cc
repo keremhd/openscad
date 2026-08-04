@@ -1406,28 +1406,101 @@ double wallOvershoot(const MergedMesh& m, const std::map<EdgeKey, std::vector<in
 // degenerate four-triangle shell behind per such contact: no volume, no effect
 // on any boolean, and a nonsense genus for anything that inspects the result.
 // Keep only the components that enclose material.
+//
+// Manifold::Decompose() is not used for this. It allocates a vector the length
+// of the whole vertex list and scans every triangle once per component, and
+// materialises a mesh per component, so its cost is (components x mesh size):
+// on a solid whose creases each leave a separate bead it reached 11 GB in two
+// seconds and the process was killed. Labelling the components on the mesh and
+// dropping the volumeless ones' triangles is linear whatever the count.
 manifold::Manifold dropVolumelessParts(manifold::Manifold solid)
 {
-  std::vector<manifold::Manifold> parts = solid.Decompose();
-  if (parts.size() < 2) return solid;
+  const manifold::MeshGL64 mesh = solid.GetMeshGL64();
+  const uint64_t numProp = mesh.numProp;
+  const uint64_t numVert = numProp ? mesh.vertProperties.size() / numProp : 0;
+  const uint64_t numTri = mesh.triVerts.size() / 3;
+  if (numVert == 0 || numTri == 0) return solid;
 
-  const double keepAbove = 1e-9 * std::abs(solid.Volume());
-  std::vector<manifold::Manifold> solidParts;
-  for (auto& part : parts)
-    if (std::abs(part.Volume()) > keepAbove) solidParts.push_back(std::move(part));
+  std::vector<uint64_t> root(numVert);
+  for (uint64_t v = 0; v < numVert; ++v) root[v] = v;
+  auto find = [&root](uint64_t v) {
+    while (root[v] != v) {
+      root[v] = root[root[v]];
+      v = root[v];
+    }
+    return v;
+  };
+  auto unite = [&root, &find](uint64_t a, uint64_t b) {
+    a = find(a);
+    b = find(b);
+    if (a != b) root[a] = b;
+  };
 
-  if (solidParts.empty()) return {};
-  if (solidParts.size() == 1) return solidParts.front();
-  if (solidParts.size() == parts.size()) return solid;
-  return manifold::Manifold::BatchBoolean(solidParts, manifold::OpType::Add);
+  // A single spatial vertex appears once per run it touches, and it is the merge
+  // vectors, not the positions, that say which of those indices are one vertex.
+  for (uint64_t i = 0; i < mesh.mergeFromVert.size(); ++i)
+    unite(mesh.mergeFromVert[i], mesh.mergeToVert[i]);
+  for (uint64_t t = 0; t < numTri; ++t) {
+    unite(mesh.triVerts[3 * t], mesh.triVerts[3 * t + 1]);
+    unite(mesh.triVerts[3 * t + 1], mesh.triVerts[3 * t + 2]);
+  }
+
+  // Six times the signed volume, per component; the factor cancels in the ratio.
+  std::vector<double> vol(numVert, 0.0);
+  double total = 0.0;
+  const auto pos = [&mesh, numProp](uint64_t v) {
+    return Vector3d(mesh.vertProperties[v * numProp], mesh.vertProperties[v * numProp + 1],
+                    mesh.vertProperties[v * numProp + 2]);
+  };
+  for (uint64_t t = 0; t < numTri; ++t) {
+    const double six = pos(mesh.triVerts[3 * t])
+                         .dot(pos(mesh.triVerts[3 * t + 1]).cross(pos(mesh.triVerts[3 * t + 2])));
+    vol[find(mesh.triVerts[3 * t])] += six;
+    total += six;
+  }
+
+  const double keepAbove = 1e-9 * std::abs(total);
+  const auto kept = [&vol, &find, keepAbove](uint64_t v) {
+    return std::abs(vol[find(v)]) > keepAbove;
+  };
+
+  uint64_t keptTri = 0;
+  for (uint64_t t = 0; t < numTri; ++t)
+    if (kept(mesh.triVerts[3 * t])) ++keptTri;
+  if (keptTri == numTri) return solid;
+  if (keptTri == 0) return {};
+
+  // The dropped components are whole connected components, so removing their
+  // triangles and vertices leaves the survivors closed and untouched.
+  constexpr uint64_t kNone = std::numeric_limits<uint64_t>::max();
+  std::vector<uint64_t> newIndex(numVert, kNone);
+  manifold::MeshGL64 out;
+  out.numProp = mesh.numProp;
+  out.tolerance = mesh.tolerance;
+  for (uint64_t v = 0; v < numVert; ++v) {
+    if (!kept(v)) continue;
+    newIndex[v] = out.vertProperties.size() / numProp;
+    out.vertProperties.insert(out.vertProperties.end(),
+                              mesh.vertProperties.begin() + v * numProp,
+                              mesh.vertProperties.begin() + (v + 1) * numProp);
+  }
+  out.triVerts.reserve(keptTri * 3);
+  for (uint64_t t = 0; t < numTri; ++t) {
+    if (!kept(mesh.triVerts[3 * t])) continue;
+    for (int k = 0; k < 3; ++k) out.triVerts.push_back(newIndex[mesh.triVerts[3 * t + k]]);
+  }
+  for (uint64_t i = 0; i < mesh.mergeFromVert.size(); ++i) {
+    if (newIndex[mesh.mergeFromVert[i]] == kNone) continue;
+    out.mergeFromVert.push_back(newIndex[mesh.mergeFromVert[i]]);
+    out.mergeToVert.push_back(newIndex[mesh.mergeToVert[i]]);
+  }
+  return manifold::Manifold(out);
 }
 
-// Union in a tree, sweeping each pair as it is made. Decompose() materialises a
-// mesh of its own per component, so the sweep costs (components x mesh size),
-// and a tool carries one shell per cell contact: sweeping the finished union
-// instead is quadratic, and cost 112 s and 17 GB on a plate of a hundred bosses.
-// A pair can leave only the one shell between its two members, so the tree hands
-// Decompose two components a step whatever the tool's size.
+// Union in a tree, dropping each pair's volumeless shells as it is made rather
+// than leaving the finished union's to be sorted out at once: a tool carries one
+// shell per cell contact, and a pair can leave only the one shell between its
+// two members.
 manifold::Manifold unionCells(std::vector<manifold::Manifold>& cells)
 {
   if (cells.empty()) return {};
