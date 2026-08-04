@@ -185,7 +185,7 @@ TEST_CASE("cylinder: convex rims walk into two closed rings")
   REQUIRE(chains.size() == 2);
   for (const auto& ch : chains) {
     CHECK(ch.closed);
-    CHECK(ch.verts.size() == static_cast<size_t>(fn));
+    CHECK(ch.stationCount() == fn);
   }
 }
 
@@ -201,7 +201,7 @@ TEST_CASE("L-shape: the concave crease is a single open chain")
   const auto chains = buildChains(mm, edges);
   REQUIRE(chains.size() == 1);
   CHECK_FALSE(chains[0].closed);
-  CHECK(chains[0].verts.size() == 2);
+  CHECK(chains[0].stationCount() == 2);
 }
 
 TEST_CASE("floor/wall: tangency frame matches the worked example")
@@ -732,7 +732,9 @@ TEST_CASE("chains: two seams that cross do so where neither is still a crease")
   for (const auto& ch : apartChains) {
     CHECK(ch.closed);
     double nearest = std::numeric_limits<double>::max();
-    for (const int v : ch.verts) nearest = std::min(nearest, std::abs(apart.pos[v].y()));
+    // The crease as the mesh has it. A station is a mesh vertex only where the
+    // walk put one there, and a resampled ring's are mostly -1.
+    for (const int v : ch.rawRun()) nearest = std::min(nearest, std::abs(apart.pos[v].y()));
     CHECK(nearest > 4.0);   // sqrt(Rr^2 - Rb^2) = 4.36, and the loops start there
   }
 }
@@ -772,9 +774,9 @@ TEST_CASE("chains: two curved creases and a straight one meet at a real junction
     CHECK_FALSE(ch.closed);
     // Both ends of every chain sit on the crossing line x = (xa + xb) / 2. The
     // grooves run up it; the arcs run from one end of it to the other.
-    CHECK(mm.pos[ch.verts.front()].x() == Approx(0.5 * (xa + xb)));
-    CHECK(mm.pos[ch.verts.back()].x() == Approx(0.5 * (xa + xb)));
-    if (ch.verts.size() == 2) ++straight;
+    CHECK(mm.pos[ch.endVert(/*front=*/true)].x() == Approx(0.5 * (xa + xb)));
+    CHECK(mm.pos[ch.endVert(/*front=*/false)].x() == Approx(0.5 * (xa + xb)));
+    if (ch.stationCount() == 2) ++straight;
   }
   CHECK(straight == 2);   // the two grooves, one segment each
 
@@ -882,7 +884,7 @@ std::vector<Chain> selection(const MergedMesh& mm, const std::vector<Chain>& cha
   const BrushVolume volume(brush.GetMeshGL64());
   std::vector<Chain> out;
   for (Chain chain : chains) {
-    const size_t n = chain.verts.size();
+    const size_t n = static_cast<size_t>(chain.stationCount());
     const size_t segments = n < 2 ? 0 : (chain.closed ? n : n - 1);
     auto keep = chainSelection(mm, chain, volume, 0.01 * size);
     if (keep.empty()) continue;
@@ -912,7 +914,7 @@ size_t takenEdges(const std::vector<Chain>& chains)
 {
   size_t taken = 0;
   for (const Chain& chain : chains) {
-    const size_t n = chain.verts.size();
+    const size_t n = static_cast<size_t>(chain.stationCount());
     const size_t segments = n < 2 ? 0 : (chain.closed ? n : n - 1);
     if (chain.keep.empty()) {
       taken += segments;
@@ -959,8 +961,8 @@ TEST_CASE("brush: the spine is cut where the brush crosses it, not at a station"
   const auto adj = buildEdgeAdjacency(mm.tris);
   const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/true));
   REQUIRE(chains.size() == 1);
-  REQUIRE(chains[0].verts.size() == 2);
-  REQUIRE(mm.pos[chains[0].verts.front()].y() == Approx(0.0));
+  REQUIRE(chains[0].stationCount() == 2);
+  REQUIRE(mm.pos[chains[0].endVert(/*front=*/true)].y() == Approx(0.0));
 
   const auto brush = box(20.0, 5.0, 20.0).Translate(manifold::vec3(-5.0, -1.0, -5.0));
   const auto keep = chainSelection(mm, chains[0], BrushVolume(brush.GetMeshGL64()), 0.01);
@@ -2545,8 +2547,10 @@ TEST_CASE("junction: a corner two creases still reach is closed at every opening
       // a size gate would have dropped.
       std::vector<Chain> flat;
       for (const Chain& c : chains) {
-        if (c.closed || c.verts.size() < 2) continue;
-        if (std::abs(mm.pos[c.verts.front()].z() - mm.pos[c.verts.back()].z()) > 1.0) continue;
+        if (c.closed || c.stationCount() < 2) continue;
+        if (std::abs(mm.pos[c.endVert(/*front=*/true)].z() -
+                     mm.pos[c.endVert(/*front=*/false)].z()) > 1.0)
+          continue;
         flat.push_back(c);
       }
       CAPTURE(theta, r);
@@ -2600,6 +2604,129 @@ TEST_CASE("curved crease: a uniform seam gives a uniform setback")
     }
     CAPTURE(fn, mean);
     CHECK(worst < 1e-9 * mean);
+  }
+}
+
+// The station list is not the crease, and this is the only test that can tell.
+//
+// Every other chain in this file comes straight from buildChains, where exactly
+// one station stands on each crease vertex, so the two lists agree and a
+// consumer that confuses them still passes. That is how the same fault reached
+// four separate consumers -- checkChainSizes, arrivesStraight, filletedEdges and
+// chainJunctions -- and was caught four times by hand and never here. These are
+// the invariants those consumers were relying on, stated once.
+TEST_CASE("resampling: a station is not a crease vertex, and the ends still are")
+{
+  // A bore through a round bar. Where the two tessellations cross, the crease
+  // they share has segments a small fraction of its own median, which is the
+  // case the resampler exists for; a hole in a flat plate has none and is never
+  // resampled at all.
+  constexpr int FN = 96;
+  const auto bar = manifold::Manifold::Cylinder(40.0, 10.0, 10.0, FN, false);
+  const auto bore = manifold::Manifold::Cylinder(40.0, 4.0, 4.0, FN, false)
+                      .Translate(manifold::vec3(0.0, 0.0, -20.0))
+                      .Rotate(-90, 0, 0)
+                      .Translate(manifold::vec3(0.0, 0.0, 20.0));
+  const MergedMesh mm = mergeMesh((bar - bore).GetMeshGL64());
+  const auto adj = buildEdgeAdjacency(mm.tris);
+  const double threshold = derivedThreshold(discretizer(FN));
+
+  // The two bore mouths: convex rims, one ring each. The bar's own two end
+  // rims are rings too, and regular ones -- the resampler leaves them alone,
+  // which is what the constant-z test picks out.
+  auto chains = buildChains(mm, selectedEdges(mm, adj, threshold, /*wantConcave=*/false));
+  std::vector<Chain> rings;
+  for (const Chain& c : chains) {
+    if (!c.closed) continue;
+    double lo = 1e30, hi = -1e30;
+    for (const int v : c.rawRun()) {
+      lo = std::min(lo, mm.pos[v].z());
+      hi = std::max(hi, mm.pos[v].z());
+    }
+    if (hi - lo > 1e-9) rings.push_back(c);
+  }
+  REQUIRE(rings.size() == 2);
+
+  // An open chain to check the other half of the rule on: cut the same rings at
+  // a vertex by taking the crease's own run and reopening it. Rebuilding one by
+  // hand is the only way to get an open chain that is also slivered enough to be
+  // resampled, since a bore mouth is always a ring.
+  std::vector<Chain> opened;
+  for (const Chain& c : rings) {
+    Chain o;
+    o.raw = c.rawRun();
+    o.setStations(o.raw);
+    o.closed = false;
+    opened.push_back(std::move(o));
+  }
+
+  std::vector<Chain> all = rings;
+  all.insert(all.end(), opened.begin(), opened.end());
+  const std::vector<int> rawBefore0 = all.front().rawRun();
+
+  resampleChains(mm, all, kSliverFraction);
+
+  // The mechanism fired. `at` is empty on a chain the resampler left alone, so a
+  // pass that measured nothing would fail here rather than below.
+  size_t redivided = 0;
+  for (const Chain& c : all)
+    if (!c.at.empty()) ++redivided;
+  CHECK(redivided == all.size());
+
+  // I3 -- the crease is untouched by resampling. Every -1 guard behind rawRun()
+  // is dead code, which is why filletedEdges does not carry one.
+  CHECK(all.front().rawRun() == rawBefore0);
+
+  for (size_t i = 0; i < all.size(); ++i) {
+    const Chain& c = all[i];
+    CAPTURE(i, c.closed);
+
+    // I2 -- station count equals crease length. Three size-based consumers
+    // depend on this and nothing in the type enforces it: the resampler happens
+    // to emit as many stations as the crease has segments. If that ever changes,
+    // this fails, and every stationCount() in the builder has to be re-read.
+    CHECK(c.stationCount() == c.rawCount());
+
+    // I1 -- an OPEN chain's two ends are exact mesh vertices, resampled or not.
+    // Corner cells and brush coverage are keyed by them.
+    if (!c.closed) {
+      for (const bool front : {true, false}) {
+        const int v = c.endVert(front);
+        REQUIRE(v >= 0);
+        REQUIRE(static_cast<size_t>(v) < mm.pos.size());
+        const int station = front ? 0 : c.stationCount() - 1;
+        CHECK(c.param(station) == Approx(front ? 0.0 : static_cast<double>(c.rawCount() - 1)));
+        CHECK(c.point(mm.pos, station).isApprox(mm.pos[v]));
+      }
+    }
+
+    // A ring has ONE pinned station and it is station 0. Its last station is
+    // placed by arc length like any interior one, so it stands between two mesh
+    // vertices and has no vertex of its own -- which is why endVert() refuses a
+    // closed chain rather than handing back the -1 that used to be there.
+    if (c.closed) {
+      CHECK(c.param(0) == Approx(0.0));
+      CHECK(c.point(mm.pos, 0).isApprox(mm.pos[c.rawRun().front()]));
+      CHECK(c.param(c.stationCount() - 1) > static_cast<double>(c.rawCount() - 1));
+    }
+
+    // Interpolated stations exist, and they are exactly the ones whose parameter
+    // is not a whole crease vertex. That is the condition under which the list
+    // holds -1, said in the vocabulary the chain still exposes.
+    size_t interior = 0;
+    for (int k = 0; k < c.stationCount(); ++k) {
+      const double p = c.param(k);
+      if (p > std::floor(p)) ++interior;
+      // Whatever the station is, its position is the point its own parameter
+      // names on the crease. `pts`, `at` and the station list are one list.
+      const int j = static_cast<int>(std::floor(p));
+      const double f = p - static_cast<double>(j);
+      const std::vector<int>& run = c.rawRun();
+      const Vector3d a = mm.pos[run[j % c.rawCount()]];
+      const Vector3d b = mm.pos[run[(j + 1) % c.rawCount()]];
+      CHECK((c.point(mm.pos, k) - (a + f * (b - a))).norm() < 1e-9);
+    }
+    CHECK(interior > 0);
   }
 }
 

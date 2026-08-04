@@ -26,6 +26,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -155,11 +156,20 @@ using SpineInterval = std::pair<double, double>;
 // A chain has two polylines, and the distinction only appears once one has been
 // resampled. `raw` is the crease as the mesh has it, every vertex of it, and is
 // never altered by anything here. The stations — the points the bead's sections
-// are placed at — are `at`, `pts` and `verts` read together: `at[i]` is where
+// are placed at — are `at`, `pts` and `stations` read together: `at[i]` is where
 // station i sits in `raw`'s own parameter (integer k meaning exactly `raw[k]`,
 // k + f meaning f of the way along raw segment k), `pts[i]` is its position, and
-// `verts[i]` is the mesh vertex it is, or -1 where it is a new point interior to
-// a raw segment.
+// `stations[i]` is the mesh vertex it IS, or -1 where it is a new point interior
+// to a raw segment.
+//
+// The list is called `stations` and not `verts` because it is not the vertices
+// of this crease. Reading it as if it were is a bug this builder has shipped
+// four times — in `checkChainSizes`, `arrivesStraight`, `filletedEdges` and
+// `chainJunctions` — each time found at integration and never by a test. It is
+// private for the same reason: the only two questions it can answer from outside
+// are `stationCount()` and, on an open chain, `endVert()`. Anything else about
+// the crease is a question for `rawRun()`, `param()`, `point()`, `inEdge()`,
+// `outEdge()` or `rawMid()`.
 //
 // `at` and `pts` empty is the identity: one station per crease vertex, which is
 // how every chain leaves buildChains and how it stays unless resampleChains has
@@ -172,39 +182,59 @@ using SpineInterval = std::pair<double, double>;
 // end by construction, and the whole of the junction, brush-coverage and
 // corner-cell bookkeeping identifies ends by their mesh vertex.
 //
-// A CLOSED chain has one pinned station and it is `verts[0]`. A ring has no last
+// A CLOSED chain has one pinned station and it is station 0. A ring has no last
 // station to pin — station count-1 is placed by arc length like any other — so
-// `verts.back()` on a resampled ring IS -1, and `verts.front()` is the only index
-// of it that can be read as a mesh vertex. Every consumer of `verts.back()` in
-// this builder therefore skips closed chains first, and must go on doing so.
+// the last station of a resampled ring IS -1, and station 0 is the only one of
+// it that can be read as a mesh vertex. That is why `endVert()` asserts the
+// chain is open: on a ring there is no end to ask about, and every consumer that
+// used to reach for the last station skipped closed chains first.
 //
-// `verts.size()` equals `rawRun().size()` today, because the resampler emits as
-// many stations as the crease has segments. Nothing enforces that. If the station
-// count ever stops matching, every `verts.size()` here silently changes meaning,
-// so read `rawCount()` when the question is about the crease.
+// `stationCount()` equals `rawCount()` today, because the resampler emits as
+// many stations as the crease has segments. Nothing enforces that; the invariant
+// is pinned by a test rather than by the type. If the station count ever stops
+// matching, every `stationCount()` here silently changes meaning, so read
+// `rawCount()` when the question is about the crease.
 struct Chain
 {
-  std::vector<int> verts;
   bool closed = false;
   std::vector<SpineInterval> keep;
   std::vector<int> raw;
   std::vector<double> at;
   std::vector<Vector3d> pts;
 
-  // The crease polyline, which is `raw` once anything has set it and `verts`
-  // before that — buildChains fills `raw`, so the fallback is only for a Chain
-  // assembled by hand, as the unit tests do.
-  const std::vector<int>& rawRun() const { return raw.empty() ? verts : raw; }
+  // How many stations the bead's sections are placed at. In station space, which
+  // is what `keep`, `at`, `pts` and the section lists are all in. Not a count of
+  // anything the mesh has — that is `rawCount()`.
+  int stationCount() const { return static_cast<int>(stations.size()); }
+
+  // The mesh vertex an OPEN chain ends on, front or back. Only an open chain has
+  // one: a ring's last station is placed by arc length like any interior one and
+  // is -1 on any chain the resampler touched.
+  int endVert(bool front) const
+  {
+    assert(!closed && "a ring has no end vertex; its last station may be -1");
+    assert(stations.size() >= 2);
+    return front ? stations.front() : stations.back();
+  }
+
+  // Replace the station list. The crease walk, the resampler and the raw-station
+  // rebuild are the only three things that do this.
+  void setStations(std::vector<int> s) { stations = std::move(s); }
+
+  // The crease polyline, which is `raw` once anything has set it and the station
+  // list before that — buildChains fills `raw`, so the fallback is only for a
+  // Chain assembled by hand, as the unit tests do.
+  const std::vector<int>& rawRun() const { return raw.empty() ? stations : raw; }
   int rawCount() const { return static_cast<int>(rawRun().size()); }
 
   // Where station i sits in the crease's own parameter.
   double param(int i) const { return at.empty() ? static_cast<double>(i) : at[i]; }
 
-  // Station i's position. Identical to m.pos[verts[i]] whenever that is what it
-  // is, since `pts` is filled by copy.
+  // Station i's position. Identical to m.pos[stations[i]] whenever the station
+  // is a mesh vertex, since `pts` is filled by copy.
   const Vector3d& point(const std::vector<Vector3d>& pos, int i) const
   {
-    return pts.empty() ? pos[verts[i]] : pts[i];
+    return pts.empty() ? pos[stations[i]] : pts[i];
   }
 
   // The mesh edge the crease arrives at station i on, and the one it leaves by.
@@ -248,6 +278,12 @@ struct Chain
     const int k = std::min(static_cast<int>(0.5 * (a + b)), n - 1);
     return {run[k % n], run[(k + 1) % n]};
   }
+
+private:
+  // The mesh vertex under each station, or -1 where the station is interior to a
+  // raw segment. Private: see the note above the struct. Everything this can
+  // legitimately be asked is above it.
+  std::vector<int> stations;
 };
 
 // Walk the selected edges into chains via shared vertices. Vertices of degree 2
@@ -381,7 +417,6 @@ struct ChainContact
   Vector3d TA, TB;
   double radius = 0.0;
   int surfaceA = -1, surfaceB = -1;
-  int vert = -1;        // the mesh vertex, or -1 between two of them
   double offFace = 0.0; // how far past the end of its wall the blend would stop
   bool valid = false;
 };

@@ -268,12 +268,12 @@ std::vector<Chain> buildChains(const MergedMesh& m, const std::vector<EdgeKey>& 
     for (const int w : ns) {
       if (!remaining.erase(edgeKey(v, w))) continue;
       Chain chain;
-      chain.verts = {v, w};
+      chain.raw = {v, w};
       int prev = v, cur = w;
       while (nbr[cur].size() == 2) {
         const int nx = nbr[cur][0] == prev ? nbr[cur][1] : nbr[cur][0];
         if (!remaining.erase(edgeKey(cur, nx))) break;
-        chain.verts.push_back(nx);
+        chain.raw.push_back(nx);
         prev = cur;
         cur = nx;
       }
@@ -287,13 +287,13 @@ std::vector<Chain> buildChains(const MergedMesh& m, const std::vector<EdgeKey>& 
     remaining.erase(remaining.begin());
     Chain chain;
     chain.closed = true;
-    chain.verts = {start.first, start.second};
+    chain.raw = {start.first, start.second};
     int prev = start.first, cur = start.second;
     while (true) {
       const int nx = nbr[cur][0] == prev ? nbr[cur][1] : nbr[cur][0];
       if (!remaining.erase(edgeKey(cur, nx))) break;
-      if (nx == chain.verts.front()) break;  // ring closed; closing edge consumed
-      chain.verts.push_back(nx);
+      if (nx == chain.raw.front()) break;  // ring closed; closing edge consumed
+      chain.raw.push_back(nx);
       prev = cur;
       cur = nx;
     }
@@ -311,7 +311,7 @@ std::vector<Chain> buildChains(const MergedMesh& m, const std::vector<EdgeKey>& 
     return a.z() < b.z();
   };
   for (Chain& chain : chains) {
-    auto& vs = chain.verts;
+    auto& vs = chain.raw;
     if (chain.closed) {
       const auto mi = std::min_element(vs.begin(), vs.end(), less);
       std::rotate(vs.begin(), mi, vs.end());
@@ -321,11 +321,12 @@ std::vector<Chain> buildChains(const MergedMesh& m, const std::vector<EdgeKey>& 
     }
   }
   std::sort(chains.begin(), chains.end(),
-            [&](const Chain& a, const Chain& b) { return less(a.verts.front(), b.verts.front()); });
+            [&](const Chain& a, const Chain& b) { return less(a.raw.front(), b.raw.front()); });
 
-  // The crease as the mesh has it. `at` and `pts` are left empty, which is the
-  // identity: one station per crease vertex, standing exactly on it.
-  for (Chain& chain : chains) chain.raw = chain.verts;
+  // The walk above fills `raw`, the crease as the mesh has it. `at` and `pts`
+  // are left empty, which is the identity: one station per crease vertex,
+  // standing exactly on it, so the station list is the crease itself.
+  for (Chain& chain : chains) chain.setStations(chain.raw);
 
   return chains;
 }
@@ -380,11 +381,11 @@ void resampleChains(const MergedMesh& m, std::vector<Chain>& chains, double frac
 
     std::vector<double> at;
     std::vector<Vector3d> pts;
-    std::vector<int> verts;
+    std::vector<int> stationVerts;
     const int stations = chain.closed ? count : count + 1;
     at.reserve(stations);
     pts.reserve(stations);
-    verts.reserve(stations);
+    stationVerts.reserve(stations);
     for (int k = 0; k < stations; ++k) {
       // The ends are the crease's ends and are taken from the mesh, not solved
       // for: k = 0 is vertex 0 (a ring's canonical start as much as an open
@@ -403,12 +404,12 @@ void resampleChains(const MergedMesh& m, std::vector<Chain>& chains, double frac
       const double f = p - static_cast<double>(j);
       at.push_back(p);
       if (f <= 0.0) {
-        verts.push_back(run[j % n]);
+        stationVerts.push_back(run[j % n]);
         pts.push_back(m.pos[run[j % n]]);
       } else {
         const Vector3d& a = m.pos[run[j]];
         const Vector3d& b = m.pos[run[(j + 1) % n]];
-        verts.push_back(-1);
+        stationVerts.push_back(-1);
         pts.push_back(a + f * (b - a));
       }
     }
@@ -416,14 +417,14 @@ void resampleChains(const MergedMesh& m, std::vector<Chain>& chains, double frac
     if (at.size() < static_cast<size_t>(chain.closed ? 3 : 2)) continue;
     chain.at = std::move(at);
     chain.pts = std::move(pts);
-    chain.verts = std::move(verts);
+    chain.setStations(std::move(stationVerts));
   }
 }
 
 std::vector<SpineInterval> chainSelection(const MergedMesh& m, const Chain& chain,
                                           const BrushVolume& brush, double debounce)
 {
-  const size_t n = chain.verts.size();
+  const size_t n = static_cast<size_t>(chain.stationCount());
   const size_t segments = n < 2 ? 0 : (chain.closed ? n : n - 1);
   if (segments == 0 || brush.empty()) return {};
 
@@ -600,7 +601,7 @@ std::vector<StationNormals> chainNormals(const MergedMesh& m,
     return true;
   };
 
-  const int n = static_cast<int>(chain.verts.size());
+  const int n = chain.stationCount();
   std::vector<StationNormals> out(n);
   for (int i = 0; i < n; ++i) {
     StationNormals s;
@@ -862,11 +863,9 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
       c.offFace, nearestOnWall(c.C - dir * c.radius * n, c.v, tri, surface, budget, nullptr));
   };
 
-  auto contactAt = [&](const StationNormals& s, int vert, bool turnedA = false,
-                       bool turnedB = false) {
+  auto contactAt = [&](const StationNormals& s, bool turnedA = false, bool turnedB = false) {
     ChainContact c;
     c.v = s.v;
-    c.vert = vert;
     if (!s.valid) return c;
 
     const double cosPhi = std::clamp(s.nA.dot(s.nB), -1.0, 1.0);
@@ -946,10 +945,9 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
         turnedA = inA != outA;
         turnedB = inB != outB;
       }
-      station = contactAt(stations[i], chain.verts[i], turnedA, turnedB);
+      station = contactAt(stations[i], turnedA, turnedB);
     } else {
       station.v = stations[i].v;
-      station.vert = chain.verts[i];
     }
     out.push_back(std::move(station));
     if (i >= segments || samplesPerSegment <= 0) continue;
@@ -996,7 +994,7 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
         out.push_back(std::move(skipped));
         continue;
       }
-      out.push_back(contactAt(s, -1));
+      out.push_back(contactAt(s));
     }
   }
   return out;
@@ -1023,7 +1021,7 @@ Chain rawStationChain(const Chain& chain)
 
   Chain out;
   out.raw = chain.rawRun();
-  out.verts = out.raw;
+  out.setStations(out.raw);
   out.closed = chain.closed;
 
   const int nsta = static_cast<int>(chain.at.size());
@@ -1128,9 +1126,9 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
   // which is a corner and not an overshoot.
   std::map<int, int> endsAt;
   for (const Chain& chain : chains) {
-    if (chain.closed || chain.verts.size() < 2) continue;
-    ++endsAt[chain.verts.front()];
-    ++endsAt[chain.verts.back()];
+    if (chain.closed || chain.stationCount() < 2) continue;
+    ++endsAt[chain.endVert(/*front=*/true)];
+    ++endsAt[chain.endVert(/*front=*/false)];
   }
   std::vector<Vector3d> junctionPos;
   for (const auto& [v, count] : endsAt)
@@ -1852,7 +1850,7 @@ bool intervalCovers(const SpineInterval& iv, double lo, double hi)
 bool endTouched(const Chain& chain, bool front)
 {
   if (chain.keep.empty()) return true;
-  const size_t n = chain.verts.size();
+  const size_t n = static_cast<size_t>(chain.stationCount());
   if (n < 2) return false;
   const double vertex = front ? 0.0 : static_cast<double>(n - 1);
   for (const SpineInterval& iv : chain.keep)
@@ -1866,7 +1864,7 @@ bool endTouched(const Chain& chain, bool front)
 // gives the whole of itself.
 SpineInterval endWindow(const MergedMesh& m, const Chain& chain, bool front, double reach)
 {
-  const size_t n = chain.verts.size();
+  const size_t n = static_cast<size_t>(chain.stationCount());
   const double vertex = front ? 0.0 : static_cast<double>(n - 1);
   const double step = front ? 1.0 : -1.0;
   double param = vertex;
@@ -1913,7 +1911,7 @@ SpineInterval endWindow(const MergedMesh& m, const Chain& chain, bool front, dou
 bool endAnchored(const MergedMesh& m, const Chain& chain, bool front, double reach)
 {
   if (chain.keep.empty()) return true;
-  if (chain.verts.size() < 2) return false;
+  if (chain.stationCount() < 2) return false;
 
   const SpineInterval window = endWindow(m, chain, front, reach);
   for (const SpineInterval& iv : chain.keep)
@@ -2148,17 +2146,17 @@ std::vector<int> dropUncoveredCorners(const MergedMesh& m, std::vector<Chain>& c
   // How many creases the corner has, asked of the selection before the brush.
   std::map<int, int> arms;
   for (const Chain& chain : candidates) {
-    if (chain.closed || chain.verts.size() < 2) continue;
-    ++arms[chain.verts.front()];
-    ++arms[chain.verts.back()];
+    if (chain.closed || chain.stationCount() < 2) continue;
+    ++arms[chain.endVert(/*front=*/true)];
+    ++arms[chain.endVert(/*front=*/false)];
   }
 
   std::map<int, int> touching, covering;
   for (const Chain& chain : chains) {
-    if (chain.closed || chain.verts.size() < 2) continue;
+    if (chain.closed || chain.stationCount() < 2) continue;
     for (const bool front : {true, false}) {
       if (!endTouched(chain, front)) continue;
-      const int v = front ? chain.verts.front() : chain.verts.back();
+      const int v = chain.endVert(front);
       ++touching[v];
       if (endAnchored(m, chain, front, r)) ++covering[v];
     }
@@ -2208,13 +2206,13 @@ std::vector<int> dropUncoveredCorners(const MergedMesh& m, std::vector<Chain>& c
   // settles this, and the counts above stay the counts the decision was made on.
   std::vector<Chain> keeping;
   for (Chain& chain : chains) {
-    const size_t n = chain.verts.size();
+    const size_t n = static_cast<size_t>(chain.stationCount());
     if (!chain.keep.empty() && !chain.closed && n >= 2) {
       std::vector<SpineInterval> kept;
       for (const SpineInterval& iv : chain.keep) {
         bool drop = false;
         for (const bool front : {true, false}) {
-          const int v = front ? chain.verts.front() : chain.verts.back();
+          const int v = chain.endVert(front);
           if (uncovered.count(v) == 0) continue;
           const double vertex = front ? 0.0 : static_cast<double>(n - 1);
           const SpineInterval window = endWindow(m, chain, front, r);
@@ -2461,9 +2459,9 @@ std::vector<Junction> chainJunctions(const MergedMesh& m,
   // Where the neighbouring mesh vertex is genuinely wanted it is rawRun()[1].
   std::map<int, int> ends;  // vertex -> how many chain ends land on it
   for (const Chain& chain : chains) {
-    if (chain.closed || chain.verts.size() < 2) continue;
-    if (endAnchored(m, chain, /*front=*/true, r)) ++ends[chain.verts.front()];
-    if (endAnchored(m, chain, /*front=*/false, r)) ++ends[chain.verts.back()];
+    if (chain.closed || chain.stationCount() < 2) continue;
+    if (endAnchored(m, chain, /*front=*/true, r)) ++ends[chain.endVert(/*front=*/true)];
+    if (endAnchored(m, chain, /*front=*/false, r)) ++ends[chain.endVert(/*front=*/false)];
   }
 
   // Every triangle that touches a vertex, so a junction can be asked about the
@@ -2722,10 +2720,10 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   // continuation only where the crease arrives straight; see arrivesStraight.
   std::set<int> arrivesBent;
   for (const Chain& c : chains) {
-    if (c.closed || c.verts.size() < 2) continue;
+    if (c.closed || c.stationCount() < 2) continue;
     for (const bool front : {true, false})
       if (!arrivesStraight(m, c, front))
-        arrivesBent.insert(front ? c.verts.front() : c.verts.back());
+        arrivesBent.insert(c.endVert(front));
   }
   // Every use below asks the same question of the same vertex, and answering it
   // walks the edge table, so it is answered once.
@@ -2810,7 +2808,10 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
     for (const bool front : {true, false}) {
       const size_t endIdx = front ? 0 : n - 1;
       const size_t nbrIdx = front ? 1 : n - 2;
-      const auto it = junctionAt.find(chain.verts[endIdx]);
+      // The chain's own end vertex. `endIdx` is an index into the section list,
+      // which is the same length as the station list here but is not the same
+      // thing, and only the chain can be asked which mesh vertex it ends on.
+      const auto it = junctionAt.find(chain.endVert(front));
       if (it == junctionAt.end()) continue;
       const RoundSection& a = sec[nbrIdx];
       const RoundSection& b = sec[endIdx];
@@ -3023,9 +3024,9 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   {
     std::map<int, int> endsAt;
     for (size_t ci = 0; ci < chains.size(); ++ci) {
-      if (!chainUsable[ci] || chains[ci].closed || chains[ci].verts.size() < 2) continue;
-      ++endsAt[chains[ci].verts.front()];
-      ++endsAt[chains[ci].verts.back()];
+      if (!chainUsable[ci] || chains[ci].closed || chains[ci].stationCount() < 2) continue;
+      ++endsAt[chains[ci].endVert(/*front=*/true)];
+      ++endsAt[chains[ci].endVert(/*front=*/false)];
     }
 
     for (size_t ci = 0; ci < chains.size(); ++ci) {
@@ -3033,7 +3034,7 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
       for (const bool front : {true, false}) {
         std::vector<RoundSection>& sec = sections[ci];
         if (sec.size() < 2) break;
-        const int vert = front ? chains[ci].verts.front() : chains[ci].verts.back();
+        const int vert = chains[ci].endVert(front);
         if (endsAt[vert] < 2) continue;             // nothing else ends here
         if (junctionAt.count(vert) != 0) continue;  // a corner already answers for it
 
@@ -3175,9 +3176,9 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   };
   std::map<int, std::vector<int>> chainsAt;  // vertex -> chains with an end there
   for (size_t ci = 0; ci < chains.size(); ++ci) {
-    if (chains[ci].closed || chains[ci].verts.size() < 2) continue;
-    chainsAt[chains[ci].verts.front()].push_back(static_cast<int>(ci));
-    chainsAt[chains[ci].verts.back()].push_back(static_cast<int>(ci));
+    if (chains[ci].closed || chains[ci].stationCount() < 2) continue;
+    chainsAt[chains[ci].endVert(/*front=*/true)].push_back(static_cast<int>(ci));
+    chainsAt[chains[ci].endVert(/*front=*/false)].push_back(static_cast<int>(ci));
   }
   // Whether a chain is kept apart is asked of the chain, not of the model. A
   // model can carry a served corner in one place and a withheld one in another,
@@ -3190,8 +3191,8 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   // everything was in before the rule existed. A seam is two beads meeting, so a
   // lone chain end has no seam to make and does not count as served.
   auto servedEnd = [&](size_t ci) {
-    if (chains[ci].closed || chains[ci].verts.size() < 2) return false;
-    for (const int v : {chains[ci].verts.front(), chains[ci].verts.back()}) {
+    if (chains[ci].closed || chains[ci].stationCount() < 2) return false;
+    for (const int v : {chains[ci].endVert(/*front=*/true), chains[ci].endVert(/*front=*/false)}) {
       const auto it = chainsAt.find(v);
       if (it != chainsAt.end() && it->second.size() > 1 && seamVertex(v)) return true;
     }
@@ -3598,8 +3599,8 @@ std::shared_ptr<const Geometry> buildFilletTool(
     std::vector<Chain> selected;
     size_t candidates = 0;
     for (Chain& chain : usable) {
-      const size_t segments =
-        chain.verts.size() < 2 ? 0 : (chain.closed ? chain.verts.size() : chain.verts.size() - 1);
+      const size_t nsta = static_cast<size_t>(chain.stationCount());
+      const size_t segments = nsta < 2 ? 0 : (chain.closed ? nsta : nsta - 1);
       candidates += segments;
 
       std::vector<SpineInterval> keep = chainSelection(m, chain, volume, debounce);
@@ -3636,8 +3637,8 @@ std::shared_ptr<const Geometry> buildFilletTool(
     // above, so the number is what will be built and not what was proposed.
     size_t taken = 0;
     for (const Chain& chain : selected) {
-      const size_t segments =
-        chain.verts.size() < 2 ? 0 : (chain.closed ? chain.verts.size() : chain.verts.size() - 1);
+      const size_t nsta = static_cast<size_t>(chain.stationCount());
+      const size_t segments = nsta < 2 ? 0 : (chain.closed ? nsta : nsta - 1);
       if (chain.keep.empty()) {
         taken += segments;
         continue;
