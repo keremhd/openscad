@@ -49,6 +49,42 @@ the env var.
 mode that cannot ship has no value. The question is closed on that ground — not deferred, and not an
 outstanding gap.
 
+## AMENDMENT, same day — the fallback this predicate selects is itself invalid
+
+Renders were commissioned after this decision was taken, on the owner's suspicion that *"putting a
+bead in was also broken"*. **The suspicion was correct, and the evidence is a proof rather than an
+impression.**
+
+At a curved arrival the seated-bead fallback does not build a bead. It leaves a thin upright fin —
+two sail surfaces meeting at a cusp, standing proud of both plate and boss wall, a fan of slivers
+converging on one apex. Measured on `bcurve.scad` (run unmodified, threshold 8.44°, zero
+"does not fit" warnings, `Status: NoError`):
+
+| | `kept` (fallback taken) | `removed` (rule ungated) |
+|---|---|---|
+| Euler χ | **5 — odd** | 2 |
+| mesh genus | **−1.5 — fractional** | 0 |
+| edges with >2 faces | **5** | 0 |
+| boundary edges | 0 | 0 |
+| components | 1 | 1 |
+
+A closed orientable surface cannot have odd χ or fractional genus. The `kept` arm at this corner is
+**not a valid solid**. Stable at welds 1e-7 and 1e-6. Images:
+`../arrives-straight-images/bcurve-corner-{shaded,mesh,zoom}-{kept,removed}.png`.
+
+**What this does and does not change.** It does not reverse the decision: removing `arrivesStraight`
+still degrades three corpus models and improves none, and that damage still grows with refinement.
+But it removes one of the two pillars the decision stood on. The honest statement of what is now
+known is:
+
+> `arrivesStraight` is a predicate choosing between two bad constructions. It is kept because
+> removing it measured worse overall, **not** because the branch it selects is sound. At a curved
+> arrival that branch produces an invalid solid.
+
+This is a live defect against the owner's standard that the bar is a valid solid, and it is not
+tracked by any of D22/D23/D24. Whoever picks up this area next should treat "the seated-bead
+fallback at a curved arrival" as an open defect in its own right, not as settled ground.
+
 ## Standing caveat for whoever reads this next
 
 `arrivesStraight`'s original justification has expired. D17.3 justified it on one model — *"it earns
