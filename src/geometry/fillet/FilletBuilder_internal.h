@@ -26,7 +26,6 @@
 
 #include <algorithm>
 #include <array>
-#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <map>
@@ -167,9 +166,9 @@ using SpineInterval = std::pair<double, double>;
 // four times — in `checkChainSizes`, `arrivesStraight`, `filletedEdges` and
 // `chainJunctions` — each time found at integration and never by a test. It is
 // private for the same reason: the only two questions it can answer from outside
-// are `stationCount()` and, on an open chain, `endVert()`. Anything else about
-// the crease is a question for `rawRun()`, `param()`, `point()`, `inEdge()`,
-// `outEdge()` or `rawMid()`.
+// are `stationCount()` and `openEnds()`. Anything else about the crease is a
+// question for `rawRun()`, `param()`, `point()`, `inEdge()`, `outEdge()` or
+// `rawMid()`.
 //
 // `at` and `pts` empty is the identity: one station per crease vertex, which is
 // how every chain leaves buildChains and how it stays unless resampleChains has
@@ -185,9 +184,13 @@ using SpineInterval = std::pair<double, double>;
 // A CLOSED chain has one pinned station and it is station 0. A ring has no last
 // station to pin — station count-1 is placed by arc length like any other — so
 // the last station of a resampled ring IS -1, and station 0 is the only one of
-// it that can be read as a mesh vertex. That is why `endVert()` asserts the
-// chain is open: on a ring there is no end to ask about, and every consumer that
-// used to reach for the last station skipped closed chains first.
+// it that can be read as a mesh vertex. That is why the end vertices are handed
+// out by `openEnds()`, which answers false on a ring and writes nothing: the
+// question and the guard that makes it legitimate are one call, so no caller can
+// take an end vertex without having handled the ring case. A guard that a caller
+// could forget, or that a build could compile out, would not do — every consumer
+// that reaches for the last station has to skip rings, and this is what makes it
+// so in every build rather than by convention.
 //
 // `stationCount()` equals `rawCount()` today, because the resampler emits as
 // many stations as the crease has segments. Nothing enforces that; the invariant
@@ -207,14 +210,20 @@ struct Chain
   // anything the mesh has — that is `rawCount()`.
   int stationCount() const { return static_cast<int>(stations.size()); }
 
-  // The mesh vertex an OPEN chain ends on, front or back. Only an open chain has
-  // one: a ring's last station is placed by arc length like any interior one and
-  // is -1 on any chain the resampler touched.
-  int endVert(bool front) const
+  // The two mesh vertices an OPEN chain ends on. False, with neither output
+  // touched, where there is no such pair: a ring, whose last station is placed by
+  // arc length like any interior one and is -1 on any chain the resampler
+  // touched, and a chain of fewer than two stations, which has no two ends. The
+  // guard is the return value and not an assertion, so it is there in a build
+  // with NDEBUG set as much as in one without; and it is the only way to reach a
+  // station's mesh vertex from outside the struct, so the -1 cannot be read as
+  // one by writing the check differently or by leaving it out.
+  [[nodiscard]] bool openEnds(int& front, int& back) const
   {
-    assert(!closed && "a ring has no end vertex; its last station may be -1");
-    assert(stations.size() >= 2);
-    return front ? stations.front() : stations.back();
+    if (closed || stations.size() < 2) return false;
+    front = stations.front();
+    back = stations.back();
+    return true;
   }
 
   // Replace the station list. The crease walk, the resampler and the raw-station

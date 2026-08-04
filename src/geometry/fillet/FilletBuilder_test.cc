@@ -771,11 +771,13 @@ TEST_CASE("chains: two curved creases and a straight one meet at a real junction
   REQUIRE(chains.size() == 4);
   size_t straight = 0;
   for (const auto& ch : chains) {
-    CHECK_FALSE(ch.closed);
+    // Every chain here is open, which is what having two end vertices means.
+    int endFront = -1, endBack = -1;
+    REQUIRE(ch.openEnds(endFront, endBack));
     // Both ends of every chain sit on the crossing line x = (xa + xb) / 2. The
     // grooves run up it; the arcs run from one end of it to the other.
-    CHECK(mm.pos[ch.endVert(/*front=*/true)].x() == Approx(0.5 * (xa + xb)));
-    CHECK(mm.pos[ch.endVert(/*front=*/false)].x() == Approx(0.5 * (xa + xb)));
+    CHECK(mm.pos[endFront].x() == Approx(0.5 * (xa + xb)));
+    CHECK(mm.pos[endBack].x() == Approx(0.5 * (xa + xb)));
     if (ch.stationCount() == 2) ++straight;
   }
   CHECK(straight == 2);   // the two grooves, one segment each
@@ -962,7 +964,10 @@ TEST_CASE("brush: the spine is cut where the brush crosses it, not at a station"
   const auto chains = buildChains(mm, selectedEdges(mm, adj, 45.0, /*wantConcave=*/true));
   REQUIRE(chains.size() == 1);
   REQUIRE(chains[0].stationCount() == 2);
-  REQUIRE(mm.pos[chains[0].endVert(/*front=*/true)].y() == Approx(0.0));
+  // Open, and its front end is the vertex at y = 0 — one assertion, since the
+  // end vertex is only there to be read once the chain has said it has ends.
+  int endFront = -1, endBack = -1;
+  REQUIRE((chains[0].openEnds(endFront, endBack) && mm.pos[endFront].y() == Approx(0.0)));
 
   const auto brush = box(20.0, 5.0, 20.0).Translate(manifold::vec3(-5.0, -1.0, -5.0));
   const auto keep = chainSelection(mm, chains[0], BrushVolume(brush.GetMeshGL64()), 0.01);
@@ -2547,10 +2552,9 @@ TEST_CASE("junction: a corner two creases still reach is closed at every opening
       // a size gate would have dropped.
       std::vector<Chain> flat;
       for (const Chain& c : chains) {
-        if (c.closed || c.stationCount() < 2) continue;
-        if (std::abs(mm.pos[c.endVert(/*front=*/true)].z() -
-                     mm.pos[c.endVert(/*front=*/false)].z()) > 1.0)
-          continue;
+        int endFront = -1, endBack = -1;
+        if (!c.openEnds(endFront, endBack)) continue;
+        if (std::abs(mm.pos[endFront].z() - mm.pos[endBack].z()) > 1.0) continue;
         flat.push_back(c);
       }
       CAPTURE(theta, r);
@@ -2689,9 +2693,10 @@ TEST_CASE("resampling: a station is not a crease vertex, and the ends still are"
 
     // I1 -- an OPEN chain's two ends are exact mesh vertices, resampled or not.
     // Corner cells and brush coverage are keyed by them.
-    if (!c.closed) {
+    int endFront = -1, endBack = -1;
+    if (c.openEnds(endFront, endBack)) {
       for (const bool front : {true, false}) {
-        const int v = c.endVert(front);
+        const int v = front ? endFront : endBack;
         REQUIRE(v >= 0);
         REQUIRE(static_cast<size_t>(v) < mm.pos.size());
         const int station = front ? 0 : c.stationCount() - 1;
@@ -2702,9 +2707,11 @@ TEST_CASE("resampling: a station is not a crease vertex, and the ends still are"
 
     // A ring has ONE pinned station and it is station 0. Its last station is
     // placed by arc length like any interior one, so it stands between two mesh
-    // vertices and has no vertex of its own -- which is why endVert() refuses a
-    // closed chain rather than handing back the -1 that used to be there.
+    // vertices and has no vertex of its own -- which is why openEnds() answers
+    // false for a ring rather than handing back the -1 that used to be there.
     if (c.closed) {
+      int ringFront = -1, ringBack = -1;
+      CHECK_FALSE(c.openEnds(ringFront, ringBack));
       CHECK(c.param(0) == Approx(0.0));
       CHECK(c.point(mm.pos, 0).isApprox(mm.pos[c.rawRun().front()]));
       CHECK(c.param(c.stationCount() - 1) > static_cast<double>(c.rawCount() - 1));
