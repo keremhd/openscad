@@ -81,7 +81,7 @@ The claim that a truncated open bead shows up in `bnd` and nowhere else is
   even count — two — to the single edge it has left.
 
 So no edge can come out carried by exactly one face. `bnd` is zero on a
-correct solid and zero on a broken one, and 36 of 36 tiles read zero. The
+correct solid and zero on a broken one, and 37 of 37 tiles read zero. The
 non-manifold edges that do appear are carried by **four** faces, never three,
 which is the same parity argument seen from the other side.
 
@@ -120,6 +120,24 @@ Everything else — `boss_plate`, `two_bosses`, `pipe_into_face`, `dome`,
 `hole_plate`, `bevel_boss`, `rib`, `pocket`, `lbracket`, `box_step`, `thin_slab`,
 `chamfer_box`, `brush_one_edge`, and both controls — is valid at defaults.
 
+## The two documentation models
+
+Neither is a gate check; both are rendered because the manual points at them.
+
+- **`shallow_crease`** is the reason `min_angle` exists. A chevron plate whose
+  fold turns 30°, below the 46° constant, so at stock defaults the fold stays
+  sharp while every 90° crease on the same plate is blended. The tile renders two
+  solids: the left at defaults, the right with `min_angle = 25`, which selects
+  the fold — measured, 0 concave feature edges against 1, and 16 convex against
+  17. That is the case the manual claims and the one a reader will hit.
+- **`mixed_fn`** used to hold that job and no longer can: a union of two
+  cylinders at `$fn` 48 and 10 is **valid at stock defaults with no
+  `min_angle`**, because a constant threshold does not care how many facet scales
+  a mesh carries. It is kept as a control for promise 2 instead. It is the model
+  a mesh-derived threshold would fail on, having two dense bands to choose
+  between and no reason to prefer either, so a clean render here is evidence that
+  nothing is reading the mesh.
+
 ## Known gaps, stated rather than left silent
 
 - **No radius sweep.** Each model carries one size. Sweeping it needs `R`
@@ -129,5 +147,4 @@ Everything else — `boss_plate`, `two_bosses`, `pipe_into_face`, `dome`,
   and re-imports it, and it is the check that proves the classifier reads the mesh
   rather than the file.
 - **No non-Manifold build check** — that the modules are absent rather than silent.
-- `FLAGS` in `sheet.sh` is where `--enable=fillet` goes once the feature is gated.
 - The `cross` no-output case is recorded, not diagnosed.

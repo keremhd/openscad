@@ -29,6 +29,7 @@ pocket                  -
 chamfer_box             -
 brush_one_edge          -
 cube_control            -       CONTROL, expect clean
-mixed_fn                skip    documentation case; needs min_angle by design
+mixed_fn                skip    CONTROL, expect clean; two facet scales in one mesh
 rib_into_boss           26      cylinder r=8; the curved-arrival seam vertex
 refused_neighbour       -       A3; refuses 5 creases next to built ones
+shallow_crease          -       documentation case; the min_angle exhibit, two solids per tile
