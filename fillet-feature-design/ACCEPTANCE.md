@@ -120,11 +120,28 @@ Five checks. All absolute — none is a comparison against a previous build.
 
 | | Check | Closes |
 |---|---|---|
-| A1 | Every bench model: zero edges carried by >2 faces, even Euler characteristic, genus as declared per model | the curved-arrival fin |
+| A1 | Every bench model: zero edges carried by >2 faces, even Euler characteristic, genus as declared per model. **Every cell measured at least three times and aggregated to the worst outcome** — one render per cell is not sound; see below | the curved-arrival fin |
 | A2 | **Provenance invariance** — see below | D22 |
 | A3 | Every refusal warns and names its crease. **Second clause retired** — see below | D24 |
 | A4 | Unit suite green on the pin: **2230 assertions / 88 cases** | regression |
 | A5 | Junction contact sheet, one render per bench model, reviewed by a person | the blind spot |
+
+### A1 — why one render per cell does not measure it
+
+`rib_into_boss` at `$fn`=14 returned a valid mesh on 2 of 40 identical invocations of one
+unchanging binary, and an invalid one on the other 38 — a different topology, `f=448` against
+`f=450`, not vertex-order noise. At `R`=1.0 the same model faults with SIGBUS on about one run
+in six.
+
+So a single render answers A1 correctly about 29 times in 30 and reports a real fault as clean
+the other time. **A1 is only meaningful as a repeated measurement**: at least three runs per
+cell, aggregated to the worst outcome, with the number of distinct meshes recorded.
+`fillet-bench/sweep.sh --repeat` is the form that holds; the single-point contact sheet is not.
+
+This also weakens, retrospectively, every green single-render result on this branch — the
+225-model corpus included. It does not invalidate them, because the flake direction is not
+known to be symmetric, but no all-green run taken one-render-per-model is stronger than the
+flake rate. The underlying fault is being hunted; until it is found and fixed, A1 cannot pass.
 
 ### A3 — why the "open bead" clause is gone
 
@@ -200,6 +217,8 @@ If no, it is a release note, not work.
 | D23 — size gate drops creases on impossible misses | documented limitation |
 | D19 — subtractive scalloped ledge | parked, tag `d19-wall-recognition` |
 | unguarded `Decompose()` on the finished solid, `FilletBuilder.cc:3400` | **open, new 2026-08-04.** Any high component count reaches it and it materialises a full mesh per component — 17.5 GB and SIGKILL on the `cross` repro. The `unionCells` comment at `:1421` already names this hazard. Fixing the threshold stopped `cross` reaching it; it did not make the path safe |
+| **the builder is nondeterministic in validity** | **open, new 2026-08-05. Blocks A1.** 2 of 40 identical runs of one binary returned a valid `rib_into_boss` at `$fn`=14, 38 returned invalid, all rc=0 — the topology moves between runs. A1 cannot be answered by a single render, and no green single-render result on this branch is stronger than the flake rate |
+| **`rib_into_boss` SIGBUS at `R`=1.0** | **open, new 2026-08-05.** rc=138 and no output on roughly one run in six. A hard memory fault, and the likeliest cause of the nondeterminism above; under hunt with sanitizers |
 | `rib_into_boss` invalid at `$fn`=14 and 32 | **open, new 2026-08-04.** Same corner as the fin, smaller fault. Neither tessellation is one the bench renders — `expect.txt` has no `$fn` axis, so a fault appearing at some tessellations and not others is invisible to it |
 
 ## How D22 was closed, and the two routes that were tried and abandoned

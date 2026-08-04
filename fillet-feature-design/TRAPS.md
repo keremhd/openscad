@@ -45,7 +45,19 @@ refusal counts beside every number. One reported win was byte-identical inertnes
     exists but its SVG rasteriser has no font.
 13. `CCACHE_BASEDIR=/Users/kerem/Devel/openscad` before configuring any worktree, or each
     worktree builds from a different absolute path and ccache hits ~12 %.
-14. **`ctest -R fillet` passing is necessary, never sufficient.** The shell-level `fillet-tests`
+14. **The builder is nondeterministic in validity, not only in vertex order.** `rib_into_boss`
+    at `$fn`=14 returned a valid mesh on 2 of 40 identical invocations of one unchanging binary
+    and an invalid one on the other 38 — `f=448` against `f=450`, so the topology moves, not the
+    vertex order. All 40 exited rc=0. At `R`=1.0 the same model crashes with SIGBUS on about one
+    run in six. **One render per cell reports a real fault as clean roughly once every thirty
+    cells**; measure each cell at least three times and aggregate to the worst outcome, as
+    `fillet-bench/sweep.sh --repeat` does. Every single-render measurement on this branch —
+    including the 225-model corpus and the original contact sheet — was taken without this
+    knowledge.
+15. **A measurement is only comparable within one binary.** Three builds existed on 2026-08-04
+    between 19:43 and 00:04, and a sweep begun under the first would have silently mixed them.
+    Record the binary's mtime on every row, and re-check it at the end of a run.
+16. **`ctest -R fillet` passing is necessary, never sufficient.** The shell-level `fillet-tests`
     suite is CSG scene-graph dumps plus fuzzy image compares on models the seam rule does not
     touch. The four models that would actually prove the geometry are slated for deletion before
     merge — do not delete them without a replacement.

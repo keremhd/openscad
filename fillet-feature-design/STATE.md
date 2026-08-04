@@ -182,10 +182,12 @@ building, so a comparison against it has no value.
 | D22 — crease threshold reads render settings | **closed 2026-08-04** by replacing the derivation with the constant 46°. |
 | `cross` yields no mesh at stock defaults | **closed 2026-08-04.** Not an empty mesh — a 17.5 GB OOM SIGKILL before the exporter ran. D22's tail, proven by a cliff at exactly 360/19, the model's own facet angle: `min_angle` 19 and above completes in 0.2 s and is valid, 18.9 and below is killed. |
 | **unguarded `Decompose()` on the finished solid** | **open, new 2026-08-04.** `FilletBuilder.cc:3400`. Materialises a full mesh per component, so any high component count turns an invalid-mesh bug into a machine-killer — `sample(1)` put 1572 of 1572 main-thread samples there. The `unionCells` comment at `:1421` already names the hazard ("cost 112 s and 17 GB on a plate of a hundred bosses"); the final call is that path, unguarded. Fixing the threshold stopped `cross` reaching it; the path is still unsafe. |
-| **`rib_into_boss` invalid at `$fn`=14 and 32** | **open, new 2026-08-04.** χ=4/3 non-manifold and χ=3/2 non-manifold, weld 1e-6. Same corner as the fin, smaller fault, on the bead surface where the two beads cross. |
+| **`rib_into_boss` invalid at `$fn`=14 and 32** | **open, new 2026-08-04.** Same corner as the fin, smaller fault, on the bead surface where the two beads cross. **Counts corrected 2026-08-05**: at `$fn`=32 it reads χ=4 with 4 non-manifold edges, not χ=3 with 2. Weld 1e-6, five runs. The defect reproduces; the counts most likely moved when D22's closure changed crease selection. |
+| **the builder is nondeterministic in validity** | **open, new 2026-08-05.** `rib_into_boss` at `$fn`=14: 2 of 40 identical runs of one unchanging binary returned a valid mesh (`v=226 e=672 f=448`), 38 returned invalid (`f=450`, nonman=3, χ=4), all rc=0. The topology moves, so this is not the known vertex-order noise. See TRAPS 14 — it makes every single-render measurement on this branch, the 225-model corpus included, weaker than it reads. |
+| **`rib_into_boss` SIGBUS at `R`=1.0** | **open, new 2026-08-05.** rc=138, no output, about one run in six. A hard memory fault, and the most economical explanation for the nondeterminism above. Observed on the 2026-08-04 23:56 build carrying an uncommitted `FilletBuilder.cc`; needs confirming against a committed tree. |
 | D23 — size gate drops creases on impossible misses | diagnosed, unfixed. The "equal radius" framing is recorded as wrong. |
 | D24 — bead truncated and left open at a refused neighbour | **closed 2026-08-04, does not reproduce.** Record: `decisions/2026-08-04-d24-does-not-reproduce.md`. Symptom is a blunt bead end, not a hole. |
-| **`refused_neighbour` non-manifold at r = 0.2, 0.8, 0.9, 1.0** | **open, new 2026-08-04. Breaks promise 1.** A 0.34 µm sliver on 4 faces at r=0.9, stable across weld 1e-4…1e-9, on the concave bead's tangency boundary — the oblique junction, not the refusal. The bench carries r=0.5, which is valid. |
+| **`refused_neighbour` non-manifold at r = 0.2, 0.8, 0.9, 1.0** | **open, new 2026-08-04. Breaks promise 1.** A 0.34 µm sliver on 4 faces at r=0.9, stable across weld 1e-4…1e-9, on the concave bead's tangency boundary — the oblique junction, not the refusal. The bench carries r=0.5, which is valid. **2026-08-05**: reproduced at all four radii on the 19:43 build; on the 23:56 build only r=0.8 is still invalid, with 0.2, 0.9 and 1.0 reading valid. Whether three quarters of this defect was fixed on purpose is not yet established, and the nondeterminism above is an alternative explanation that has not been excluded. |
 | latent A3 gap — `chainUsable[ci] = false` | **open, latent.** A two-station chain consumed by truncation is discarded with no warning; the node is argued not to reach it. |
 | D19 — subtractive scalloped ledge | parked at tag `d19-wall-recognition` (`fe8c8d9d1`). |
 
@@ -195,13 +197,26 @@ called the `arrivesStraight` branch clean and one rendered junction found a fin 
 characteristic inside it; and `box_step`'s recorded genus regressions turned out to be artefacts
 of the same blind spot.
 
-**The bench has the same blind spot on two axes.** `expect.txt` carries one `$fn` and one
-radius per model, so a fault appearing at some tessellations or some sizes and not others is
-invisible to it. Both have now bitten: `rib_into_boss` fails at `$fn`=14 and 32, and
-`refused_neighbour` fails at r = 0.2, 0.8, 0.9, 1.0 — each surviving an all-green bench
-because the one value the bench happens to carry is a good one. **A `$fn` axis and a radius
-axis are the two highest-value additions to the instrument**, and between them they would have
-caught both defects on the run that introduced the models.
+**The bench's two-axis blind spot is closed as an instrument, 2026-08-05.**
+`fillet-bench/sweep.sh` walks a `$fn` axis and a radius axis, numbers only, checkpointing every
+row; every bench model now carries a top-level `R` alongside `FNSET`, verified to leave all 24
+single-point results unmoved. Its `--selftest` reproduces both open defects independently
+before any sweep is read, and carries a facet-rotation invariant (`models/selfproof.scad` — a
+tee, not a cylinder, because a cylinder maps onto itself under a facet rotation and would pass
+vacuously).
+
+**The full sweep has not been run.** The binary was rebuilt twice by another line of work
+part-way through, and a table spanning three builds is not a table. Every row records the mtime
+of the binary that produced it, so the mixing is visible rather than silent.
+
+Two things the axes found immediately, before any systematic sweep: the validity
+nondeterminism and the SIGBUS above. The instrument earned its cost on the run that introduced
+it, which is the same thing the bench itself did.
+
+**Also stale:** all 24 models are now valid at stock defaults, so `fillet-bench/README.md`'s
+"First run, 2026-08-04" table of five bad tiles no longer describes the tree — D22's closure
+fixed them. `tee_small` reads `comp=2` at defaults, two closed surfaces rather than one solid,
+which nothing has yet explained.
 
 ---
 
