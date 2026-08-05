@@ -259,6 +259,86 @@ false after the fix — inverted rather than deleted, so a returning read now fa
 instrument; and the end-of-run summary read the elapsed-seconds field as the binary column, so
 it always claimed the table mixed builds.
 
+## 4d. The debris is pinched vertices, and the round pass is what plants it — 2026-08-05
+
+Four independent investigations converged on one mechanism. Each was asked a different
+question; none knew the others' answers.
+
+**The instrument is sound, and the week was not spent chasing an artifact.** `cross` at r=2.0
+reads genus 4 identically from weld 1e-4 down to *unwelded*, and no welding occurs on that mesh
+at all — the closest vertex pair is 5.8e-5 mm, sixty times the tolerance. Manifold independently
+reports `Genus: 4`. The suspected mechanism does exist — two tetrahedra welded across a gap read
+exactly `comp=2, nonman=0, χ=3` — it is simply not what these cells are doing. §5's "every
+failing case reports Genus 0" is about the junction faults, not about `cross`; there is no
+Manifold-versus-script disagreement here to adjudicate.
+
+**But `mesh.py` produces false acceptances, which is worse.** It checks non-manifold *edges*
+and never non-manifold *vertices*, and emits `genus` regardless. Five currently-green rows carry
+debris: `tee` r=0.5 (`VALID χ=4 genus=1 comp=3` — two point-attached slivers and no tunnel at
+all; the parity came out even because there were two pinches rather than one), `tee_small` at
+**stock defaults** and at `$fn`=10 and r=1.5 (a fully detached 6-triangle fragment,
+0.35 × 0.10 × 0.40 mm, sharing zero vertices — this is the `comp=2` §5 records as unexplained),
+and `cross` r=0.9 (a detached 4-triangle shard, 3.45e-7 mm³, winding number 0, floating
+*outside* the solid). `shallow_crease`'s nine `comp=2` rows are legitimate; that model renders
+two plates by design.
+
+**The χ-odd family is real**, and it is a 4-triangle tetrahedral sliver 0.05–0.4 mm across
+attached at *exactly one vertex* — for `tee`, always at (1.913417162, −4.619397663, 8.086582838).
+Tolerance-independent because those vertices are bit-identical. Manifold sees them perfectly
+(`Genus: −1`, two shells); it just does not call two shells an error. `cross` r=0.3 belongs to
+the other family — it carries `nonman=1` at every tolerance.
+
+**`cross`'s genus is real and irrelevant.** The handles were isolated by ball-removal — eight
+balls in the `x>0, z<0` octant take genus 4 → 0 with `comp` still 1 — and the throat measures
+**1.5 µm**, about 130× below a 0.2 mm layer. Confirmed by the owner in a third-party slicer:
+both r=1.5 and r=2.0 slice as a single object with no visible tunnel. They sit in *one* octant
+of a solid with full octahedral symmetry, which alone proves them boolean noise rather than
+intent. A correction to the record: an earlier reading of 0.18/0.42 mm was of near-*contact*
+gaps, not throats.
+
+**`Manifold::Simplify` clears twelve cells and breaks six**, so Part 1 cannot ship — but it
+identified the mechanism. It clears the whole sliver family and, unhypothesised, the entire
+`$fn`=8 boss-and-plate family at unchanged vertex counts. It breaks `tee_small` at stock
+defaults, takes five χ-even cells to χ-odd with no warning, and takes the unit suite to four
+failures — one of them a junction *gaining* a self-touch. It cannot be tuned: `Simplify(t)`
+runs `SimplifyTopology()` unconditionally, every value from 1e-10 to 1e-5 yields an identical
+mesh, and 1e-11 and below is inert. **It is a step, not a tolerance.**
+
+**The convergent answer: the remnant is a pinched vertex, not a sliver of volume.** That is why
+`SplitPinchedVerts()` fixes it and why vertex counts go *up*. The regression comes from
+`CollapseShortEdges()`, whose own comment states it removes handles. Both are private and
+Manifold's public surface exposes them only together. The next attempt is therefore
+`CleanupTopology()` alone — `SplitPinchedVerts` + `DedupeEdges`, no edge collapse — reached
+either by a vendored patch widening the public surface or by a pinch split written against
+`MeshGL64`. `DedupeEdges` is separately the candidate for the membrane, which is an exact
+duplicate triangle pair. `refused_neighbour` at r=1.05 says even that is not the whole family.
+
+**And the round pass is what plants the debris.** `fillet()` is
+`difference(union(target, fillet_tool), round_tool)`, the convex pass measured against the
+already-blended solid. On `cross` the concave pass is *clean* — eight junctions, corner balls
+seated, `noCorner=0`, `creaseLeavesUnfilleted=0`, **zero warnings and genus 0 at every radius**.
+The convex pass then selects 52–68 "convex creases" that do not exist on the input model,
+refuses about two-thirds of them, and subtracts beads along the rest; every warning coordinate
+clusters at the eight triple points (±4.24, ±4.24, ±4.24). Material ends up cut back to radius
+7.22 — *inside* the original sharp corner at 7.35, where the concave pass had pushed it out to
+7.53. **The ragged notch at a junction is a subtraction, not a missing corner ball.** The corner
+bead is built at all eight junctions, at every radius.
+
+This retires a framing: §4's `arrivesStraight` reasoning is **inert on `cross`** — it never
+fires. That conclusion was derived on `bcurve.scad`, where a selection brush cut the crease and
+the same brush withheld the corner through `noCorner`. `cross` uses no brush. The scope of §4's
+claim must be narrowed to brush-cut creases; it is neither vindicated nor refuted here.
+
+**Why the second pass is structurally in trouble, and it is not the classifier's fault.**
+`fillet()` uses one R for both passes, so the concave pass leaves surfaces already curved at R
+and an R-radius rolling ball essentially cannot fit against them. The ~2/3 refusal rate is
+therefore *expected and correct*; the suspect population is the 14–26 creases the size gate
+says do fit. Two live hypotheses, under measurement at the time of writing: that the gate's
+clearance test cannot see a neighbour curving away at exactly R, and that `fillet_tool`'s bead
+sits *proud* of the wall by the deliberate `eps` offset §5 already names — a step of any height
+has a steep dihedral, so a micron-high step would explain both the 46°–91° ridges and debris at
+the micron scale, as one phenomenon rather than two.
+
 ## 5. Open defects
 
 | defect | state |
@@ -399,9 +479,28 @@ flag, and drop them without Manifold", touched only `ACCEPTANCE.md` and `STATE.m
 the criterion, not the code, and read as done for a day. **A commit subject in the imperative
 is a claim; the diffstat is the evidence.**
 
-- **R1** — `buildFilletTool` echoes a mesh-statistics line unconditionally
-  (`FilletBuilder.cc:3498`), once per tool node and twice per `fillet()`. No other OpenSCAD
-  operator prints on success. Gate it behind `debug=`; the conditional warnings below it stay.
+**Stale entries, corrected 2026-08-05.** R1 and R5 were listed here as open and were already
+committed — `563cd3423` and `539380344`. This is the mechanism behind the sense of circling:
+the record over-reports open work, so each pass re-derives that the code is already fine
+before discovering it. **Audit this section against the tree, not item by item.**
+
+**R9 and R8 are done, 2026-08-05.** `077fca2fb` (degenerate triangle no longer classifies
+convex — `classifyEdge` returned an edge endpoint as `aFar`, now returns −1, below every
+threshold including `min_angle=0`), `a420eee16` (single-cell path drops volumeless parts),
+`50358c776` (`endSections` read through `find()`, not `operator[]`), `95a2ee80c`
+(`CORE_SOURCES` alphabetical), `4b2cfa41c` (warnings cut to one line each). Suite 2230/88
+unfiltered, `ctest -R fillet` 21/21 both backends, binary verified with `strings` rather than
+by mtime alone. R9b was harmless rather than wrong and was changed for consistency only.
+
+**Left for R7:** the comment above `buildFilletTool` still says the diagnostic line goes out
+"on every invocation". R1 made that false — a comment that now lies about behaviour, so fix
+the clause rather than merely trimming it. Also note `fillet()` has no `debug=` parameter, so
+after R1 the stats line is unreachable from `fillet()` at all; that is an unspecified
+behaviour change.
+
+- ~~**R1**~~ — **done, `563cd3423`.** `buildFilletTool` echoed a mesh-statistics line
+  unconditionally, once per tool node and twice per `fillet()`. Now gated on `node.debug`;
+  the conditional warnings below it stay.
 - **R2** — on a build without Manifold, `fillet()` **deletes the model**.
   `GeometryEvaluator.cc:1065`, the `#else` branch, warns and leaves `geom` null. **Resolved
   differently from the review's proposal, on the owner's decision:** do not pass the child
@@ -467,6 +566,28 @@ Recorded here because each was believed and each was false.
   **floor** at 0.08 and no upper edge short of 2.0; 2.0 was the top of the swept range, not a measured
   failure boundary. Corrected in source.
 
+**New 2026-08-05 — a copy in the shared scratchpad is not a pin.** An agent pinned the binary
+by copying the app bundle to the session scratchpad; a sibling agent's rebuild overwrote the
+copy mid-run, and the original build no longer exists on the machine. Pin into a *private*
+subdirectory. It was caught, and both builds were cross-checked as agreeing exactly on the
+model in question, so the results stood — but this is precisely how measurements here have gone
+wrong before.
+
+**New 2026-08-05 — `mesh.py` has no non-manifold-vertex check**, so a surface pinched at a
+point reads clean on `nonman` and announces itself only through χ parity, which is a coin flip
+on the pinch count. This is instrument #11 and the first found by asking what the *validity
+criterion* omits rather than whether a metric's value looked right. Four corrections follow,
+and none of them is the tolerance — position-welding at 1e-6 is the right reading, because a
+solid destined for manufacture is defined by its point set and not by its index table:
+
+1. Add a non-manifold-vertex check — the faces incident on a vertex must form a single
+   edge-connected fan; two or more fans is a pinch. Report it as its own count.
+2. Stop reporting `genus` when the surface is pinched, as is already done for `bnd`/`nonman`.
+   `genus=1` on `tee` r=0.5 is a number with no referent.
+3. Flag `comp > 1` on a model whose source is a single union.
+4. Report handle throat size beside genus, so a 1.5 µm handle can be triaged apart from a
+   0.4 mm loose sliver instead of weighing the same.
+
 **Instruments found broken (nine, cumulative):** `-o /dev/null` makes OpenSCAD skip the render and
 report zero calls; `timeout(1)` does not exist on this machine and made an export loop report 19/19
 FAILED; Catch2 splits test names on commas, so an unescaped test exclusion excludes nothing and
@@ -475,3 +596,55 @@ already known — earned its place again three times this session.
 
 **Environmental:** ten agent runs were lost to the 10-minute stall watchdog, host process exit and a
 network failure. Only committed work survived, every time.
+
+---
+
+## 9. What to do next, in order — written 2026-08-05
+
+Ordered so that nothing later invalidates anything earlier. The first item is small and is the
+reason the rest can be trusted.
+
+**1. Fix `mesh.py`'s criterion** (§7, four changes). Until it lands, A1 is measuring the wrong
+thing in both directions: it misses point-attached slivers and detached fragments entirely, and
+it reports a `genus` for pinched surfaces where the number has no referent. Everything below is
+measured with this instrument, so it goes first.
+
+**2. Re-run the 353-cell sweep under the fixed criterion.** The recorded sixteen not-valid cells
+are neither complete nor correct — at least five green cells carry debris. The true failure list
+does not exist yet, and no fix should be evaluated against the old one.
+
+**3. Settle why `round_tool` selects features it cannot blend.** Two hypotheses were under
+measurement when this was written; the agent's report is the next thing to read. Then design,
+against the constraints in `ACCEPTANCE.md` promise 5 — no tagging of first-pass geometry, and a
+tool must work from the mesh in front of it. The leading candidates, all mesh-only and all
+scaled by R, which the user supplies:
+   - **Ball seating**, which needs no constant: the ball's contact point lies R along each face
+     from the edge, so it is seated only if both contact points fall within their faces' extent.
+     At a step of height h ≪ R it never touches the short face at all.
+   - **A relief threshold**, or equivalently the owner's **minimum contact arc** — the same rule
+     in different units. Choose the constant from a visible gap in the measured distribution,
+     the way 46° was chosen, not by fitting one model.
+   Check any candidate against the `$fn`=8 family, which is the coarse-tessellation case where
+   "face extent" is one facet, and against a small but genuine feature — a rule that refuses
+   everything is useless, even though promise 1 makes false refusal the safe direction.
+
+**4. `CleanupTopology()` without `CollapseShortEdges`** (§4d). Specified, not started. Needs a
+vendored patch widening Manifold's public surface, or a pinch split against `MeshGL64`.
+Rebase `worktree-agent-a2867183791ec2485` first — it is based on `efe8e485a` and `kerem-fillet`
+has advanced past it, including in `FilletBuilder.cc`.
+
+**5. R7, the comment register.** Mechanical, decided, and unchanged by any of the above. Do it
+after the code stops moving, and fix the `buildFilletTool` comment that R1 made false.
+
+**6. Squash `0c0727583`; delete `fillet-feature-design/` and the four geometry-blind
+`fillet-tests` models.** Last, and only once everything above has landed — this file is the
+working record until then.
+
+**Note for whoever picks this up:** §4d says the same thing four independent investigations
+said from four different starting points. That convergence is the strongest evidence in this
+document, and it is worth more than any single measurement in it. The one-line summary is that
+**the debris is pinched vertices, planted by the convex pass building beads at scales where no
+bead belongs.** Three separate open defects on the §5 list are plausibly one bug.
+
+**A correction to a path reference:** the builder is at `src/geometry/fillet/FilletBuilder.cc`.
+Earlier entries in this file say `src/geometry/manifold/`, which is wrong.

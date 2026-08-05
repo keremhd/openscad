@@ -84,6 +84,43 @@ Consequences, all of which are part of this criterion and all now done:
 4. **Seams are acceptable.** A visible line where two blends meet is not a defect. The bar is
    a valid solid, not a smooth corner.
 
+5. **Every tool accepts any solid, including one it produced.** A tool's output is a solid
+   like any other, and a tool handed its own output — or another tool's — must behave as it
+   does on a modelled solid. `fillet()` is exactly this composition, so the property is not
+   optional.
+
+   **Tagging first-pass geometry is ruled out. Owner decision 2026-08-05, not open.** The
+   proposal was for the concave pass to mark the edges it created so the convex pass could
+   skip them. It is rejected on principle: a tool that needs privileged knowledge of how its
+   input was built is not reading a solid, and the same tool invoked by a user on an imported
+   STL would have no tag to read. This is promise 2's argument applied to geometry rather
+   than to the classifier — a solid does not carry the history that made it. Any fix must
+   work from the mesh in front of it.
+
+   **A feature far smaller than the radius is not a feature. Owner decision 2026-08-05.**
+   Classification today reads dihedral angle and nothing else, which is scale-blind: a 90°
+   step two microns high is indistinguishable from a 90° corner ten millimetres high. A tool
+   asked for radius R cannot meaningfully blend a feature whose relief is orders of magnitude
+   below R, and must skip it rather than build debris at the feature's own scale.
+
+   This is not a violation of promise 2. What promise 2 forbids is reading `$fn`, `$fa` and
+   `$fs` — render settings that describe the file rather than the shape. R is an explicit
+   argument the user makes about the geometry, and it is the scale the operator was asked to
+   work at. It is also the answer to the objection that refuted the local-threshold route
+   below: that attempt failed because only magnitude separates 45° from 90° and no global
+   scale was available. Here one is, and the user supplied it.
+
+   It follows that a tool must tolerate anomalies in its input rather than depend on its
+   input being clean — which is what promise 5 requires, and what an imported STL guarantees
+   it will meet.
+
+   The consequence, which is where the work goes instead: if a blend is tangent to the
+   surfaces it meets, the edges it leaves behind are shallow and no threshold selects them.
+   Where a second pass does select a first pass's output, **the question is why that edge is
+   steep**, not how to hide it. A 46°–91° convex ridge on a rolling-ball blend's own output
+   is a defect in the blend, and the leading suspect is a bead left blunt by a refusal or a
+   truncation — a blunt end is a real 90° edge, and a classifier is right to see it.
+
 ## Documented limitations — these ship
 
 - One size per invocation. No variable radius; no differing radii meeting at a corner.
