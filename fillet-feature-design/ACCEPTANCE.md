@@ -130,8 +130,11 @@ Consequences, all of which are part of this criterion and all now done:
   `--backend=cgal` *is* supported and tested: the node builds its tool through Manifold
   internally and hands the result to the CGAL pipeline, which is what
   `tests/regression/render-cgal/round-tool-tests-expected.png` is.
-  `doc-page/fillet.md:291` states this wrongly as "under the CGAL backend they warn and emit
-  nothing" — it conflates the runtime backend with the build option, and must be corrected.
+  `doc-page/fillet.md` stated this wrongly as "under the CGAL backend they warn and emit
+  nothing", conflating the runtime backend with the build option. **Corrected 2026-08-04,
+  `167536b62`** — it now names the build without Manifold as the limitation and says outright
+  that `--backend=cgal` is supported. This entry stayed on the open list for two days after the
+  fix landed and sent one agent to redo it; it is the §8 over-reporting fault in miniature.
 - Re-filleting an already-blended model is not reliable.
 - **The size gate refuses conservatively.** Some creases that could geometrically be blended
   are dropped with a warning (D23). Promise 1 makes this the correct failure direction.

@@ -882,10 +882,18 @@ from. Five of the seventeen are the `$fn`=8 family, four are χ-odd with no othe
 both were invisible to the single-point bench. The instrument earned its cost on the run that
 introduced it, which is what the bench itself did.
 
-**Also stale:** all 24 models are now valid at stock defaults, so `fillet-bench/README.md`'s
-"First run, 2026-08-04" table of five bad tiles no longer describes the tree — D22's closure
-fixed them. `tee_small` reads `comp=2` at defaults, two closed surfaces rather than one solid,
-which nothing has yet explained.
+**Also stale:** `fillet-bench/README.md`'s "First run, 2026-08-04" table of five bad tiles no
+longer describes the tree. Removed rather than repaired, 2026-08-06 — its `cross` row quotes
+"374 convex edges of 757 at an 18° threshold", a number that cannot exist now the threshold is
+the constant 46°, so the run is not fixable row by row.
+
+**Correction, 2026-08-06: "all 24 models are now valid at stock defaults" was true only under
+the pre-fix criterion, and this file asserted it after the criterion had moved.** `tee_small`
+at stock defaults is **not valid** — the `comp=2` recorded here as "which nothing has yet
+explained" is now explained, and it is a fully detached 6-triangle fragment sharing no vertex
+with the solid, 0.353 × 0.101 × 0.401 mm. `tee` at r=0.9 is not valid either. The corrected
+criterion (item 1) is what surfaced both. This is the same fault the file warns about in §8:
+a claim that was true when written, restated after the thing it depended on had changed.
 
 ---
 
@@ -1250,7 +1258,12 @@ based on `efe8e485a` and `kerem-fillet` has advanced past it, including in `Fill
 
 No further geometry work. Everything below is documentation, hygiene and one human review.
 
-**S1. Triage the 21 not-valid cells into the release notes.** This is the substantive item and
+**S1. Triage the 21 not-valid cells into the release notes — DONE 2026-08-06**, `a1adfc661`.
+**4 documented limitations, 17 known defects**; the cut, the three families and the measured
+scales are in `ACCEPTANCE.md` under "What ships broken". Raw measurements and the instrument
+are in `fillet-bench/work/s1-triage/`. The original text of this item follows.
+
+*Original:* This is the substantive item and
 it is what "documented limitation" has to mean concretely. `results/sweep-fd3dec78.tsv` is the
 list. Under `ACCEPTANCE.md`'s "A1's scope", every cell closed as a limitation **must carry its
 measured remnant scale in millimetres** in the row that closes it, so a later reader can
@@ -1266,11 +1279,10 @@ files. Fix the `buildFilletTool` comment that R1 made false — it still claims 
 line goes out "on every invocation", and it does not. Landed commit messages are history and
 are not rewritten.
 
-**S3. The two documentation defects.** `fillet-pr/doc-page/fillet.md:291` says the tools "warn
-and emit nothing" under the CGAL backend, which is wrong — the runtime `--backend=cgal` is
-supported and tested, and the real limitation is a build without Manifold. And
-`fillet-bench/README.md:155`'s "First run, 2026-08-04" table of five bad tiles no longer
-describes the tree.
+**S3. The two documentation defects — DONE.** The CGAL claim was **already fixed on 2026-08-04
+by `167536b62`** and this list was wrong to carry it; an agent was sent to redo a correction
+that had landed two days earlier. `fillet-bench/README.md`'s stale table is removed,
+`7d7f13e16`. The user-facing known-defects section is written, `d3bf02df7`.
 
 **S4. Regenerate `fillet-bench/sheets/` and review them — A5, the one human check.** See item
 3a above for why the current sheets are not merely stale but carry a false acceptance. Do this
