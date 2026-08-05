@@ -1258,6 +1258,23 @@ based on `efe8e485a` and `kerem-fillet` has advanced past it, including in `Fill
 
 No further geometry work. Everything below is documentation, hygiene and one human review.
 
+**Status at 2026-08-06.** S1 done (`a1adfc661`) — 4 limitations, 17 known defects. S3 done; one
+half of it had been done two days earlier and this file did not know. S2 in progress — the
+comment register is landing file by file (`9fbf4187d`, `c413926ef`, `5c1d7337d` and following);
+`FilletBuilder.cc` is the one still moving. **S4 and S5 are untouched and are the whole
+remainder.**
+
+**The gate, stated plainly for whoever picks this up.** A1 does **not** pass and will not:
+21 of 353 cells are not valid and 17 of them ship as named defects. A2 passes by construction.
+A3 passes. A4 is green at 2230/88 on `fd3dec78`. **A5 has never been run against a current
+binary** — that is S4, and it is the only acceptance check still capable of finding something
+new, because no pass has ever looked at a junction render. Everything else is known.
+
+**Do not reopen the size gate.** Three attempts are recorded in §4d, all reverted, all
+restorable in one command, and the reason to stop is a measured contradiction rather than
+exhaustion — see item 3 above. If someone insists, the single entry point is the
+boundary-contact exemption and nothing else.
+
 **S1. Triage the 21 not-valid cells into the release notes — DONE 2026-08-06**, `a1adfc661`.
 **4 documented limitations, 17 known defects**; the cut, the three families and the measured
 scales are in `ACCEPTANCE.md` under "What ships broken". Raw measurements and the instrument
