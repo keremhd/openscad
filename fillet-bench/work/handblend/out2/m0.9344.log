@@ -1,0 +1,12 @@
+ECHO: round_tool: selection brush takes 1 of 39 candidate edge(s) in file handblend_step.scad, line 63
+WARNING: round_tool: radius 1 does not fit the crease at [0, 1.934, 5.714] - the blend would leave the surface it is meant to meet, by 5.6535e-05; that crease is dropped in file handblend_step.scad, line 63
+Geometries in cache: 5
+Geometry cache size in bytes: 5464
+CGAL Polyhedrons in cache: 1
+CGAL cache size in bytes: 8500
+Total rendering time: 0:00:00.001
+   Top level object is a 3D object (manifold):
+   Status:     NoError
+   Genus:      0
+   Vertices:       34
+   Facets:         64
