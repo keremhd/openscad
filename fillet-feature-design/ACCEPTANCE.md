@@ -135,6 +135,30 @@ Consequences, all of which are part of this criterion and all now done:
 - Re-filleting an already-blended model is not reliable.
 - **The size gate refuses conservatively.** Some creases that could geometrically be blended
   are dropped with a warning (D23). Promise 1 makes this the correct failure direction.
+- **And against a tangent blend it accepts conservatively, which is the wrong direction.**
+  Owner decision 2026-08-05, after three measured attempts to fix it; the record is STATE.md
+  §4d and §9 item 3. `FilletBuilder.cc:1068` passes one threshold to both edge selection and
+  `smoothSurfaces`, so at 46° a tangent blend never reaches the crease threshold and merges
+  into the wall it sits on. The seat test is then asked about the merged surface, whose
+  curvature radius is R, and a radius-R ball genuinely seats anywhere on it. **The check
+  cannot fire.** Measured on hand-built geometry with no fillet module in it: the default
+  threshold accepts every clearance from 0.02 to 4.0, including one leaving 91% of the wall
+  missing.
+
+  A correct rule was built and measured — it reproduces the derived limit
+  `R(1−tan(Δ/2)) − d` to six figures with no false refusals and no geometry loss — but it
+  needs surface grouping finer than 45°, and no grouping value exists: the proof model needs
+  below 7.5°, `cross` needs above 12° for its cylinder seam, and below 30° three flat-walled
+  models false-refuse and shed half their vertices. **This is Route 2's refutation relocated
+  to the second parameter**, not a new problem: a cube, a `$fn`=4 prism and a `$fn`=8 cylinder
+  are locally congruent, and splitting the constant in two does not repeal that.
+
+  This is why "re-filleting an already-blended model is not reliable" is a limitation and not
+  a bug to be fixed before release. It is the same statement from the other end.
+
+  One prerequisite is unbuilt and is the only place a successor should start: a contact landing
+  on its own wall's boundary reads as a large miss, worth 11 unit-suite assertions, and it is
+  the plausible cause of the flat-model false refusals that close the grouping window.
 - **A crease shallower than 46° is not filleted unless `min_angle` says so.** This is the
   price of a constant threshold and it is paid on real models: the tee's own intersection
   curve carries a 15.86° quartet that is never selected by default. The operator picks one

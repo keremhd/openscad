@@ -1113,7 +1113,49 @@ pinched-vertex family is work.
 what actually survives — not against what this file predicts will survive. Three of the §5 open
 defects are plausibly one bug, so measuring after the fix is worth more than planning before it.
 
-**3. Build the ball-seating check.** See §4d. Two parts, and the second may be the larger:
+**3. Build the ball-seating check — CLOSED WITHOUT SHIPPING, owner decision 2026-08-05.**
+
+**The route is closed on evidence, and the size gate ships as a documented limitation.** Three
+attempts are recorded below and in §4d, each reverted, each restorable in one step. They are
+kept because they are the argument, not because anything is expected to resume them.
+
+What was established, and none of it is in doubt:
+- The 46° diagnosis is correct. The gate is structurally disabled, and both `handblend_step`
+  axes confirm it at the default threshold.
+- **A correct rule exists.** The mesh-seated ball with an angular normal-cone residual
+  reproduces the independently derived limit `R(1−tan(Δ/2)) − d` to six figures, causes no
+  false refusals on any genuine population, and loses no geometry (`tee` returns to its exact
+  224-vertex baseline; `cross` to 1290 against 1239).
+- **It cannot be reached through a threshold.** The rule needs surface grouping finer than 45°
+  to separate artifacts at all — at 46° the separation is *gone*, 32 of 72 caught with the
+  escapees at machine zero. But no grouping value works: `handblend_step` at `$fn`=48 needs
+  below **7.5°**, `cross` needs above **12°** for its cylinder seam, and below 30° three
+  flat-walled models (`box_step`, `lbracket`, `two_bosses`) false-refuse and shed half their
+  vertices. Those requirements are mutually exclusive.
+
+**That last point is Route 2's refutation arriving at the second parameter**, and it is why the
+decision is to stop rather than to try a fourth value. `ACCEPTANCE.md` already records that a
+cube, a `$fn`=4 prism and a `$fn`=8 cylinder are locally congruent, so no angle alone separates
+a coarse tessellation from a real chamfer. Splitting the constant in two does not repeal that;
+it relocates it.
+
+**The one untested card, recorded so it is not mistaken for unexplored ground.** The
+boundary-contact defect — a contact landing on the edge of its own wall reads as a large miss,
+because `surfaceRim` accepted that case and a one-sided normal cone has nothing to accept it
+with — is unbuilt, and is the plausible cause of the flat-model false refusals, since finer
+grouping creates more wall edges for contacts to land on. It is 11 of the unit suite's
+assertions. **It may well open the window.** The owner's decision is that finding out is not
+worth another attempt against a feature that already ships behind `--enable=fillet` with the
+gate documented as conservative. A successor who wants to reopen this starts there and nowhere
+else.
+
+**What ships instead:** D23's existing entry — "the size gate refuses conservatively" — is
+extended to say that it also *accepts* conservatively in the presence of a tangent blend, which
+is the re-fillet case promise 5 covers and which the documented limitation "re-filleting an
+already-blended model is not reliable" already names. No code changes.
+
+*Superseded plan, kept for the evidence:*
+   - Two parts, and the second may be the larger:
    - **Compare the seat foot against `r` — BUILT AND REVERTED 2026-08-05**, `06a12765a`,
      reverted at `fef81a712`, measured in §4d's last subsection. It confirms the 46° diagnosis
      on both `handblend_step` axes at the default threshold and it refuses genuine blends on
@@ -1193,23 +1235,59 @@ that the single-point contact sheet is not the form A1 holds in. The sheets are 
 Also stale and fixable without a render: `fillet-bench/README.md:155`, "First run, 2026-08-04",
 whose table of five bad tiles no longer describes the tree — D22's closure fixed them.
 
-**4. `CleanupTopology()` without `CollapseShortEdges`** (§4d). Specified, not started. Needs a
-vendored patch widening Manifold's public surface, or a pinch split against `MeshGL64`.
-Rebase `worktree-agent-a2867183791ec2485` first — it is based on `efe8e485a` and `kerem-fillet`
-has advanced past it, including in `FilletBuilder.cc`.
+**4. `CleanupTopology()` without `CollapseShortEdges`** (§4d) — **not started, and not on the
+shipping path.** Specified in §4d if anyone returns to it: it needs a vendored patch widening
+Manifold's public surface, or a pinch split written against `MeshGL64`, because
+`Manifold::Simplify` clears twelve cells and breaks six and cannot be tuned —
+`Simplify(t)` runs `SimplifyTopology()` unconditionally and is a step, not a tolerance.
+Deferred by the same decision that closed item 3: the remaining faults are documented rather
+than fixed. If it is ever picked up, rebase `worktree-agent-a2867183791ec2485` first — it is
+based on `efe8e485a` and `kerem-fillet` has advanced past it, including in `FilletBuilder.cc`.
 
-**5. R7, the comment register.** Mechanical, decided, and unchanged by any of the above. Do it
-after the code stops moving, and fix the `buildFilletTool` comment that R1 made false.
+---
 
-**6. Squash `0c0727583`; delete `fillet-feature-design/` and the four geometry-blind
-`fillet-tests` models.** Last, and only once everything above has landed — this file is the
-working record until then.
+## The shipping sequence — decided 2026-08-05, and it is the whole remaining plan
+
+No further geometry work. Everything below is documentation, hygiene and one human review.
+
+**S1. Triage the 21 not-valid cells into the release notes.** This is the substantive item and
+it is what "documented limitation" has to mean concretely. `results/sweep-fd3dec78.tsv` is the
+list. Under `ACCEPTANCE.md`'s "A1's scope", every cell closed as a limitation **must carry its
+measured remnant scale in millimetres** in the row that closes it, so a later reader can
+re-open it against a different manufacturing scale. Cells whose remnant is at a scale the user
+can reach are shipped as *known defects*, named in the documentation, not quietly folded in.
+Some scales are already measured — `cross`'s 1.5 µm genus throat, `refused_neighbour`'s 0.34 µm
+sliver, `tee_small`'s 0.35 × 0.10 × 0.40 mm detached fragment. The rest need measuring.
+
+**S2. R7, the comment register.** Mechanical and decided; see §8. Between a third and two
+fifths of `FilletBuilder.cc` is prose in a voice the tree does not use. Target roughly a third
+of current volume, same pass over `FilletBuilder_internal.h`, `FilletNode.cc` and the two test
+files. Fix the `buildFilletTool` comment that R1 made false — it still claims the diagnostic
+line goes out "on every invocation", and it does not. Landed commit messages are history and
+are not rewritten.
+
+**S3. The two documentation defects.** `fillet-pr/doc-page/fillet.md:291` says the tools "warn
+and emit nothing" under the CGAL backend, which is wrong — the runtime `--backend=cgal` is
+supported and tested, and the real limitation is a build without Manifold. And
+`fillet-bench/README.md:155`'s "First run, 2026-08-04" table of five bad tiles no longer
+describes the tree.
+
+**S4. Regenerate `fillet-bench/sheets/` and review them — A5, the one human check.** See item
+3a above for why the current sheets are not merely stale but carry a false acceptance. Do this
+after S2, on the binary that ships.
+
+**S5. Squash `0c0727583`; delete `fillet-feature-design/` and the four geometry-blind
+`fillet-tests` models.** Last. This file is the working record until then, and the four models
+must not be deleted without a replacement — `ctest -R fillet` passing is necessary, never
+sufficient.
 
 **Note for whoever picks this up:** §4d says the same thing four independent investigations
 said from four different starting points. That convergence is the strongest evidence in this
 document, and it is worth more than any single measurement in it. The one-line summary is that
 **the debris is pinched vertices, planted by the convex pass building beads at scales where no
-bead belongs.** Three separate open defects on the §5 list are plausibly one bug.
+bead belongs.** Three separate open defects on the §5 list are plausibly one bug — though the
+seat-test work partly refuted even that: 10 of the 21 failing cells were untouched by any
+change to the gate, so there is more than one bug in there.
 
 **A correction to a path reference:** the builder is at `src/geometry/fillet/FilletBuilder.cc`.
 Earlier entries in this file say `src/geometry/manifold/`, which is wrong.
