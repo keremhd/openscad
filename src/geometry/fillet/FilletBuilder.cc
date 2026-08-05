@@ -1468,6 +1468,9 @@ manifold::Manifold dropVolumelessParts(manifold::Manifold solid)
 manifold::Manifold unionCells(std::vector<manifold::Manifold>& cells)
 {
   if (cells.empty()) return {};
+  // Every other way out of here has been through dropVolumelessParts; a lone
+  // cell goes the same way so the result does not depend on how many there were.
+  if (cells.size() == 1) return dropVolumelessParts(cells.front());
 
   std::vector<manifold::Manifold> merged;
   while (cells.size() > 1) {
