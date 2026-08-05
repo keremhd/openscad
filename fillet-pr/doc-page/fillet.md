@@ -320,3 +320,41 @@ solid, so it is for looking at, not for building with.
 - **A crease shallower than 46° is not blended unless `min_angle` says so.** See
   min_angle above. This is the price of a threshold that does not read the mesh.
 - **Re-filleting an already-blended model is not reliable.** See above.
+
+## Known defects
+
+The limitations above are what these operators do not attempt. What follows is
+what they get wrong, and it is the reason for the flag.
+
+**All three families produce a mesh that renders, exports and looks right.**
+Nothing warns. The shape on screen is the shape you asked for, and the fault is
+in the mesh underneath it: a solid that is non-manifold, or that touches itself.
+You will not find it by looking at the model. You will find it when a slicer,
+a mesh repair tool or a CAD import rejects the part.
+
+The recourse is the same for all three: **change the radius, or change the
+tessellation**. Either moves the geometry enough to miss the fault, and there is
+no way to ask the operators to avoid it.
+
+- **Coarse tessellation.** At `$fn` of 8 or below, a boss or a hole meeting a
+  plate can leave a zero-area pair of duplicate triangles along the line where
+  the bead runs out onto the curved wall. Five different shapes of that family
+  do it, and every one of them is clean at `$fn` of 10 or above. Raise `$fn`.
+- **Slivers where two beads cross tangentially.** At a junction of three or more
+  blended creases, a radius near the local feature size there can shed a small
+  tetrahedral fragment — typically 0.07 to 1.14 mm across — attached to the
+  solid at exactly one vertex, or in some cases sharing no vertex with it at all
+  and floating free as a second object. **The fragment scales with the radius**,
+  which is what makes it a construction fault rather than numerical noise.
+- **Zero-thickness membranes.** Where consecutive sections of one blend abut,
+  the tool can leave a duplicate pair of triangles of opposite orientation — a
+  surface of no thickness, around 0.44 mm across. It bounds no volume, so it
+  changes nothing you can measure on the part, and it makes the solid
+  non-manifold all the same.
+
+Separately, and more mildly: at larger radii on a highly symmetric model the
+boolean can leave micron-scale handles — tunnels — through the solid. They are
+orders of magnitude below any manufacturing resolution and they slice as a
+single object, so they are not a practical fault, but they do change the
+model's reported genus, which matters if you are measuring topology rather than
+printing.
