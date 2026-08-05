@@ -409,6 +409,37 @@ at y=0, a blend arc of radius R tangent at (0,R) and (R,0), and the convex edge 
 H=R+d, the seated ball's centre is (−R, d) and its wall contact is (0, d) — which lies on the
 flat wall iff d ≥ R smooth, or d ≥ R(1−tan(Δ/2)) = 0.934457 as tessellated.
 
+**One constant is answering two different questions, and that is the design defect. Owner
+observation 2026-08-05.** `FilletBuilder.cc:1068` passes the same `thresholdDeg` to
+`smoothSurfaces` that edge selection uses, so a single number decides both *"is this crease a
+feature the user wants blended?"* and *"do these two faces belong to the same smooth surface?"*
+Those want different values: the first is a statement about user intent, the second should be
+near-tangency. At 46° the second assertion is that a 45° chamfer is a smooth continuation of
+the wall it sits on, which is plainly false.
+
+Corroboration that this was already felt: `FilletBuilder_test.cc:2176` and `:2185` call
+`smoothSurfaces(cm, cAdj, 20.0)` with a hardcoded 20, not the threshold. The test author needed
+a different value for segmentation and supplied one locally, because the production path offers
+no way to.
+
+Why it went unseen: both questions happen to need a value above 45°, and for the same reason —
+grouping a `$fn`=8 cylinder's wall facets into one surface needs >45, and keeping those same
+seams out of the feature set needs >45. One constant satisfied both and nothing complained.
+
+**But splitting them and setting segmentation low does not work either**, and the reason is
+already on record: a `$fn`=8 cylinder's wall seams are 45°, so at 10° the wall shatters into
+eight surfaces and each face's extent becomes one facet, breaking the seat test from the other
+side. That is Route 2's refutation in `ACCEPTANCE.md` — a cube, a `$fn`=4 prism and a `$fn`=8
+cylinder are locally congruent, so no angle alone separates a coarse tessellation from a real
+chamfer.
+
+**Which suggests the seat test should not depend on surface grouping at all.** Ball seating
+asks whether the constructed perpendicular foot lands on *the face the contact belongs to* — a
+local question about one face, not about a merged surface. If that holds, the fix deletes the
+dependency rather than retuning it, and the two-parameter split becomes unnecessary. **Not
+verified.** If it does not hold, then two parameters are needed and the segmentation one must
+be solved as the tessellation-versus-chamfer problem it is, not chosen as a number.
+
 **This makes the rule easier to build than §4d implied.** Ball seating is *already implemented*
 in `seatOn`; the defect is only that "the face's extent" is taken as the whole 46°-smooth
 surface rather than the face the contact was meant to land on.
