@@ -798,6 +798,36 @@ parts, and the second may be the larger:
    a 1.46× gap between artifacts and genuine features, and a ball-buried test alone catches
    14/72. Both are recorded in §4d with numbers.
 
+**3a. Regenerate `fillet-bench/sheets/` — the A5 instrument. Queued behind item 3.** The four
+sheets and `INDEX.md` date from 2026-08-04 19:39 and are stale two ways, the second worse than
+the first:
+
+1. The renders predate `efe8e485a` (the out-of-bounds read) and `4ce78926e` (the
+   `dropVolumelessParts` cap), so every image is from a binary that could build geometry out of
+   allocator residue.
+2. **The mesh column was computed by the pre-fix `mesh.py`, so it green-lights cells the
+   corrected criterion fails.** `S1-T05` and `S1-T06` (`tee_small`, defaults and `$fn`=10) read
+   `VALID … comp=2 chi=4 genus=0`, and item 1 found that model carries a fully detached
+   6-triangle fragment, 0.35 × 0.10 × 0.40 mm, sharing zero vertices. The sheet asserts valid
+   where the criterion now says not valid. A stale render is old; a stale *verdict* is a false
+   acceptance sitting in the file the gate asks a person to review.
+
+`sheet.sh:86` shells out to `mesh.py`, so regenerating picks up the corrected criterion —
+`nmvert`, the suppressed genus, and the per-model `comp` declaration — with no change to
+`sheet.sh`. Tile ids stay stable as long as `expect.txt` keeps its order.
+
+Do it **after** item 3 lands, on the binary that will ship, for two reasons: A5 is reviewed by a
+person and that review should happen once, and `sheet.sh` reads
+`../build/OpenSCAD.app`, which is exactly what an implementing agent is rebuilding.
+
+Known and not a defect: `sheet.sh` reads the OFF, where A1 reads exact ASCII STL, and it renders
+each tile once where A1 needs three. Both are correct for A5 — `ACCEPTANCE.md` says outright
+that the single-point contact sheet is not the form A1 holds in. The sheets are the junction
+*eyeball*; `sweep.sh` is the measurement.
+
+Also stale and fixable without a render: `fillet-bench/README.md:155`, "First run, 2026-08-04",
+whose table of five bad tiles no longer describes the tree — D22's closure fixed them.
+
 **4. `CleanupTopology()` without `CollapseShortEdges`** (§4d). Specified, not started. Needs a
 vendored patch widening Manifold's public surface, or a pinch split against `MeshGL64`.
 Rebase `worktree-agent-a2867183791ec2485` first — it is based on `efe8e485a` and `kerem-fillet`
