@@ -2200,34 +2200,27 @@ std::vector<int> dropUncoveredCorners(const MergedMesh& m, std::vector<Chain>& c
 // that do arrive have to meet each other in a seam along that edge instead. Where
 // nothing sharp leaves, there is nothing to line up with and the ball is right.
 //
-// Why an edge counts is deliberately not asked. A crease the brush excluded, one
-// refused for size, and one turning the other way all leave the same sharp edge
-// in the output, and the blend owes that edge the same seam.
+// Why an edge counts is not asked: a crease the brush excluded, one refused for
+// size, and one turning the other way all leave the same sharp edge in the output.
 //
-// What counts as a crease of the model is `isFeatureAngle` and nothing else — the
-// same threshold the selection itself is made on. That is what keeps a
-// tessellated wall out of this: the seams between the facets of a cylinder turn
-// by a fraction of the threshold, so they are not creases here any more than they
-// are creases to the selection, and two bead segments meeting at such a seam
-// still get their ball. Reading curvature off the tessellation instead would put
-// a seam at every facet boundary.
+// What counts as a crease of the model is `isFeatureAngle` and nothing else, the
+// same threshold the selection is made on. That keeps a tessellated wall out of
+// this — a cylinder's facet seams turn by a fraction of the threshold, so two bead
+// segments meeting at one still get their ball. Reading curvature off the
+// tessellation instead would put a seam at every facet boundary.
 std::set<EdgeKey> filletedEdges(const std::vector<Chain>& chains)
 {
-  // Of the crease, not of the stations. A chain's stations may have been placed
-  // along the spine rather than on its vertices, and the pair either side of such
-  // a station is not a mesh edge at all. `rawRun()` is the crease as the mesh has
-  // it and holds nothing else, so every pair of it is an edge and there is no
-  // pair to skip. Skipping would be worse than reading the wrong thing: it drops
-  // the filleted edges either side of an interpolated station, and a crease read
-  // as unfilleted when it is in fact filleted makes a seam vertex out of one that
-  // is not.
+  // Of the crease, not of the stations: a station placed along the spine is not a
+  // mesh vertex, so the pair either side of it is not a mesh edge. Every
+  // consecutive pair of `rawRun()` is an edge, so nothing has to be skipped —
+  // and skipping would drop the filleted edges either side of an interpolated
+  // station, making a seam vertex out of one that is not.
   std::set<EdgeKey> out;
   for (const Chain& c : chains) {
     const std::vector<int>& run = c.rawRun();
     const size_t n = run.size();
-    // A ring's closing edge is one of its edges like any other. Leaving it out
-    // said that a fully filleted ring left one crease sharp at its own first
-    // vertex, which is the opposite of what the set is for.
+    // A ring's closing edge counts like any other. Leaving it out said that a
+    // fully filleted ring left one crease sharp at its own first vertex.
     const size_t last = c.closed && n > 2 ? n : (n < 1 ? 0 : n - 1);
     for (size_t i = 0; i < last; ++i) {
       const int a = run[i], b = run[(i + 1) % n];
@@ -2254,48 +2247,39 @@ bool creaseLeavesUnfilleted(const MergedMesh& m,
 // How far a bead may run past a seam vertex before it runs out of the part it is
 // running through.
 //
-// The overrun past a seam vertex is free only where the part goes on past the
-// vertex: the bead continues into the wall the unfilleted crease runs along,
-// which for a concave blend is solid the caller unions onto, and for a convex one
-// is air outside the part that the caller's cut never has to reach. None of that
-// holds for a wall thinner than the overrun, for one that turns away inside it,
-// or for one that ends inside it — there the bead crosses a face of the part
-// nothing was blending and stands proud of it.
+// The overrun is free only where the part continues past the vertex: the bead runs
+// into the wall the unfilleted crease lies along, which for a concave blend is
+// solid and for a convex one is air outside the part. None of that holds for a
+// wall thinner than the overrun, one that turns away inside it, or one that ends
+// inside it — there the bead crosses a face nothing was blending and stands proud
+// of it.
 //
 // So the swept end of the bead is measured against the mesh: every corner of the
-// end profile is carried along the overrun direction, and the first face it
-// crosses is where the room runs out. Faces of the vertex's own fan are not
-// crossings — they are the walls the bead is tangent to and its profile starts
-// on — and neither are faces the overrun merely runs along, since a bead sliding
-// tangentially past the facets of a curved wall never leaves it.
+// end profile is carried along the overrun direction and the first face it crosses
+// bounds the room. Faces of the vertex's own fan are not crossings — they are the
+// walls the bead is tangent to — and neither are faces the overrun merely runs
+// along, since a bead sliding tangentially past a curved wall's facets never
+// leaves it. Only a face the run pushes the bead OUT through can bound it, which
+// is what the outward normal is read for.
 //
-// Only a face the run pushes the bead OUT through can bound it, which is what the
-// outward normal is read for: a face the run carries the bead INTO is solid
-// closing over it, not a face it will stand proud of.
+// A crossing counts whether it lies ahead of the profile corner or behind it.
+// Behind means the corner started on the far side already: at an opening angle
+// under a right angle the end profile's corner sits r*cos(theta) into the
+// neighbouring wall, so a thinner wall has the bead poking out before the overrun
+// begins. Reading forward only left the overrun unbounded and put a bead a quarter
+// of a millimetre proud of a wall one and a half millimetres thick.
 //
-// The crossing counts whether it lies ahead of the profile corner or behind it.
-// Behind means that corner started on the far side of the face already: at an
-// opening angle under a right angle the corner of the end profile sits r*cos(θ)
-// into the neighbouring wall, so a wall thinner than that has the bead poking out
-// of it before the overrun begins. Carrying such a corner further along the run
-// only takes it further out, so it has no room at all — and reading forward only
-// missed that, left the overrun unbounded, and put the bead a quarter of a
-// millimetre proud of a wall one and a half millimetres thick.
-//
-// `reach` is how far to look, in BOTH directions, and is also the answer where
-// nothing was found. Forward it is the point past which more room stops making a
-// difference. Backward it is how far out a face may already have been breached
-// and still be one this overrun is about to make worse: a bead standing more than
-// its whole overrun proud of a wall is a radius that does not fit that wall,
-// which is a complaint about the radius, and letting it withhold the overrun
-// would only take the seam repair away from the models that need it most.
+// `reach` is how far to look in BOTH directions, and the answer where nothing was
+// found. Backward it bounds how far out a face may already have been breached and
+// still be one this overrun would worsen: a bead standing more than its whole
+// overrun proud of a wall is a complaint about the radius, not about the seam.
 double seamRoom(const MergedMesh& m, int vert, const std::vector<Vector3d>& from,
                 const Vector3d& dir, double reach)
 {
-  // A face the overrun is more parallel to than this is one it runs along rather
-  // than through. The facets of a tessellated wall are the case that matters:
-  // consecutive facets turn by a fraction of a degree and their planes lie a
-  // hair off the ray, so without this a curved wall would read as no room at all.
+  // A face the overrun is more parallel to than this is one it runs along, not
+  // through. Tessellated walls are the case that matters: consecutive facets turn
+  // by a fraction of a degree and their planes lie a hair off the ray, so without
+  // this a curved wall would read as no room at all.
   constexpr double kMinCross = 0.1;
   constexpr double kOnFace = 1e-6;
 
@@ -2358,31 +2342,26 @@ std::vector<Junction> chainJunctions(const MergedMesh& m,
   // and never contributes.
   //
   // An end the brushes cut short of r does not count: the corner cell is the full
-  // seated ball whatever is selected, so building one for a brush that covers part
-  // of the stretch it occupies puts material outside what was asked for. That is
-  // the whole of `noCorner`, which the brush pass hands over — the same vertices
-  // it drops the arriving stubs at, so that the cell and the stubs go together
-  // rather than one of them surviving the other.
+  // seated ball whatever is selected, so building one where the brush covers only
+  // part of the stretch it occupies puts material outside what was asked for. That
+  // is `noCorner`, handed over by the brush pass — the same vertices it drops the
+  // arriving stubs at, so cell and stubs go together.
   //
-  // Two ends is enough anywhere else. Three is the valence of a vertex where
-  // three creases meet, but only some of them need be selected: one refused for
-  // size, or turning the other way, or too shallow, leaves two ends on a vertex
-  // that is still a corner of the model. The two beads that were built arrive
-  // there together, tangent to the wall they share, and their footprints on it
-  // cross about a radius out — where the two surfaces meet at no angle at all.
-  // That is a cusp, which a boolean can only resolve into a flap, and measured
-  // over the opening angle of a plain two-wall corner it is what happens at 60,
-  // 75, 105 and 120 degrees. Ninety comes back clean, because there the two beads
-  // are mirror images and their intersection lands on the symmetry plane; that is
-  // a property of the mesh and not of the shape, so it is not a rule. The corner
-  // cell fills the valley, and it is solved against every wall at the vertex
-  // either way, so the wall of the crease that is missing is already one of the
-  // ball's constraints.
-  // How many chain ends land on each vertex, and nothing more. Recording the
-  // station beside each end is what this used to do and it must not: a chain
-  // whose stations were placed along the spine carries no mesh vertex there, so
-  // the entry would be -1 and the next reader of it would index the mesh at -1.
-  // Where the neighbouring mesh vertex is genuinely wanted it is rawRun()[1].
+  // Two ends is enough anywhere else. Three creases may meet at a vertex with only
+  // two selected — the third refused for size, turning the other way, or too
+  // shallow — and the two beads that were built arrive tangent to the wall they
+  // share, their footprints crossing about a radius out at no angle at all. That
+  // cusp is something a boolean can only resolve into a flap; it happens at
+  // opening angles of 60, 75, 105 and 120 degrees. Ninety comes back clean only
+  // because the two beads are then mirror images and their intersection lands on
+  // the symmetry plane, which is a property of the mesh and not of the shape. The
+  // corner cell fills the valley, and is solved against every wall at the vertex,
+  // so the missing crease's wall is already one of the ball's constraints.
+  //
+  // Count only. Recording the station beside each end is wrong: a chain whose
+  // stations were placed along the spine carries no mesh vertex there, so the
+  // entry would be -1 and the next reader would index the mesh at -1. Where the
+  // neighbouring mesh vertex is wanted it is rawRun()[1].
   std::map<int, int> ends;  // vertex -> how many chain ends land on it
   for (const Chain& chain : chains) {
     int endFront = -1, endBack = -1;
@@ -2405,11 +2384,10 @@ std::vector<Junction> chainJunctions(const MergedMesh& m,
 
     Junction j;
     j.vert = v;
-    // Every wall meeting at the vertex constrains the ball, not just the walls
-    // of the creases this tool selected. Where a convex edge arrives at a
-    // concave corner, its far face is the one a centre solved from the concave
-    // walls alone would end up buried in, and nothing about that crease's own
-    // sign makes the face any less solid.
+    // Every wall meeting at the vertex constrains the ball, not just the walls of
+    // the creases this tool selected. Where a convex edge arrives at a concave
+    // corner, its far face is the one a centre solved from the concave walls alone
+    // would be buried in.
     const auto tit = trisAt.find(v);
     if (tit != trisAt.end())
       for (const int t : tit->second) {
@@ -2464,13 +2442,12 @@ std::vector<Junction> chainJunctions(const MergedMesh& m,
 
 namespace {
 
-// How far along the last spine segment the ball may still travel: the first
-// point at which it touches a wall it is not riding. Past there it would cut
-// into material, so that is where the spine stops and the corner cell takes
-// over. Phrased as a distance to every wall at the junction rather than as a
-// solve, it needs no special case per valence — the walls the spine does ride
-// sit at exactly r all along it and never bind, and at degree three every
-// incident spine stops at the same point. Returned as a fraction of the segment
+// How far along the last spine segment the ball may still travel: the first point
+// at which it touches a wall it is not riding. Past there it would cut into
+// material, so that is where the spine stops and the corner cell takes over.
+// Phrased as a distance to every wall at the junction rather than as a solve, so
+// it needs no special case per valence — the walls the spine does ride sit at
+// exactly r all along it and never bind. Returned as a fraction of the segment
 // from `C0` toward `C1`; 1 means nothing binds.
 double truncationParam(const Junction& j, const Vector3d& vj, const Vector3d& C0,
                        const Vector3d& C1, double r, double dir)
@@ -2550,26 +2527,22 @@ double inradius(const manifold::Manifold& convex)
 // point and the two tangency points — but taken `over` past their walls instead
 // of `eps`, one copy of the crease point per wall.
 //
-// Handing the wedge's own pentagon over instead, which is what this replaces,
-// put five of the corner cell's points exactly on the wedge's surface, since a
-// section of a chain is by construction where the cells hulled from it end. Two
-// solids whose boundaries touch along the five edges of a shared face and then
-// leave each other at a fraction of a degree are what a union cannot resolve:
-// on a spike, where the cell's faces and the bead's differ by less than that, it
-// left nine triangles of no area at the one height each bead was cut back at.
-// Rebuilt at `over`, every point of this profile is further past its wall than
-// anything the wedge has there, so the two surfaces are a clear 0.5 eps apart
-// along each wall and cross transversally where the profile turns the tangency
-// point — the same ladder the wedge and the arc already stand on.
+// Handing the wedge's own pentagon over instead puts five of the corner cell's
+// points exactly on the wedge's surface, since a chain's section is where the
+// cells hulled from it end. Two solids whose boundaries touch along five edges of
+// a shared face and then part at a fraction of a degree are what a union cannot
+// resolve: on a spike that left nine triangles of no area at the height each bead
+// was cut back at. Rebuilt at `over`, every point here is further past its wall
+// than anything the wedge has, so the two surfaces stay 0.5 eps apart along each
+// wall and cross transversally at the tangency point.
 //
-// Past the walls is the only direction the profile may grow: outward is free
-// space no ball reaches, and material there would be a lump. So its fourth side
-// — the chord between the two tangency points — comes back toward the crease by
-// `over * cos(phi/2)` instead. That costs nothing, because the chord is not a
-// surface of the blend: it is the far side of a circular segment that lies
-// wholly inside the arc, `r * (1 - sin(phi/2))` deep, which the subtraction
-// removes whatever the cell does there. The two are comparable only as phi
-// approaches 180 degrees, and a crease that flat is refused a section at all.
+// Past the walls is the only direction the profile may grow — outward is free
+// space no ball reaches, and material there would be a lump — so the chord between
+// the two tangency points comes back toward the crease by `over * cos(phi/2)`.
+// That costs nothing: the chord is not a surface of the blend but the far side of
+// a circular segment lying wholly inside the arc, `r * (1 - sin(phi/2))` deep,
+// which the subtraction removes anyway. The two are comparable only as phi
+// approaches 180, and a crease that flat is refused a section at all.
 std::array<Vector3d, 4> cornerProfile(const RoundSection& s, double over)
 {
   // TA = C - dir*r*nA by construction, so the two tangency points give back the
