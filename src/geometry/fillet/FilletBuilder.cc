@@ -327,9 +327,8 @@ std::vector<Chain> buildChains(const MergedMesh& m, const std::vector<EdgeKey>& 
   std::sort(chains.begin(), chains.end(),
             [&](const Chain& a, const Chain& b) { return less(a.raw.front(), b.raw.front()); });
 
-  // The walk above fills `raw`, the crease as the mesh has it. `at` and `pts`
-  // are left empty, which is the identity: one station per crease vertex,
-  // standing exactly on it, so the station list is the crease itself.
+  // `at` and `pts` stay empty, the identity case: one station per crease vertex,
+  // standing exactly on it.
   for (Chain& chain : chains) chain.setStations(chain.raw);
 
   return chains;
@@ -366,10 +365,8 @@ void resampleChains(const MergedMesh& m, std::vector<Chain>& chains, double frac
     const double total = arc[segments];
     if (!(total > 0.0)) continue;
 
-    // As many stations as the crease has segments, at equal arc length. The
-    // count is what it was, so nothing about how closely the bead follows the
-    // wall changes; only the spacing does, from a spread of a thousand to one
-    // down to exactly even.
+    // As many stations as the crease has segments, at equal arc length: the count
+    // is unchanged, so only the spacing moves.
     const int count = segments;
     const double step = total / count;
 
@@ -391,11 +388,10 @@ void resampleChains(const MergedMesh& m, std::vector<Chain>& chains, double frac
     pts.reserve(stations);
     stationVerts.reserve(stations);
     for (int k = 0; k < stations; ++k) {
-      // The ends are the crease's ends and are taken from the mesh, not solved
-      // for: k = 0 is vertex 0 (a ring's canonical start as much as an open
-      // chain's first vertex), and an open chain's last station is its last
-      // vertex. Everything between is placed by arc length, and lands on a
-      // vertex exactly when the arithmetic puts it there.
+      // The ends come from the mesh, not from the solve: k = 0 is vertex 0 (a
+      // ring's canonical start as much as an open chain's first vertex), and an
+      // open chain's last station is its last vertex. Everything between is
+      // placed by arc length.
       double p;
       if (k == 0)
         p = 0.0;
@@ -479,13 +475,10 @@ std::vector<SpineInterval> chainSelection(const MergedMesh& m, const Chain& chai
     return total;
   };
 
-  // The length test asks what put an interval's ends where they are. A brush cut
-  // at least one of them wherever the interval starts past the first station or
-  // stops before the last, and the tangency artefact the debounce exists for is
-  // one of those. An interval the brush cut at neither end is the whole crease,
-  // selected entire: nothing there is being clipped, the crease is simply as long
-  // as it is, and dropping it would make a brush that contains the whole model
-  // build less than no brush at all.
+  // Only intervals the brush actually cut are debounced. An interval starting past
+  // the first station or stopping before the last was cut at that end; one cut at
+  // neither end is the whole crease, and dropping it for being short would make a
+  // brush containing the whole model build less than no brush at all.
   const double span = static_cast<double>(segments);
   std::vector<SpineInterval> out;
   for (const SpineInterval& iv : keep) {
@@ -572,19 +565,17 @@ std::vector<StationNormals> chainNormals(const MergedMesh& m,
   };
 
   // The crease between two chain parameters, reduced to one direction per wall.
-  // Without resampling every span is exactly one mesh edge and this is the edge's
-  // own pair of normals, which is what it has always been. With it, a span can
-  // cover several raw segments and start or stop partway along one, and each
-  // segment counts for as much of it as lies inside the span — so a sliver
-  // counts for as little as it is long, and the ill-conditioned average that the
-  // fins are made of does not arise.
+  // Without resampling every span is exactly one mesh edge and this is that edge's
+  // own pair of normals. With it, a span can cover several raw segments and start
+  // or stop partway along one; each segment is weighted by the length of it inside
+  // the span, so a sliver counts for as little as it is long.
   const std::vector<int>& run = chain.rawRun();
   const int rawN = chain.rawCount();
   auto spanNormals = [&](double from, double to, Vector3d& nA, Vector3d& nB) {
     if (to <= from) to += static_cast<double>(rawN);  // a ring's closing stretch
     const int first = static_cast<int>(from);
-    // One whole mesh edge, asked for and answered as itself: the common case,
-    // and the one an unresampled chain is entirely made of.
+    // One whole mesh edge, answered as itself: the case an unresampled chain is
+    // entirely made of.
     if (from == static_cast<double>(first) && to == static_cast<double>(first + 1))
       return sidedNormals(run[first % rawN], run[(first + 1) % rawN], nA, nB);
 
@@ -611,10 +602,10 @@ std::vector<StationNormals> chainNormals(const MergedMesh& m,
     StationNormals s;
     s.v = chain.point(m.pos, i);
 
-    // Average each wall's normal over the crease either side of the station
-    // (with wrap-around on a closed ring); an open end has only one side. The
-    // triangles the station names its walls by are the ones of the mesh edge the
-    // crease arrives on, or leaves by where there is nothing before it.
+    // Average each wall's normal over the crease either side of the station (with
+    // wrap-around on a ring); an open end has only one side. The station names its
+    // walls by the triangles of the mesh edge the crease arrives on, or leaves by
+    // where there is nothing before it.
     const bool hasPrev = i > 0 || chain.closed;
     const bool hasNext = i < n - 1 || chain.closed;
     const double here = chain.param(i);
@@ -648,10 +639,10 @@ std::vector<SpineFrame> spineFrames(const MergedMesh& m,
 {
   const std::vector<StationNormals> stations = chainNormals(m, adj, chain);
 
-  // Which way the ball sits off the crease. At a concave edge the outward wall
-  // normals both point into the empty quadrant, so the center is along +(nA+nB)
-  // and each tangency point lies back down its own normal; at a convex edge the
-  // ball is buried in the solid and every one of those signs flips.
+  // Which way the ball sits off the crease. At a concave edge both outward wall
+  // normals point into the empty quadrant, so the center is along +(nA+nB) and
+  // each tangency point lies back down its own normal; at a convex edge the ball
+  // is buried in the solid and all those signs flip.
   const double dir = concave ? 1.0 : -1.0;
 
   const int n = static_cast<int>(stations.size());
@@ -3490,8 +3481,8 @@ std::unique_ptr<PolySet> debugSpineMarkers(const MergedMesh& m,
 // Rebuild edge -> two-face adjacency from the target's triangle soup, classify
 // each edge as concave/convex and feature/seam, walk the ones this tool acts on
 // into chains, and build the tool solid along them. A diagnostic count line goes
-// out on every invocation (a plain cube yields 12 feature edges, all convex; an
-// inside corner yields a single concave edge).
+// out when debug= is set, which only the *_tool modules expose: fillet() has no
+// debug= parameter, so the line is unreachable through it.
 std::shared_ptr<const Geometry> buildFilletTool(
   const FilletNode& node, FilletType type, const std::shared_ptr<const ManifoldGeometry>& target,
   const std::shared_ptr<const ManifoldGeometry>& brush)
