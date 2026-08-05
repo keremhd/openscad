@@ -152,31 +152,33 @@ edge carried by four faces, and it shows up in `nonman`, not `bnd`.
 read 205 non-manifold edges at 1e-5 and 0 at 1e-6 in this effort. Default 1e-6,
 `--tol` to change it, and never quote a count without it.
 
-## First run, 2026-08-04
+## First run, 2026-08-04 — superseded, and its table is gone
 
-33 tiles against the tree at `39557c022`. **Five bad tiles, all at stock defaults,
-in about two minutes.**
+33 tiles against the tree at `39557c022`, five of them bad at stock defaults, in
+about two minutes. **That table has been removed rather than updated, because
+the tree it describes no longer exists.** It was taken while the crease
+threshold was still derived from the caller's facet angle; the threshold is now
+the constant 46°, and one row of that table — `cross` producing no mesh at all,
+having selected 374 convex edges of 757 *at an 18° threshold* — names a number
+that cannot occur on this tree. Nothing in it can be quoted as current.
 
-| tile | finding |
-|---|---|
-| `S1-T01` `tee` | defaults **χ=3, 2 non-manifold edges** — invalid. At `$fn`=16, χ=2 genus 0, clean |
-| `S1-T03` `tee_oblique` | defaults **χ=5, 6 non-manifold** — invalid. At `$fn`=16, clean |
-| `S1-T05` `tee_small` | defaults **χ=5, 6 non-manifold** — invalid. At `$fn`=10, clean |
-| `S1-T09` `cross` | defaults **produce no mesh at all**. Selects 374 convex edges of 757 at an 18° threshold, then refuses 136 of 298 |
-| `S1-T10` `cross` | at `$fn`=19, **χ=3, comp=2, 1 non-manifold** — invalid |
+What replaced it is the two-axis sweep, 353 cells rather than 33 tiles, in
+`results/sweep-fd3dec78.tsv`: **21 cells not valid**, enumerated in *What the
+corrected criterion found* below. That is the current state of the tree and the
+only list to read from.
 
-**This reclassifies D22.** It was recorded as a cosmetic fault — burrs on rims at
-stock defaults. It is a *validity* fault: the same models are invalid solids at
-defaults and valid at an explicit `$fn`. D22 breaks promise 1, not only promise 2.
+Two findings of that first run outlived their table and are kept here as what
+the run established at the time:
 
-The bench also confirms its own prediction, which is what makes it trustworthy:
-`tee_large` (d=40, above the ~19 mm diameter where `$fa` takes over from `$fs`) is
-**valid both ways**, exactly as the binding-term analysis said it would be. A model
-predicted safe measured safe, and the models predicted unsafe measured unsafe.
-
-Everything else — `boss_plate`, `two_bosses`, `pipe_into_face`, `dome`,
-`hole_plate`, `bevel_boss`, `rib`, `pocket`, `lbracket`, `box_step`, `thin_slab`,
-`chamfer_box`, `brush_one_edge`, and both controls — is valid at defaults.
+- **It reclassified D22.** D22 was recorded as a cosmetic fault — burrs on rims
+  at stock defaults. It is a *validity* fault: models that are invalid solids at
+  one tessellation are valid at another. D22 breaks promise 1, not only promise
+  2. The sweep's `$fn`=8 family is the same finding on a wider axis.
+- **The bench confirmed its own prediction**, which is what made it trustworthy:
+  `tee_large` (d=40, above the ~19 mm diameter where `$fa` takes over from
+  `$fs`) was valid both ways, exactly as the binding-term analysis said it would
+  be. A model predicted safe measured safe, and the models predicted unsafe
+  measured unsafe.
 
 ## The two documentation models
 
