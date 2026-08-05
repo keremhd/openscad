@@ -301,6 +301,63 @@ change anything* makes that gap irrelevant, and retires byte-identity as an inst
 the integration record already concluded was the wrong test for a branch carrying two
 default-on changes.
 
+## What ships broken — the 21 not-valid cells, triaged 2026-08-06
+
+Measured on binary md5 `fd3dec78` against `results/sweep-fd3dec78.tsv`, instrument and raw
+output in `fillet-bench/work/s1-triage/`, four known answers reproduced before any new cell was
+read. Weld 1e-6, scales in millimetres.
+
+**The cut, applied uniformly:** a cell closes as a *documented limitation* only when its remnant
+has a measured extent both **under 10 µm absolute** — an order below the finest manufacturing
+resolution in common use — and **at least three orders below the solid it sits on**. That is
+calibrated to the two worked precedents, `cross`'s 1.5 µm throat in a 40 mm solid and
+`refused_neighbour`'s 0.34 µm sliver in a 33 mm one. A remnant with **no extent to measure** — a
+zero-thickness membrane — cannot be closed on a measurement at all and ships as a defect.
+
+**Result: 4 documented limitations, 17 known defects.** The expectation that most of the 21
+would prove to be sub-manufacturing noise was wrong; `cross`'s handles were the exception, not
+the pattern.
+
+### Documented limitations — 4 cells, all `refused_neighbour`
+
+A sliver wedge on 4 faces where one bead's spine crosses the neighbouring bead's tangency line,
+at r = 0.2, 0.8, 0.9, 1.0. Extents 7.35e-5 to 4.05e-3 mm in a 32.9 mm solid — four to six
+orders below the model. Smallest triangle 7.3e-9 mm². Below any manufacturing resolution and
+below the tolerance of every slicer tested.
+
+### Known defects — 17 cells, three families
+
+These ship named. **All of them export a mesh that looks plausible**, which is the actual
+hazard: the user cannot tell by inspection, and finds out when a slicer rejects the solid.
+
+**1. Point-attached and detached slivers, 0.07–1.14 mm** — millimetre-scale, visible, and in
+one case a separate printable object. Ten cells: `tee` r=0.5 (two slivers, 0.267 and 0.438 mm)
+and r=0.9 (0.590 mm); `tee_oblique` r=0.2/0.3/0.8 (0.068–0.430 mm); `tee_small` at defaults, at
+`$fn`=10 and at r=1.5 — a **fully detached** 6-triangle fragment sharing no vertex with the
+solid, 0.353 × 0.101 × 0.401 mm and **growing with radius** to 1.139 mm; `cross` r=0.3 (0.080 mm
+wedge) and r=0.9 (a detached shard outside the solid, winding number 0).
+
+`tee_small`'s fragment growing with R is the clearest single statement that this is a
+construction defect and not numerical noise.
+
+**2. The `$fn`=8 boss-and-plate family, 5 cells** — `boss_plate`, `hole_plate`, `two_bosses`,
+`dome`, `pipe_into_face`, every one valid at `$fn`≥10. The remnant is a **zero-area duplicate
+triangle pair along the rim tangency line**, spanning 36–38 mm of a 57–66 mm solid, with a bead
+overrun of 1.0e-3 to 2.0e-3. No thickness, so no scale to compare against a layer height.
+
+**3. Zero-thickness membranes at a section plane, 2 cells** — `rib_into_boss` at `$fn`=14 and
+32: a duplicate triangle pair with opposite orientation where consecutive cells abut, 0.44 mm
+across. Present in the `fillet_tool()` solid alone, so `buildRoundSolid` produces it rather
+than the caller's `union()`.
+
+### Not in the 21, and still open on a different question
+
+`cross` gains genus with radius — 0 at r≤1.0, 2 at r=1.5, 4 at r=2.0 — and every one of those
+cells is *valid*, because a genus-4 closed solid is valid. Whether a fillet may punch handles
+through the model is a promise question, not an A1 one. The handles measure a 1.5 µm throat and
+slice as a single object, so they are a release note under any reading; they are listed here
+only so their absence from the table above is not mistaken for an oversight.
+
 ## Triage rule
 
 For anything found from here: **does it break promise 1 or promise 2?**
