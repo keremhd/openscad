@@ -3594,27 +3594,25 @@ std::shared_ptr<const Geometry> buildFilletTool(
       const bool speaker = node.inner ? wantConcave : !wantConcave;
       if (alone && others > 0)
         LOG(message_group::Warning, node.modinst->location(), "",
-            "%1$s: no %2$s edge of the target turns more than %3$.1f deg; nothing is built. "
-            "The target has %4$d %5$s edge(s) - %6$s = true takes those.",
+            "%1$s: no %2$s edge turns more than %3$.1f deg; nothing is built (%6$s = true takes "
+            "the target's %4$d %5$s edge(s))",
             node.name(), wantConcave ? "concave" : "convex", thresholdDeg, static_cast<int>(others),
             wantConcave ? "convex" : "concave", wantConcave ? "outer" : "inner");
       else if (c.feature == 0 && speaker)
         LOG(message_group::Warning, node.modinst->location(), "",
-            "%1$s: no edge of the target turns more than %2$.1f deg; nothing is built. "
-            "min_angle= on a tool node lowers that threshold if the feature is shallower "
-            "than the tessellation it was built at.",
+            "%1$s: no edge turns more than %2$.1f deg; nothing is built (min_angle= lowers that "
+            "threshold)",
             node.name(), thresholdDeg);
     } else if (others > 0)
       LOG(message_group::Warning, node.modinst->location(), "",
-          "%1$s: no %2$s edge of the target turns more than %3$.1f deg; nothing is built. "
-          "The target has %4$d %5$s edge(s) - %6$s takes those.",
+          "%1$s: no %2$s edge turns more than %3$.1f deg; nothing is built (%6$s takes the "
+          "target's %4$d %5$s edge(s))",
           node.name(), wantConcave ? "concave" : "convex", thresholdDeg, static_cast<int>(others),
           wantConcave ? "convex" : "concave", sibling);
     else
       LOG(message_group::Warning, node.modinst->location(), "",
-          "%1$s: no edge of the target turns more than %2$.1f deg; nothing is built. "
-          "min_angle= lowers that threshold if the feature is shallower than the "
-          "tessellation it was built at.",
+          "%1$s: no edge turns more than %2$.1f deg; nothing is built (min_angle= lowers that "
+          "threshold)",
           node.name(), thresholdDeg);
     return nullptr;
   }
@@ -3680,9 +3678,7 @@ std::shared_ptr<const Geometry> buildFilletTool(
     for (const int v : uncovered)
       LOG(message_group::Warning, node.modinst->location(), "",
           "%1$s: the brush covers less than the radius %2$g of the creases meeting at the corner "
-          "[%3$.4g, %4$.4g, %5$.4g]; nothing is built there. A corner cell is the full size "
-          "whatever is selected, so a corner is built only where the brush reaches the radius down "
-          "every edge of it, and a bead stopping short of one would meet nothing.",
+          "[%3$.4g, %4$.4g, %5$.4g]; nothing is built there",
           node.name(), node.size, m.pos[v].x(), m.pos[v].y(), m.pos[v].z());
 
     // Counted per edge, since that is the unit the user wrote the model in; an
@@ -3713,8 +3709,8 @@ std::shared_ptr<const Geometry> buildFilletTool(
     // more detail than "the brush covers none".
     if (selected.empty() && candidates > 0 && uncovered.empty())
       LOG(message_group::Warning, node.modinst->location(), "",
-          "%1$s: the selection brush covers none of the %2$d candidate edge(s); nothing is built. "
-          "The brush has to contain part of an edge, not merely touch the model.",
+          "%1$s: the selection brush covers none of the %2$d candidate edge(s); nothing is built "
+          "(it has to contain part of an edge, not merely touch the model)",
           node.name(), static_cast<int>(candidates));
     else if (!selected.empty())
       LOG(message_group::Echo, node.modinst->location(), "",
@@ -3770,15 +3766,14 @@ std::shared_ptr<const Geometry> buildFilletTool(
         : STR("another feature ", worst->amount, " away needs the same material");
     if (refused == 1)
       LOG(message_group::Warning, node.modinst->location(), "",
-          "%1$s: %2$s %3$g does not fit the crease at [%4$.4g, %5$.4g, %6$.4g] - %7$s. "
-          "That crease is dropped; the size is never clamped to make it fit.",
+          "%1$s: %2$s %3$g does not fit the crease at [%4$.4g, %5$.4g, %6$.4g] - %7$s; "
+          "that crease is dropped",
           node.name(), isWedgeOnly ? "setback" : "radius", node.size, worst->where.x(),
           worst->where.y(), worst->where.z(), why);
     else
       LOG(message_group::Warning, node.modinst->location(), "",
           "%1$s: %2$s %3$g does not fit %4$d of the %5$d crease(s) selected; the worst is at "
-          "[%6$.4g, %7$.4g, %8$.4g] - %9$s. Those creases are dropped; the size is never clamped "
-          "to make it fit. Dropped at: %10$s%11$s",
+          "[%6$.4g, %7$.4g, %8$.4g] - %9$s. Dropped at: %10$s%11$s",
           node.name(), isWedgeOnly ? "setback" : "radius", node.size, static_cast<int>(refused),
           static_cast<int>(usable.size()), worst->where.x(), worst->where.y(), worst->where.z(),
           why, refusedAt,
@@ -3796,7 +3791,7 @@ std::shared_ptr<const Geometry> buildFilletTool(
       if (j.ballCentres.empty())
         LOG(message_group::Warning, node.modinst->location(), "",
             "%1$s: no ball of radius %2$g is seated in the corner at [%3$.4g, %4$.4g, %5$.4g]; "
-            "the blends there run out to the sharp vertex instead of closing at that size.",
+            "the blends there run out to the sharp vertex",
             node.name(), node.size, m.pos[j.vert].x(), m.pos[j.vert].y(), m.pos[j.vert].z());
 
   // Chamfer and bevel are the wedge alone. The rounded tools are the same wedge
