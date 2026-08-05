@@ -553,6 +553,87 @@ d² = r² + off² on a flat wall — inherits that error. Re-seating the ball ag
 before asking is the prerequisite; until then the two-parameter split of §4d's last paragraph
 is the live option, and it needs the tessellation-versus-chamfer problem solved.
 
+### Seating the ball against the mesh: the rule is right and the grouping is the whole defect — 2026-08-05
+
+Built on top of the local seat test, `2cd4f1431` and `5ec8d8fe1`, binary md5 `9eaf681d`.
+Two changes, and both were needed:
+
+- **The centre is re-seated against the mesh.** Newton on the two distances-to-mesh, held in
+  the crease's own section plane by a third row, starting from the tangent-plane construction.
+  It converges in **3 iterations** on every case dumped: at `handblend_step` D=0.02 the wall
+  distance goes 1.22505572 → 1.00522588 → 1.000000, step 1.3e-16. Capped at 12 iterations and
+  at half a radius per step, so it terminates deterministically whether or not it converges.
+- **The residual became angular.** With the centre seated, the perpendicular foot *is* the
+  contact, so stepping off along a normal measures nothing. What is left to ask is whether the
+  direction from contact to centre is one the mesh calls "out" there: inside a triangle that is
+  its normal alone, on a seam it is the whole fan of normals meeting on it. A wall that has run
+  out has a one-sided fan and the direction falls outside it; the miss is what that angle
+  subtends at the radius asked for.
+
+**The normal cone is not optional, and the intermediate binary says so.** With the centre
+re-seated but the foot still stepped off the contact triangle's own normal (`62224731`), the
+false refusals got *worse* than the tangent-plane construction they were meant to cure — `tee`
+0.0142 → **0.0253**, `dome` 7.7e-4 → **0.0243**, `cross` 0.0723. The cause is tessellation, not
+curvature: the seated ball rests on a seam, and reading one of the two triangles that carry the
+seam charges half the tessellation's own turn to the fit. On a `$fa`=12 sphere that is
+r·sin(6°)·sin(12°), which is the 0.024 measured.
+
+**Take the angles from a cross product, not from `acos`.** A seated ball's answer is zero and
+`acos` loses half its bits approaching it: it read **1.5e-8 rad** on directions agreeing to the
+last bit, which is above the `1e-9` margin the gate refuses at, and it refused `boss_plate` and
+`dome` — flat-walled and previously untouched — at 2.98e-08 and 2.24e-08. `atan2(|a×b|, a·b)`
+is exact there. This is a new instrument fault, of the kind TRAPS collects.
+
+**Every curved-wall false refusal is gone.** The regression list from the previous attempt,
+measured at stock defaults on the new binary, with vertex counts against the `fd3dec78`
+baseline:
+
+| model | before | now | vertices |
+|---|---|---|---|
+| `tee` | 2 of 2 concave creases refused, 0.0142·R | **0 refused** | 224, the baseline exactly |
+| `dome` | refused, 7.7e-4·R | **0 refused** | 492 |
+| `boss_plate` | (flat, never refused) | 0 refused | 474 |
+| `cross` | concave pass 0.0723 | 26 of 42 refused, v up | 1290, against a 1239 baseline |
+| `tee_small` | refused | 1 refusal left | 182 |
+| `rib` | 16 of 36 refused | 12 of 36 | 484 |
+
+Not one of these gained its verdict by losing geometry, which is what trap 15 exists to catch:
+`tee` returns to its baseline vertex count exactly and `cross` comes back with *more* geometry
+than the baseline, not less.
+
+**And the rule reads the derived closed form exactly.** On `handblend_step` at `min_angle=5` —
+the one-parameter control, where the blend's 7.5° facets are each their own surface so the wall
+and the blend are not merged — the gate prints **0.914457, 0.434457, 5.6535e-05** at
+D = 0.02, 0.5, 0.9344 and accepts D=0.95. Those are `0.934457 − d` to six figures: the
+independently derived `R(1−tan(Δ/2)) − d`, not a proxy for it. The previous attempt's foot
+measure printed the perpendicular distance to the arc instead (0.400071 at D=0.02); this one
+prints the length of missing wall itself.
+
+**But at the default 46° the gate is inert on that model at every D, and the reason is that
+the seat is genuinely good.** All ten D values from 0.02 to 4.0 are accepted, D=0.02 included,
+where 0.914 mm of wall is missing — 91% of R. The dump says why, and it is not a margin: the
+re-seated ball reaches `d = r = 1` on both walls with a contact interior to a single triangle
+and an angular residual of **8.9e-16**. The ball has rolled a full radius down off the flat wall
+onto the hand-built blend and seated there *perfectly*, because a tangent blend merged into its
+own wall is a smooth surface and a smooth surface of curvature radius R accepts a radius-R ball
+anywhere on it.
+
+**So this resolves §4d's open question in the opposite direction from the last attempt, and the
+answer is better news.** The seat test made local does not need surface grouping to be *correct*
+— the rule above has no `surfaceRim`, no dependence on how far a surface extends, and no false
+refusals on any curved wall in the bench. It needs the grouping to be *right*, because the walk
+that finds the contact may not leave the wall, and at 46° the wall it is given already contains
+the blend. **There is no local geometric quantity that can separate these two populations**, and
+this is the second construction to fail on it: the ball really does seat, so nothing measured at
+the seat can say otherwise.
+
+**What that leaves.** The two-parameter split of §4d's last paragraph is now the only thing
+between this rule and a working size gate, and the rule to pair it with exists, is measured, and
+is committed. Its remaining dependency is `smoothSurfaces` — one call, one threshold — and the
+question that threshold has to answer has narrowed to exactly one thing: is a 7.5° turn a
+tessellation seam or a chamfer boundary. Route 2's refutation still stands against answering it
+with an angle alone.
+
 ## 5. Open defects
 
 | defect | state |
@@ -872,6 +953,19 @@ defects are plausibly one bug, so measuring after the fix is worth more than pla
      the ball is re-seated against the mesh. The 9.8e-15·R against 0.117–1.004·R separation is
      real for cap rims and flat-walled creases and does not survive adding curved walls to the
      population.
+   - **Seat the ball against the mesh — BUILT 2026-08-05**, `2cd4f1431` and `5ec8d8fe1`,
+     measured in §4d's last subsection. Newton on the two distances-to-mesh in the crease's
+     section plane, plus an angular residual against the normal cone at the contact. It removes
+     every curved-wall false refusal the previous part left — `tee`, `dome` and `boss_plate`
+     clean at their baseline vertex counts — and on the one-parameter control it prints the
+     derived `R(1−tan(Δ/2)) − d` exactly. At the default 46° it is still inert on that control,
+     and now for a reason nothing local can reach: the ball genuinely seats on the merged
+     wall-and-blend surface, to 8.9e-16. **The rule is finished; the grouping is what is left.**
+   - **Split the threshold in two.** Promoted from an option to the next step by the line above.
+     `FilletBuilder.cc:1068` hands `smoothSurfaces` the same number edge selection uses. One
+     value must stay 46 — that is promise 2, settled. The other has to answer only "is this 7.5°
+     turn a tessellation seam or a chamfer boundary", and Route 2's refutation says an angle
+     alone cannot. Nothing else now blocks the size gate.
    - **Make the gate actually ask.** 15 of 26 accepted chains at r=0.5 have `ntest`=0 — every
      sample exempted as a chain end or as within `2·size` of a junction. A check that is never
      evaluated cannot refuse. This is the harder half: the exemptions exist for a reason and
