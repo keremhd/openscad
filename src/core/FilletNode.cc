@@ -34,15 +34,13 @@
 #include "core/node.h"
 
 // Child 0 is the target whose edges are analysed; children 1+ are selection
-// brushes. The node parses its parameters here; the edge analysis and tool
-// construction happen when the geometry is evaluated.
+// brushes. Edge analysis and tool construction happen at geometry evaluation.
 static std::shared_ptr<AbstractNode> builtin_fillet_impl(const ModuleInstantiation *inst,
                                                          Arguments arguments,
                                                          const Children& children, FilletType type)
 {
-  // FILLET/ROUND take a radius r; CHAMFER/BEVEL take a setback t. Accept both
-  // spellings so either name reads naturally, with the type's primary bound to
-  // the first positional argument.
+  // FILLET/ROUND take a radius r, CHAMFER/BEVEL a setback t. Both spellings are
+  // accepted; the type's primary name binds to the first positional argument.
   const bool isChamfer = (type == FilletType::CHAMFER || type == FilletType::BEVEL);
   Parameters parameters =
     Parameters::parse(std::move(arguments), inst->location(),
@@ -95,40 +93,17 @@ static std::shared_ptr<AbstractNode> builtin_bevel_tool(const ModuleInstantiatio
   return builtin_fillet_impl(inst, std::move(arguments), children, FilletType::BEVEL);
 }
 
-// The composition every fillet is: grow the inner creases, THEN cut back the
-// outer ones. Written out, because the tool nodes are the composable surface and
-// anyone wanting a different composition should be able to start from this one:
+// Equivalent to: union the inner tool onto the child, then subtract the outer
+// tool from that union. The order matters — the round pass must be measured
+// against the solid the fillet pass left. A bead that runs out onto a face of
+// the model leaves its end cross-section standing in that face, and a round pass
+// that never saw the bead leaves that crescent as a sharp lip.
 //
-//   module fillet(r = 2, inner = true, outer = true, min_angle = undef) {
-//       module blended() {
-//           union() {
-//               children();
-//               if (inner) fillet_tool(r = r, min_angle = min_angle) children();
-//           }
-//       }
-//       difference() {
-//           blended() children();
-//           if (outer) round_tool(r = r, min_angle = min_angle) blended() children();
-//       }
-//   }
-//
-// This node is exactly that, to the byte, and "then" is the load-bearing word in
-// it. The round pass is measured against the solid the fillet pass left, because
-// a bead that runs out onto a face of the model leaves its end cross-section
-// standing in that face, and a pass that never saw the bead leaves that crescent
-// as a sharp lip over the outline it rounded beside it.
-//
-// `blended() children()` at both call sites is the whole trick and is not
-// optional: children() INSIDE blended() means blended's own children, so writing
-// the calls as a bare blended() and relying on the definition to see the outer
-// ones produces nothing at all, silently.
-//
-// Under $preview the node hands back its child untouched, because the tools cost
-// a mesh analysis and two booleans on every keystroke and the fillets are
-// usually the last thing being iterated on. disable_preview = false asks for
-// them anyway. The four *_tool nodes deliberately do not do this: a tool is a
-// solid the user is composing with by hand, and one that vanished under a render
-// mode would break every composition built out of it.
+// Under $preview the node hands back its child untouched: the tools cost a mesh
+// analysis and two booleans per evaluation. disable_preview = false asks for them
+// anyway. The four *_tool nodes do not do this, since a tool is a solid the user
+// composes with by hand and one that vanished under preview would break every
+// composition built from it.
 static std::shared_ptr<AbstractNode> builtin_fillet(const ModuleInstantiation *inst,
                                                     Arguments arguments, const Children& children)
 {
@@ -142,8 +117,8 @@ static std::shared_ptr<AbstractNode> builtin_fillet(const ModuleInstantiation *i
   const bool preview =
     parameters["$preview"].type() == Value::Type::BOOL && parameters["$preview"].toBool();
   if (preview && disable_preview) {
-    // Child 0 only. Children 1+ are selection brushes for the tools rather than
-    // geometry, and passing them through would put the brush in the model.
+    // Child 0 only: children 1+ are selection brushes, not geometry, and passing
+    // them through would put the brush in the model.
     return children.instantiate(std::make_shared<GroupNode>(inst, "fillet"), {0});
   }
 
@@ -154,8 +129,8 @@ static std::shared_ptr<AbstractNode> builtin_fillet(const ModuleInstantiation *i
   if (parameters["r"].type() == Value::Type::NUMBER) node->size = parameters["r"].toDouble();
   if (parameters["inner"].type() == Value::Type::BOOL) node->inner = parameters["inner"].toBool();
   if (parameters["outer"].type() == Value::Type::BOOL) node->outer = parameters["outer"].toBool();
-  // Both halves get it. The threshold is a statement about which edges of the
-  // target are features, and that cannot depend on which sign is being built.
+  // Both halves share the threshold: it says which edges of the target are
+  // features, which cannot depend on which sign is being built.
   if (parameters["min_angle"].type() == Value::Type::NUMBER) {
     node->min_angle = parameters["min_angle"].toDouble();
   }
@@ -180,7 +155,7 @@ std::string FilletNode::toString() const
 {
   std::ostringstream stream;
   // The wrapper has no setback spelling and no debug overlay, and carries two
-  // switches the tools do not, so it prints its own line.
+  // switches the tools do not.
   if (this->type == FilletType::APPLY) {
     stream << this->name() << "(" << this->discretizer << ", r = " << this->size;
     if (!this->inner) stream << ", inner = false";
@@ -200,10 +175,10 @@ std::string FilletNode::toString() const
   return stream.str();
 }
 
-// Without Manifold there is no tool builder at all, so the modules are left
-// unregistered rather than registered and inert: an unregistered module is an
-// unknown-module error naming the line, where a module that evaluates to no
-// geometry silently deletes the model fillet() was applied to.
+// Without Manifold there is no tool builder, so the modules are left unregistered
+// rather than registered and inert: an unregistered module raises an unknown-module
+// error naming the line, where a module evaluating to no geometry would silently
+// delete the model fillet() was applied to.
 #ifdef ENABLE_MANIFOLD
 void register_builtin_fillet()
 {
