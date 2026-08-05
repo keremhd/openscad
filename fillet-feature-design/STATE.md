@@ -529,6 +529,23 @@ and that is inertness, not repair.** `tee` r=0.5 and r=0.9, `tee_oblique` r=0.2/
 because no bead is built on them any more. Standing rule: the debris and the fillet went
 together. Do not read this as eleven cells fixed.
 
+**The 353-cell sweep, three renders a cell, `distinct`=1 throughout**
+(`results/sweep-f6d06ecb.tsv`, against the `fd3dec78` baseline). **Eleven cells go
+INVALID→VALID and none goes the other way; the not-valid count falls 21 → 10.** The eleven are
+`cross` r=0.3 and r=0.9, `tee` r=0.5 and r=0.9, `tee_oblique` r=0.2/0.3/0.8, `tee_small` at
+defaults / `$fn`=10 / r=1.5, and `pipe_into_face` at `$fn`=8.
+
+**Read the vertex counts beside them and it is not a fix.** Every one of the eleven loses
+between 26% and 71% of its geometry — `cross` r=0.3 goes v=1519 → 435 — and across the sweep
+166 cells lose vertices, up to 82%, while the cells carrying at least one warning rise from 140
+to 201. The ten failures that remain are precisely the ones the change never touched: the
+`$fn`=8 boss family, `refused_neighbour` ×4 and `rib_into_boss` at 14 and 32, all on models
+whose every cell is byte-for-byte unchanged in vertex count and warning count. Thirteen models
+are untouched entirely, and they are the flat-walled ones — `boss_plate`, `hole_plate`,
+`lbracket`, `box_step`, `chamfer_box`, `pocket`, `thin_slab`, the controls. The damage falls
+exactly where a wall curves: `tee`, `tee_small`, `tee_oblique`, `tee_large`, `cross`, `dome`,
+`pipe_into_face`, `two_bosses`, `rib`, `mixed_fn`.
+
 **What a successor has to do first.** The seat construction, not the seat test, is what fails on
 a curved wall: the ball is placed from planes and then asked whether it touches a surface that
 is not one. Any local fit test — the foot, or `d` against `r`, which is the same question since
