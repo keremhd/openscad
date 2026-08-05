@@ -69,6 +69,8 @@ def angle_between(a, b):
 
 
 class Mesh:
+    nosurf = False
+
     def __init__(self, path, tol=1e-7, thr=46.0):
         r = census(path, tol)
         self.verts, self.tris, self.nrm, self.adj = r['verts'], r['tris'], r['nrm'], r['adj']
@@ -115,8 +117,8 @@ class Mesh:
             for k in range(3):
                 e = (min(tri[k], tri[(k+1) % 3]), max(tri[k], tri[(k+1) % 3]))
                 for nb in self.adj.get(e, ()):
-                    if self.surf[nb] == surface and dot(self.nrm[nb], n0) > TURN_CAP \
-                       and nb not in seen:
+                    if (self.nosurf or self.surf[nb] == surface) \
+                       and dot(self.nrm[nb], n0) > TURN_CAP and nb not in seen:
                         seen.add(nb); stack.append(nb)
         tied = []
         if want_tied:
@@ -204,6 +206,9 @@ def main():
     dirs = 1.0 if want_concave else -1.0
     P = planes_of(target)
     mesh = Mesh(blend, thr=seg)
+    if len(sys.argv) > 7 and sys.argv[7] == 'nosurf':
+        mesh.nosurf = True
+        lab += ' nosurf'
 
     def inplane(ti, mid):
         n = mesh.nrm[ti]

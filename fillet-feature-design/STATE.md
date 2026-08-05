@@ -720,6 +720,40 @@ measured clean on both sides, and it is the value `FilletBuilder_test.cc:2176` a
 fails at 10°, and `$fn`=8's 45° seam is exactly such a solid. That it passes anyway is measured,
 not explained.
 
+**The surface restriction in `nearestOnWall` is load-bearing and must not be dropped.** Measured
+with the walk unrestricted — adjacency, the 60° turn cap and the budget only, no surface id — the
+segmentation constant becomes irrelevant, as it must, and every value from 46° to 5° reads the
+same: **26 of 72 and 72 of 91 caught**, worse than 46° restricted, *and* 7 of `cross`'s 97
+genuine concave creases now falsely refused. The grouping still bounds which triangles the ball
+may contact, and that bound is what the rule stands on.
+
+**What segmentation buys, exactly.** Swept over `handblend_step`'s own `$fn`, whose blend facet
+angle is Δ = 360/`$fn` by construction, with D=0.5 so the answer is R(1−tan(Δ/2)) − 0.5:
+
+| `$fn` | Δ | seg 46° | seg 20° | seg 10° | seg 5° | closed form |
+|---|---|---|---|---|---|---|
+| 8 | 45.0 | 4.4e-16 | **0.08579** | 0.08579 | 0.08579 | 0.085786 |
+| 12 | 30.0 | 2.2e-16 | **0.2321** | 0.2321 | 0.2321 | 0.232051 |
+| 16 | 22.5 | 2.2e-16 | **0.3011** | 0.3011 | 0.3011 | 0.301041 |
+| 24 | 15.0 | 2.9e-14 | 2.9e-14 | **0.3683** | 0.3683 | 0.368265 |
+| 48 | 7.5 | 6.2e-14 | 6.2e-14 | 6.2e-14 | **0.4345** | 0.434457 |
+
+Every fired value is the independently derived closed form for that model's own Δ, which is what
+makes this table the instrument's self-proof as well as its result. **The rule fires on exactly
+those blends whose facets turn by more than the segmentation constant, and is inert on the rest.**
+
+**So no single segmentation value satisfies both known answers, and this is Route 2's refutation
+arriving at the second parameter.** `handblend_step` at its own `$fn`=48 needs grouping below
+7.5° to be seen at all; `cross` needs it above 12°, its cylinder seam, or 22 of its 97 genuine
+concave creases are refused. 7.5° is a chamfer boundary and 12° is tessellation and they are the
+same shape locally. **The D axis therefore does not reproduce at the default threshold at
+`$fn`=48, and cannot be made to** — it reproduces at `$fn`≤16 for a 20° constant. That is a
+narrowing of the gate's reach, not a fix for it.
+
+What it does buy is the population that motivated the work: `cross`'s blend-made ridges are
+bead-on-bead runout at 46–89°, not tangent-blend boundaries, and a 20° constant catches 72 of 72
+and 91 of 91 of them with no false refusal anywhere in the bench.
+
 **All of this is offline Python on exported meshes.** It does not include the gate's chain
 sampling, its end and junction exemptions, the averaged station normals, or the brushes.
 
