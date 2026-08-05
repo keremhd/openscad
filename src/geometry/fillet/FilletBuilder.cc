@@ -1833,11 +1833,9 @@ bool endTouched(const Chain& chain, bool front)
 // by station because segments differ in length. A chain shorter than the reach
 // gives the whole of itself.
 //
-// False, with `out` untouched, on a chain that has no two ends: a ring is a
-// closed loop with no end for a cell to sit at, and station n - 1 of one is an
-// ordinary interior station, so measuring back from it would answer a question
-// nobody asked. Returned rather than asserted so the refusal is there in every
-// build.
+// False, with `out` untouched, on a chain that has no two ends: a ring's station
+// n - 1 is an ordinary interior station, so measuring back from it would answer a
+// question nobody asked. Returned rather than asserted so it holds in every build.
 bool endWindow(const MergedMesh& m, const Chain& chain, bool front, double reach,
                SpineInterval& out)
 {
@@ -1868,29 +1866,22 @@ bool endWindow(const MergedMesh& m, const Chain& chain, bool front, double reach
 // from it: `reach` of crease measured back from the end vertex, which is where
 // the bead is truncated and the corner takes over.
 //
-// A junction is built only where every chain arriving there covers it, and why
-// touching the vertex is not enough is that the cell is a fixed size — it is
-// hulled from the seated ball and the sections the beads stop at, and there is no
-// perpendicular to clip it against in three directions at once. So a brush that
-// reaches a corner by a fraction of `reach` still gets the whole of it, which is
-// the brush contract broken by however much was missing, while along an edge the
-// same brush is honoured to the micron. The decision is therefore binary at
-// `reach`: cover it and get a corner, fall inside it and get none — and the
-// stretch that fell inside is dropped with the corner rather than built as a stub
-// meeting nothing, which is what dropUncoveredCorners does to it.
+// Touching the vertex is not enough because the cell is a fixed size — hulled from
+// the seated ball and the sections the beads stop at, with no perpendicular to
+// clip it against in three directions at once. A brush reaching a corner by a
+// fraction of `reach` would still get the whole of it. The decision is therefore
+// binary at `reach`: cover it and get a corner, fall inside it and get none, with
+// the stretch that fell inside dropped by dropUncoveredCorners rather than built
+// as a stub meeting nothing.
 //
-// `reach` is the tool's own size, which is what every caller passes: r for a
-// rounded tool, and not the trigonometric setback r * tan(phi/2) the
-// cross-section works in. The two agree only at a right angle.
+// `reach` is the tool's own size — r for a rounded tool, not the trigonometric
+// setback r * tan(phi/2) the cross-section works in. The two agree only at a right
+// angle.
 //
-// A crease that was never selected is a different thing and does not stop a
-// corner. Two beads that were built still meet at the vertex whether the third
-// crease was refused for size, turned the other way or fell below the threshold,
-// and they cusp there if nothing closes it. What this rule protects is the corner
-// the caller reached for and did not cover.
-//
-// A chain with no two ends has no corner to anchor, and says no: the window is
-// what carries that refusal here, so it holds whether or not assertions are on.
+// A crease that was never selected does not stop a corner: two beads that were
+// built still meet at the vertex whether the third crease was refused for size,
+// turned the other way, or fell below the threshold. This rule protects only the
+// corner the caller reached for and did not cover.
 bool endAnchored(const MergedMesh& m, const Chain& chain, bool front, double reach)
 {
   SpineInterval window;
@@ -1914,9 +1905,8 @@ std::vector<SpineInterval> toSectionSpace(const std::vector<SpineInterval>& runs
   if (runs.empty() || at.size() < 2) return runs;
   bool identity = true;
   for (size_t i = 0; i < at.size() && identity; ++i) identity = at[i] == static_cast<double>(i);
-  // A closed chain has no ends to truncate or run out at, so its sections never
-  // leave their stations — and its parameter runs one past the last of them,
-  // which the open-chain clamp below would swallow.
+  // A closed chain's sections never leave their stations, and its parameter runs
+  // one past the last of them, which the open-chain clamp below would swallow.
   if (identity || closed) return runs;
 
   auto index = [&](double p) {
@@ -1953,8 +1943,7 @@ std::vector<WedgeSection> wedgeSections(const MergedMesh& m,
 
   // A concave tool is unioned into the material, so its overshoot points inward,
   // against the outward wall normals; a convex tool is subtracted and overshoots
-  // into the air. Setback follows the same sign: a concave tool spans the
-  // reentrant quadrant, a convex one cuts into the solid.
+  // into the air. The setback follows the same sign.
   const double dir = concave ? 1.0 : -1.0;
 
   std::vector<WedgeSection> out(stations.size());
@@ -2048,11 +2037,10 @@ RoundSection makeRoundSection(const MergedMesh& m,
   if (phi > 179.0 * M_PI / 180.0 || bis.norm() < 1e-9) return s;
   bis.normalize();
 
-  // The plane of the section is the one spanned by the two wall normals: C, v,
-  // TA and TB all lie in it by construction, so the arc meets each wall
-  // tangentially there whatever the spine does between stations. Taking it from
-  // the normals rather than from the spine direction is what keeps that true
-  // around a bend, where the two disagree.
+  // The section's plane is the one spanned by the two wall normals: C, v, TA and
+  // TB all lie in it by construction, so the arc meets each wall tangentially
+  // whatever the spine does between stations. Taking it from the normals rather
+  // than the spine direction keeps that true around a bend, where the two differ.
   Vector3d e = nA.cross(nB);
   if (e.norm() < 1e-12) return s;
   e.normalize();
@@ -2076,23 +2064,18 @@ RoundSection makeRoundSection(const MergedMesh& m,
     s.u.push_back(C + r * (std::cos(a) * e1 + std::sin(a) * e2));
   }
   // Two more, one per wall, in the tangency directions and further out than
-  // anything the subtraction has to cut through. Without them the arc only
-  // kisses each wall while the wedge reaches eps past it, so what the
-  // subtraction leaves is a strip of the wedge's own overshoot — eps thick, as
-  // long as the crease, and running out to nothing where the arc curves away
-  // from the wall at either end of it. That strip is the sliver, and no amount
-  // of arc segments removes it: it is the gap between a tangent and its tangent
-  // plane, so refining the tangent only makes it thinner. Taking the arc past
-  // the wall instead has it cross the wedge's wall face at a real angle and the
-  // strip never exists.
+  // anything the subtraction has to cut through. Without them the arc only kisses
+  // each wall while the wedge reaches eps past it, and the subtraction leaves a
+  // strip of the wedge's own overshoot — eps thick, as long as the crease. No
+  // number of arc segments removes that strip, since it is the gap between a
+  // tangent and its tangent plane; taking the arc past the wall makes it cross the
+  // wedge's wall face at a real angle instead.
   //
-  // The arc itself is untouched — these are two extra points for the hull to
-  // reach, not a larger ball — so the blend still meets each wall where a ball
-  // of exactly r touches it, to within the overshoot the tool already carries
-  // there. The distance is the top of the ladder every piece of the tool sits
-  // on: the wedges stand eps past each wall, the corner cells further, and what
-  // is subtracted further still, so that a cut always crosses a face and never
-  // arrives along it.
+  // These are extra points for the hull to reach, not a larger ball, so the blend
+  // still meets each wall where a ball of exactly r touches it. The distance is the
+  // top of the ladder every piece of the tool sits on — wedges eps past each wall,
+  // corner cells further, the subtraction further still — so a cut always crosses a
+  // face rather than arriving along it.
   s.u.push_back(TA - dir * 2.0 * epsA * nA);
   s.u.push_back(TB - dir * 2.0 * epsB * nB);
   s.valid = true;
@@ -2147,48 +2130,39 @@ std::vector<int> dropUncoveredCorners(const MergedMesh& m, std::vector<Chain>& c
     }
   }
 
-  // Three creases is what makes a corner, and covering every one of them for `r`
-  // back from the vertex is what lets it be built; a vertex over the first and
-  // short of the second is a corner that cannot be had, and everything cut short
-  // at it goes — the stubs here, and the cell itself through the set handed back.
+  // Three creases make a corner, and covering every one of them for `r` back from
+  // the vertex is what lets it be built. A vertex over the first count and short
+  // of the second is a corner that cannot be had, and everything cut short at it
+  // goes: the stubs here, and the cell itself through the set handed back.
   //
-  // Both counts have to be of the same arms or the rule inverts. Measured against
-  // the arms that survived the brush, a corner appeared as the brush shrank: an
-  // arm covered by less than the debounce leaves the selection outright, so two
-  // arms remained where three arrived, the vertex was never marked, and the cell
-  // came back at full size. Less of the brush bought more material, and the
-  // switch sat at a hundredth of the size rather than at the size.
+  // Both counts must be of the same arms or the rule inverts. Measured against the
+  // arms that survived the brush, a corner appeared as the brush shrank — an arm
+  // covered by less than the debounce leaves the selection outright, so two arms
+  // remained where three arrived, the vertex was never marked, and the cell came
+  // back at full size.
   //
   // A vertex fewer than three creases arrive at is not this rule's business: two
-  // that meet because the third was never a candidate — refused for size, turned
-  // the other way, too shallow — is a corner chainJunctions closes on its own,
-  // and no brush asked otherwise.
-  // Arriving at all is what makes it this rule's business rather than the
-  // model's. A corner the brush is nowhere near has no end covering its vertex,
-  // so nothing is dropped there and no cell was going to be built there either —
-  // marking it would be inert, and it would stop the set meaning what its name
-  // says.
+  // meeting because the third was never a candidate is a corner chainJunctions
+  // closes on its own. Nor is a corner the brush is nowhere near, which has no end
+  // covering its vertex and was never going to get a cell.
   std::set<int> uncovered;
   for (const auto& [v, count] : arms)
     if (count >= 3 && touching[v] > 0 && covering[v] < count) uncovered.insert(v);
   if (uncoveredOut != nullptr) *uncoveredOut = uncovered;
   if (uncovered.empty()) return {};
 
-  // Of those, the ones worth telling the caller about are where nothing at all
-  // was covered: the brush was drawn around that corner and gets nothing there,
-  // which is the one place a brush is answered with silence. Where some crease
-  // through the vertex was covered, the brush was aimed along it and the stubs
-  // going with the corner are the neighbours it inevitably clipped — dropping
-  // those is what makes "this edge and no other" expressible, the count of edges
-  // taken already reports it, and a warning would fire on every use of it.
+  // Only the corners where nothing at all was covered are worth reporting. Where
+  // some crease through the vertex was covered, the brush was aimed along it and
+  // the stubs going with the corner are the neighbours it inevitably clipped —
+  // that is what makes "this edge and no other" expressible, and a warning would
+  // fire on every use of it.
   std::vector<int> out;
   for (const int v : uncovered)
     if (covering[v] == 0 && touching[v] >= 3) out.push_back(v);
 
-  // Every stretch running into an uncovered corner, cut short of the cell it
-  // would have met, goes with it. A stretch is short at one end at most — one
-  // covering the whole of its chain covers both ends by definition — so one pass
-  // settles this, and the counts above stay the counts the decision was made on.
+  // Every stretch running into an uncovered corner, cut short of the cell it would
+  // have met, goes with it. A stretch is short at one end at most, so one pass
+  // settles this and the counts above stay the counts the decision was made on.
   std::vector<Chain> keeping;
   for (Chain& chain : chains) {
     const size_t n = static_cast<size_t>(chain.stationCount());
