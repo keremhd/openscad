@@ -793,6 +793,18 @@ failed at `kSurfaceGroupingDeg` = 20**, the same six cases and the same eleven a
 attempt 2 recorded at 46. The split costs the suite nothing and fixes nothing in it. The eleven
 are the boundary-contact family and the non-monotone magnitude, both still open.
 
+**Reverted, and the branch is provably where it was.** `git checkout 28d6bdbc4 -- src/` puts
+back attempt 2 *and* the threshold split in one step; nothing else on the branch moves. The
+binary rebuilt from the revert is md5 **`fd3dec78`**, the binary the 21-cell baseline sweep was
+measured on, and the unit suite at the revert is **2230/2230, 88/88**. No re-sweep is needed to
+say the branch is unchanged.
+
+**Not verified, and a successor should not assume any of it:** no 353-cell sweep was run on any
+of this — the third attempt in a row not to reach one; the bench table above is one render a
+cell, where trap 14 requires three; `handblend_step`'s RT axis was not re-run against the split;
+and the boundary-contact exemption that the whole segmentation question now waits on was not
+attempted at all.
+
 ## 5. Open defects
 
 | defect | state |
@@ -1120,8 +1132,8 @@ defects are plausibly one bug, so measuring after the fix is worth more than pla
      derived `R(1−tan(Δ/2)) − d` exactly. At the default 46° it is still inert on that control,
      and now for a reason nothing local can reach: the ball genuinely seats on the merged
      wall-and-blend surface, to 8.9e-16. **The rule is finished; the grouping is what is left.**
-   - **Split the threshold in two — BUILT AND REVERTED 2026-08-05**, restorable with the whole
-     of attempt 2 (see the last two subsections of §4d). `kSurfaceGroupingDeg`, one constant and
+   - **Split the threshold in two — BUILT AND REVERTED 2026-08-05**, restorable together with
+     attempt 2 by `git checkout 28d6bdbc4 -- src/` (see the last three subsections of §4d). `kSurfaceGroupingDeg`, one constant and
      one call site. Measured on both sides. It does what §4d hoped: grouped below 45° the
      angular rule catches 72 of 72 and 91 of 91 of `cross`'s blend-made ridges again, against
      genuine features at ≤2.6e-14, and **§4d's stated reason the split fails does not transfer**
