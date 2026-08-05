@@ -3309,9 +3309,17 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   // there, since a corner cell resting inside one of them is the coincident-face
   // problem the overshoot exists to avoid, and the beads no longer all stand the
   // same distance past a wall.
+  // endSections carries a vertex only where a bead reached it, so this is a
+  // lookup and not an insertion: operator[] would grow the map while reading it.
+  static const std::vector<RoundSection> kNoSections;
+  auto sectionsAt = [&](int vert) -> const std::vector<RoundSection>& {
+    const auto it = endSections.find(vert);
+    return it == endSections.end() ? kNoSections : it->second;
+  };
+
   auto epsAt = [&](const Junction& j) {
     double most = eps;
-    for (const RoundSection& s : endSections[j.vert]) most = std::max(most, s.eps);
+    for (const RoundSection& s : sectionsAt(j.vert)) most = std::max(most, s.eps);
     return most;
   };
 
@@ -3336,7 +3344,7 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
     const double over = 1.5 * here;
     const double ballPast = ballShort + 2.0 * here;
     std::vector<std::array<Vector3d, 4>> profiles;
-    for (const RoundSection& s : endSections[j.vert]) profiles.push_back(cornerProfile(s, over));
+    for (const RoundSection& s : sectionsAt(j.vert)) profiles.push_back(cornerProfile(s, over));
     manifold::Manifold cell = cornerCell(j, m.pos[j.vert], profiles, r, dir, over);
     if (cell.IsEmpty()) continue;
     // The group the ball's own vertex ties together: every chain arriving there
