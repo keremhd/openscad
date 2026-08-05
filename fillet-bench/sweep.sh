@@ -106,12 +106,28 @@ BINSTAMP=$(md5 -q "$BIN" | cut -c1-8)
 mkdir -p ${OUT:h} $WORK
 (( FRESH )) && rm -f $OUT
 if [[ ! -f $OUT ]]; then
-  print "# model\tfn\tr\tvalid\tnonman\tchi\tgenus\tcomp\tv\te\tf\twarn\ttol\truns\tdistinct\tagree\tsecs\tbin" > $OUT
+  # nmvert, throat and wantcomp are APPENDED at the end rather than put beside
+  # nonman and genus where they belong, so that every field index in the awk
+  # summaries below and in every recorded results file stays what it was. A
+  # column inserted in the middle silently reassigns eighteen of them.
+  print "# model\tfn\tr\tvalid\tnonman\tchi\tgenus\tcomp\tv\te\tf\twarn\ttol\truns\tdistinct\tagree\tsecs\tbin\tnmvert\tthroat\twantcomp" > $OUT
 fi
 
 # --- one render + one reading ------------------------------------------------
 # Sets the REPLY_* globals. fn == "def" means stock defaults with no -D FNSET,
 # which is the only honest way to ask a planar model anything (trap 7).
+
+# How many solids the MODEL'S SOURCE builds. Declared in the .scad itself with a
+# `// mesh.py-comp: N` line, because it is a fact about the source and not about
+# the sweep; everything that declares nothing builds one solid, and a one-solid
+# model that comes back in two pieces has shed a fragment. shallow_crease is the
+# only declarer -- it renders two plates as its whole point, and its nine comp=2
+# rows are correct.
+want_comp() {
+  local n=$(sed -n 's|^// *mesh\.py-comp: *\([0-9][0-9]*\).*|\1|p' models/$1.scad | head -1)
+  print -r -- ${n:-1}
+}
+
 run_one() {
   local model=$1 fn=$2 r=$3 extra=${4:-}
   local tag=${model}_fn${fn}_r${r}${extra:+_$extra}
@@ -144,9 +160,11 @@ run_one() {
   # exports a plausible mesh. An export succeeding proves nothing; read the log.
   REPLY_WARN=$(grep -c "WARNING:" $log 2>/dev/null); REPLY_WARN=${REPLY_WARN:-0}
 
+  local wc=$(want_comp $model)
   if [[ ! -s $stl ]]; then
     REPLY_VALID=NOOUT; REPLY_NONMAN=-; REPLY_CHI=-; REPLY_GENUS=-
     REPLY_COMP=-; REPLY_V=-; REPLY_E=-; REPLY_F=-; REPLY_AGREE=-
+    REPLY_NMVERT=-; REPLY_THROAT=-
     (( waited >= CAP )) && REPLY_VALID=TIMEOUT
     return
   fi
@@ -156,19 +174,28 @@ run_one() {
   # coordinate of 1.2. The OFF is still read, and any disagreement is recorded
   # rather than left silent -- see the `agree` column and README.
   if [[ -s $off ]]; then
-    python3 mesh.py --compare --tol $TOL $off $stl > $WORK/$tag.cmp 2>&1
+    python3 mesh.py --compare --tol $TOL --comp $wc $off $stl > $WORK/$tag.cmp 2>&1
     if grep -q '^AGREE' $WORK/$tag.cmp; then REPLY_AGREE=yes; else REPLY_AGREE=NO; fi
   else
     REPLY_AGREE=-
   fi
-  local line=$(python3 mesh.py --tol $TOL $stl 2>&1)
+  local line=$(python3 mesh.py --tol $TOL --comp $wc $stl 2>&1)
   # awk, not sed: BSD sed has no \| alternation, and a pattern anchored on
   # "off:" silently stopped matching the moment the reader moved to STL --
   # which showed up as UNREADABLE on every row rather than as an error.
   REPLY_VALID=$(print -r -- "$line" | awk '{print $2}')
-  get() { print -r -- "$line" | sed -n "s/.* $1=\([^ ]*\).*/\1/p"; }
+  # awk on whole tokens and take the FIRST match, not sed: `.*comp=` is greedy,
+  # and the line can end "(wanted comp=1)", so a sed read of comp returned the
+  # EXPECTATION instead of the measurement -- a column that would have reported
+  # every shed fragment as comp=1 and agreed with itself.
+  get() { print -r -- "$line" | awk -v k="$1" \
+      '{for(i=1;i<=NF;i++) if (index($i, k "=")==1) {print substr($i, length(k)+2); exit}}'; }
   REPLY_NONMAN=$(get nonman); REPLY_CHI=$(get chi); REPLY_GENUS=$(get genus)
   REPLY_COMP=$(get comp); REPLY_V=$(get v); REPLY_E=$(get e); REPLY_F=$(get f)
+  REPLY_NMVERT=$(get nmvert)
+  REPLY_THROAT=$(print -r -- "$line" | sed -n 's/.*throat<=\([^ ]*\)mm.*/\1/p')
+  REPLY_THROAT=${REPLY_THROAT:--}
+  REPLY_WANTCOMP=$wc
   [[ -n $REPLY_VALID ]] || REPLY_VALID=UNREADABLE
 }
 
@@ -194,26 +221,27 @@ emit() {  # model fn r  -- render REPEAT times, print, checkpoint. Skips a done 
     return
   fi
   local -a seen
-  local worst="" wnonman wchi wgenus wcomp wv we wf wwarn wagree=yes
+  local worst="" wnonman wchi wgenus wcomp wv we wf wwarn wagree=yes wnmvert wthroat wwant
   local t0=$SECONDS i
   for i in $(seq 1 $REPEAT); do
     run_one $model $fn $r
-    local sig="$REPLY_VALID v=$REPLY_V e=$REPLY_E f=$REPLY_F chi=$REPLY_CHI nonman=$REPLY_NONMAN comp=$REPLY_COMP"
+    local sig="$REPLY_VALID v=$REPLY_V e=$REPLY_E f=$REPLY_F chi=$REPLY_CHI nonman=$REPLY_NONMAN nmvert=$REPLY_NMVERT comp=$REPLY_COMP"
     [[ ${seen[(Ie)$sig]} -eq 0 ]] && seen+=($sig)
     # Keep the first run, then let any non-VALID run displace it.
     if [[ -z $worst || ( $worst == VALID && $REPLY_VALID != VALID ) \
           || ( $worst == INVALID && ( $REPLY_VALID == NOOUT || $REPLY_VALID == TIMEOUT ) ) ]]; then
       worst=$REPLY_VALID; wnonman=$REPLY_NONMAN; wchi=$REPLY_CHI; wgenus=$REPLY_GENUS
       wcomp=$REPLY_COMP; wv=$REPLY_V; we=$REPLY_E; wf=$REPLY_F; wwarn=$REPLY_WARN
+      wnmvert=$REPLY_NMVERT; wthroat=$REPLY_THROAT; wwant=${REPLY_WANTCOMP:-1}
     fi
     [[ $REPLY_AGREE == NO ]] && wagree=NO
   done
   local distinct=${#seen}
   local secs=$((SECONDS - t0))
-  local row="$model	$fn	$r	$worst	$wnonman	$wchi	$wgenus	$wcomp	$wv	$we	$wf	$wwarn	$TOL	$REPEAT	$distinct	$wagree	$secs	$BINSTAMP"
+  local row="$model	$fn	$r	$worst	$wnonman	$wchi	$wgenus	$wcomp	$wv	$we	$wf	$wwarn	$TOL	$REPEAT	$distinct	$wagree	$secs	$BINSTAMP	$wnmvert	$wthroat	$wwant"
   print -r -- "$row" >> $OUT
-  printf "  %-18s fn=%-4s r=%-5s %-9s nonman=%-3s chi=%-3s genus=%-4s warn=%-3s tol=%s runs=%s distinct=%s off=%s %ss%s\n" \
-    $model $fn $r $worst $wnonman $wchi $wgenus $wwarn $TOL $REPEAT $distinct $wagree $secs \
+  printf "  %-18s fn=%-4s r=%-5s %-9s nonman=%-3s nmvert=%-3s chi=%-3s genus=%-4s comp=%s/%s warn=%-3s tol=%s runs=%s distinct=%s off=%s %ss%s\n" \
+    $model $fn $r $worst $wnonman $wnmvert $wchi $wgenus $wcomp $wwant $wwarn $TOL $REPEAT $distinct $wagree $secs \
     "$( (( distinct > 1 )) && print '  <-- RUNS DISAGREE' )$( [[ $wagree == NO ]] && print '  <-- OFF/STL DISAGREE' )"
 }
 
@@ -229,20 +257,33 @@ if (( SELFTEST )); then
   # invalid, a VALID expectation only if EVERY run is.
   check() {  # label expected-VALID/INVALID model fn r [extra]
     local label=$1 want=$2; shift 2
-    local worst="" nm chi n
+    local worst="" nm chi n nv cp wc
     for n in $(seq 1 $REPEAT); do
       run_one "$@"
       if [[ -z $worst || ( $worst == VALID && $REPLY_VALID != VALID ) ]]; then
         worst=$REPLY_VALID; nm=$REPLY_NONMAN; chi=$REPLY_CHI
+        nv=$REPLY_NMVERT; cp=$REPLY_COMP; wc=$REPLY_WANTCOMP
       fi
     done
+    local shown="nonman=$nm nmvert=$nv chi=$chi comp=$cp/$wc tol=$TOL ($REPEAT runs)"
     if [[ $worst == $want* ]]; then
-      print "  PASS  $label -> $worst nonman=$nm chi=$chi tol=$TOL ($REPEAT runs)"
+      print "  PASS  $label -> $worst $shown"
     else
-      print "  FAIL  $label -> $worst (wanted $want) nonman=$nm chi=$chi tol=$TOL ($REPEAT runs)"
+      print "  FAIL  $label -> $worst (wanted $want) $shown"
       (( fails++ ))
     fi
   }
+
+  # The instrument's own instrument, first: five synthetic solids whose answers
+  # are arithmetic rather than measurement. If the pinch check cannot tell two
+  # cubes meeting at a corner from a cube, nothing below is worth rendering.
+  print "the reader's synthetic controls"
+  if python3 mesh.py --selftest --tol $TOL | sed 's/^/  /'; then
+    :
+  else
+    print "  FAIL  mesh.py's own selftest failed -- the reader is broken, stop here"
+    (( fails++ ))
+  fi
 
   # KNOWN ANSWERS, re-derived 2026-08-05 on a pinned binary and read from exact
   # ASCII STL. They are NOT the numbers this file shipped with, and the change
@@ -270,6 +311,97 @@ if (( SELFTEST )); then
   check "refused_neighbour r=0.3"  VALID   refused_neighbour def 0.3
   check "refused_neighbour r=0.5"  VALID   refused_neighbour def 0.5
   check "refused_neighbour r=1.2"  VALID   refused_neighbour def 1.2
+
+  # KNOWN ANSWERS FOR THE CORRECTED CRITERION, dissected 2026-08-05 and each
+  # asserted on the FAULT and not only on the verdict. Every one of these read
+  # VALID before the pinch check and the component expectation existed, so an
+  # assertion here that starts passing for a different reason than the one named
+  # is the failure mode to watch -- which is why `want` is a field value, not a
+  # word. `pinches` and `parts` in --json carry the locations and the sizes.
+  print "known answers -- the debris the old criterion could not see"
+  field() {  # label model fn r  key=value...
+    local label=$1 model=$2 fn=$3 r=$4; shift 4
+    run_one $model $fn $r
+    local wc=$(want_comp $model)
+    local line=$(python3 mesh.py --tol $TOL --comp $wc \
+        $WORK/${model}_fn${fn}_r${r}.stl 2>&1)
+    local bad=()
+    local kv k want got
+    for kv in "$@"; do
+      k=${kv%%=*}; want=${kv#*=}
+      if [[ $k == valid ]]; then
+        got=$(print -r -- "$line" | awk '{print $2}')
+      else
+        got=$(print -r -- "$line" | awk -v k="$k" \
+          '{for(i=1;i<=NF;i++) if (index($i, k "=")==1) {print substr($i, length(k)+2); exit}}')
+      fi
+      [[ $got == $want ]] || bad+=("$k=$got wanted $want")
+    done
+    if (( ${#bad} )); then
+      print "  FAIL  $label -- ${bad[*]}"
+      print "        $line"
+      (( fails++ ))
+    else
+      print "  PASS  $label -- $*"
+    fi
+  }
+  # Two point-attached slivers, 4 and 8 triangles, and NO tunnel anywhere. This
+  # cell read VALID chi=4 genus=1 comp=3: two pinches make an even chi, and the
+  # genus was a number with no referent.
+  field "tee r=0.5 is two pinches, not a handle" tee def 0.5 \
+        valid=INVALID nmvert=2 nonman=0 comp=3 genus=n/a chi=4
+  # A fully detached 6-triangle fragment, 0.35 x 0.10 x 0.40 mm, sharing zero
+  # vertices with the body. Nothing about it is non-manifold; it is a second
+  # component of a model that unions one solid.
+  field "tee_small sheds a detached fragment (defaults)" tee_small def def \
+        valid=INVALID comp=2 nmvert=0 nonman=0
+  field "tee_small sheds it at \$fn=10 too" tee_small 10 def \
+        valid=INVALID comp=2
+  field "tee_small sheds it at r=1.5 too" tee_small def 1.5 \
+        valid=INVALID comp=2
+  # A 4-triangle shard of 3.45e-7 mm^3 floating OUTSIDE the solid.
+  field "cross r=0.9 sheds a shard outside the body" cross def 0.9 \
+        valid=INVALID comp=2 nmvert=0 nonman=0
+  # The chi-odd family: one tetrahedral sliver attached at exactly one vertex.
+  # It was already invalid, by parity; it must now be invalid for the reason.
+  field "tee r=0.9 is one pinch, located" tee def 0.9 \
+        valid=INVALID nmvert=1 chi=3 genus=n/a
+  field "tee_oblique r=0.2 is one pinch" tee_oblique def 0.2 valid=INVALID nmvert=1
+  field "tee_oblique r=0.3 is one pinch" tee_oblique def 0.3 valid=INVALID nmvert=1
+  field "tee_oblique r=0.8 is one pinch" tee_oblique def 0.8 valid=INVALID nmvert=1
+  # comp > 1 is a fault only against what the model builds. shallow_crease
+  # renders two plates as its whole point and declares so in its source; its
+  # nine comp=2 rows are correct and must stay green.
+  field "shallow_crease legitimately renders two plates" shallow_crease def def \
+        valid=VALID comp=2 nmvert=0
+  # And the one real handle in the bench stays valid, now carrying the throat
+  # that says why it does not matter.
+  field "cross r=2.0 genus 4 is real, and micron-scale" cross def 2.0 \
+        valid=VALID genus=4 comp=1 nmvert=0
+  # THE PAIR IS THE CHECK, not either half. cross's four handles must close
+  # under a weld the tessellation still survives, and hole_plate's genus 1 --
+  # a hole a plate is supposed to have, at the same genus and the same every
+  # other number -- must not. An instrument that cannot separate those two is
+  # not triage, and the first two versions of the throat proxy could not.
+  run_one cross def 2.0
+  local cross_t=$REPLY_THROAT
+  run_one hole_plate def def
+  local hole_t=$REPLY_THROAT
+  if [[ $cross_t == - || -z $cross_t ]]; then
+    print "  FAIL  cross r=2.0 reported no throat beside a nonzero genus"
+    (( fails++ ))
+  elif (( cross_t <= 0.01 )); then
+    print "  PASS  cross r=2.0 handles close under a ${cross_t}mm weld -- micron-scale, 20x under a 0.2 mm layer"
+  else
+    print "  FAIL  cross r=2.0 throat<=${cross_t}mm -- that is not the micron-scale handle the record describes"
+    (( fails++ ))
+  fi
+  if [[ $hole_t == - || -z $hole_t ]]; then
+    print "  PASS  hole_plate's genus 1 survives every weld the tessellation allows, as a real hole must"
+  else
+    print "  FAIL  hole_plate's hole closed under a ${hole_t}mm weld -- the throat proxy is reading facet spacing again"
+    (( fails++ ))
+  fi
 
   # THE BUILDER IS NOW DETERMINISTIC, and this pair is what proves it.
   # rib_into_boss used to return two or three distinct meshes over eight runs at
@@ -352,8 +484,8 @@ if (( SELFTEST )); then
   # reader that is right about every known answer and still wrong.
   print "self-proof -- a facet rotation is a rigid motion"
   for f in 16 24 32; do
-    run_one selfproof $f def "ROT=0"; s0="$REPLY_VALID v=$REPLY_V e=$REPLY_E f=$REPLY_F chi=$REPLY_CHI nonman=$REPLY_NONMAN"
-    run_one selfproof $f def "ROT=1"; s1="$REPLY_VALID v=$REPLY_V e=$REPLY_E f=$REPLY_F chi=$REPLY_CHI nonman=$REPLY_NONMAN"
+    run_one selfproof $f def "ROT=0"; s0="$REPLY_VALID v=$REPLY_V e=$REPLY_E f=$REPLY_F chi=$REPLY_CHI nonman=$REPLY_NONMAN nmvert=$REPLY_NMVERT comp=$REPLY_COMP"
+    run_one selfproof $f def "ROT=1"; s1="$REPLY_VALID v=$REPLY_V e=$REPLY_E f=$REPLY_F chi=$REPLY_CHI nonman=$REPLY_NONMAN nmvert=$REPLY_NMVERT comp=$REPLY_COMP"
     if [[ $s0 == $s1 ]]; then print "  PASS  selfproof fn=$f rot 0 == rot 1: $s0"
     else print "  FAIL  selfproof fn=$f rot 0 != rot 1\n        rot0: $s0\n        rot1: $s1"; (( fails++ )); fi
   done
@@ -410,7 +542,11 @@ done
 
 print "\ndone. $(( $(wc -l < $OUT) - 1 )) rows in $OUT, weld tolerance $TOL, $REPEAT runs per cell"
 print "invalid rows:"
-awk -F'\t' 'NR>1 && $4 != "VALID" {print "  " $1 "  fn=" $2 "  r=" $3 "  " $4 "  nonman=" $5 "  chi=" $6 "  warn=" $12 "  tol=" $13 "  runs=" $14 "  distinct=" $15}' $OUT
+awk -F'\t' 'NR>1 && $4 != "VALID" {print "  " $1 "  fn=" $2 "  r=" $3 "  " $4 "  nonman=" $5 "  nmvert=" $19 "  chi=" $6 "  comp=" $8 "/" $21 "  warn=" $12 "  tol=" $13 "  runs=" $14 "  distinct=" $15}' $OUT
+print "rows whose fault is a pinched vertex (invisible to every edge count):"
+awk -F'\t' 'NR>1 && $19 != "0" && $19 != "-" && $19 != "" {print "  " $1 "  fn=" $2 "  r=" $3 "  nmvert=" $19 "  chi=" $6}' $OUT
+print "rows with more components than the model builds (a shed fragment):"
+awk -F'\t' 'NR>1 && $21 != "" && $8 != "-" && $8+0 > $21+0 {print "  " $1 "  fn=" $2 "  r=" $3 "  comp=" $8 "  wanted " $21}' $OUT
 print "binaries present in $OUT (more than one means the table mixes builds):"
 # Field 18, not 17: the row is model fn r valid nonman chi genus comp v e f warn
 # tol runs distinct agree secs bin, and 17 is the elapsed seconds -- which made
@@ -418,7 +554,7 @@ print "binaries present in $OUT (more than one means the table mixes builds):"
 awk -F'\t' 'NR>1 {print $18}' $OUT | sort -u | sed 's/^/  /'
 print "cells where the OFF export changed the answer (the exporter, not the geometry):"
 awk -F'\t' 'NR>1 && $16 == "NO" {print "  " $1 "  fn=" $2 "  r=" $3}' $OUT
-print "cells where genus is not 0 (a fillet that changed the topology):"
-awk -F'\t' 'NR>1 && $7 != "0" && $7 != "n/a" && $7 != "-" {print "  " $1 "  fn=" $2 "  r=" $3 "  genus=" $7 "  chi=" $6}' $OUT
+print "cells where genus is not 0 (a fillet that changed the topology), with the throat it turns on:"
+awk -F'\t' 'NR>1 && $7 != "0" && $7 != "n/a" && $7 != "-" {print "  " $1 "  fn=" $2 "  r=" $3 "  genus=" $7 "  chi=" $6 "  throat" ($20=="-" ? " survives every weld tried" : "<=" $20 "mm")}' $OUT
 print "cells whose runs disagreed with each other:"
 awk -F'\t' 'NR>1 && $15 > 1 {print "  " $1 "  fn=" $2 "  r=" $3 "  distinct=" $15 " of " $14 " runs"}' $OUT
