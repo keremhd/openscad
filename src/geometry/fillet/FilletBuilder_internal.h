@@ -145,29 +145,6 @@ inline bool isFeatureAngle(double dihedralDeg, double thresholdDeg)
 // distribution.
 inline constexpr double kDefaultCreaseThresholdDeg = 46.0;
 
-// The angle `smoothSurfaces` groups at when the size gate asks which triangles
-// a seated ball may touch. It is NOT the crease threshold and must not be tied
-// to it: the crease threshold states which edges the user wants blended, this
-// one states which faces are the same wall. At 46 they are the same number and
-// a 45 degree chamfer counts as a smooth continuation of the wall it sits on,
-// so a wall with any blend already built into it reaches past everything the
-// ball could hang off and the gate can never answer no.
-//
-// Bounded on both sides by measurement, and the bounds nearly meet. Below: the
-// grouping must clear the target's own tessellation seam, or each facet becomes
-// its own wall and a ball whose contact is a radius away lands off it. At 10 a
-// cross of three stock-default cylinders, whose seams are 12, falsely refuses
-// 22 of its 97 concave creases. Above: the gate only sees a blend whose facets
-// turn by more than this, so raising it narrows what the gate can refuse, and
-// past 45 it sees nothing at all.
-//
-// Nothing separates the two sides in general -- a 12 degree tessellation seam
-// and a 12 degree chamfer facet are the same shape -- so this constant buys a
-// range and not a rule. 20 is the widest tessellation seam the bench produces
-// with clearance, and it is the value the segmentation tests already used
-// before there was a constant to name.
-inline constexpr double kSurfaceGroupingDeg = 20.0;
-
 // Walk the adjacency, classify every two-face edge, and tally the counts. Edges
 // with a dihedral below thresholdDeg are treated as seams and skipped. Same-
 // source-id ("same-surface") edges are only tallied when useProvenance is set
