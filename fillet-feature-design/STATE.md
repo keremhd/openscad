@@ -627,6 +627,32 @@ the blend. **There is no local geometric quantity that can separate these two po
 this is the second construction to fail on it: the ball really does seat, so nothing measured at
 the seat can say otherwise.
 
+**The unit suite is 2230 assertions / 88 cases, 82 passed and 11 assertions failed**, unfiltered
+on the pin. The previous attempt's canaries all clear: "a wall's own curvature is not an
+overshoot" passes its four dome-Fits checks at r = 0.3, 1.0, 2.0 and 10.0, and the rib-with-a-
+bead refusal counts are back. Six cases fail, in three families, and two of them are real:
+
+- **A contact landing on its wall's own boundary now reads as a large miss.** "a contact landing
+  on the edge of its wall is a fit, not a miss" — two overlapping bosses whose merged top face is
+  bounded by the crease being blended — refuses one chain at 0.0627 and reads a worst miss of
+  **0.9265 on a radius of 2**, where the old rule read 4.4e-16. "a bead the target already
+  carries is not a wall in the way" fails the same way at 0.0640. The two rules define the
+  boundary case oppositely on purpose: `surfaceRim` called nearest-point-equals-boundary a fit,
+  because the blend then stops exactly where its wall does, while a normal cone at a one-sided
+  boundary edge has no direction to accept and calls the same contact a miss. **The angular rule
+  needs the crease's own edge exempted before it is usable**, and that is not the `turned`
+  exemption, which fires only where the chain changes walls.
+- **The reported magnitude is not monotone in the overshoot.** `r·sin θ` is bounded by r and
+  turns over: on the perched dome the r=18 refusal reports 0.0124 against r=14's 0.0311, and
+  "a blend wider than the face it must meet is refused" reports 4.685 where the test asserts the
+  5.0 setback. The refusals themselves are all still there — it is the number in the warning
+  that changed meaning, from a length of missing wall to an angle subtended at the radius.
+- "a crease the exemptions cover is judged the same at any scale" fails with them.
+
+**So it is not shipped.** The code is reverted for the same reason `06a12765a` was, and restored
+the same way — `git revert` the revert. It leaves the branch green and it leaves the rule one
+command away.
+
 **What that leaves.** The two-parameter split of §4d's last paragraph is now the only thing
 between this rule and a working size gate, and the rule to pair it with exists, is measured, and
 is committed. Its remaining dependency is `smoothSurfaces` — one call, one threshold — and the
