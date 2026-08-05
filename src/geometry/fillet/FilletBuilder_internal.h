@@ -18,11 +18,9 @@
  */
 #pragma once
 
-// Internal decomposition of the fillet edge-classification pass. These types and
-// helpers back buildFilletTool() and are exposed here (rather than living in an
-// anonymous namespace in the .cc) so the unit test can exercise the pure mesh
-// combinatorics — vertex merging, edge adjacency, concavity — directly, without
-// going through the geometry evaluator. Not part of the public fillet API.
+// Internal decomposition of the fillet edge-classification pass. Not part of the
+// public fillet API; declared here rather than in an anonymous namespace so the
+// unit test can exercise the mesh combinatorics without the geometry evaluator.
 
 #include <algorithm>
 #include <array>
@@ -102,47 +100,34 @@ struct ClassCounts
   std::size_t featureSameSurface = 0;
 };
 
-// Whether an edge turning dihedralDeg counts as a feature rather than as a seam
-// the tessellation itself produced. Every caller must go through this: the
-// classification, the selection, the smooth-surface grouping and the debug
-// colouring all ask the same question, and at a value where they disagreed an
-// edge would be a crease to one and a flat seam to another.
+// Whether an edge turning dihedralDeg counts as a feature rather than a seam the
+// tessellation produced. Classification, selection, smooth-surface grouping and
+// debug colouring must all go through this, or an edge could be a crease to one
+// and a flat seam to another.
 //
-// Ties are rejected, not accepted. An exact tie is reachable — min_angle= can
-// name any value, including one a surface's own facets turn by — and there the
-// dihedrals of a tessellated surface land a few ulp either side of the
-// threshold, splitting edges that are identical by symmetry. Rejecting keeps a
-// prism a prism; accepting would round every facet of one. The margin is four
-// orders above that ulp noise and far below any angle a caller chose on purpose.
-// The default threshold is deliberately kept off every common facet angle so
-// that no unnamed threshold ever lands here.
+// Ties are rejected. min_angle= can name an angle a surface's own facets turn by,
+// and there the computed dihedrals land a few ulp either side of the threshold,
+// splitting edges that are identical by symmetry. Rejecting keeps a prism a
+// prism. The 1e-9 margin is four orders above that ulp noise and far below any
+// angle a caller chose on purpose.
 inline bool isFeatureAngle(double dihedralDeg, double thresholdDeg)
 {
   return dihedralDeg >= thresholdDeg * (1 + 1e-9);
 }
 
 // The dihedral above which an edge is a feature rather than a curve-tessellation
-// seam, when min_angle= names no other value. A constant, not a quantity read
-// off the mesh or off $fn/$fa: classification is then a property of the solid
-// alone, identical whether the solid arrived at stock defaults, at an explicit
-// $fn, or through an STL round trip.
+// seam, when min_angle= names no other value. A constant, not a quantity read off
+// the mesh or off $fn/$fa, so classification is a property of the solid alone —
+// the same at stock defaults, at an explicit $fn, or after an STL round trip.
 //
-// 46 clears every tessellation seam a bench model produces (the widest measured
-// is 36 degrees, on a 10 mm cylinder at stock defaults) while sitting below the
-// steep part of every real intersection curve.
-//
-// It is bounded on both sides by measurement. Below: the wall seams of a
-// cylinder($fn=8) turn 45, and a threshold under that rounds every facet of an
-// octagonal prism. Equalling 45 is no better than falling under it, because then
-// a prism's classification turns on where its computed dihedrals land against
-// the tie margin, and measured facet angles are not exact — a sphere's latitude
-// rings read about 0.065 degrees off nominal. Above: a tee of two equal
-// cylinders carries a concave intersection curve whose dihedrals run 15.86,
-// 46.26, 72.02, 87.82; a threshold over 46.27 drops the 46.26 quartet, which
-// cuts the 16-edge chain into seven fragments and leaves four of them too short
-// for the size gate. Selecting a crease chain whole matters more than margin:
-// the gap the threshold sits in, 15.86 to 46.26, is the widest in that
-// distribution.
+// Bounded on both sides by measurement. Below: the wall seams of cylinder($fn=8)
+// turn 45, and a threshold at or under that rounds every facet of an octagonal
+// prism (at exactly 45 the outcome turns on the tie margin, and measured facet
+// angles are not exact — a sphere's latitude rings read ~0.065 deg off nominal).
+// Above: a tee of two equal cylinders has a concave intersection curve with
+// dihedrals 15.86, 46.26, 72.02, 87.82, and a threshold over 46.27 drops the
+// 46.26 quartet, cutting a 16-edge chain into seven fragments of which four are
+// then too short for the size gate. 46 sits in the widest gap available.
 inline constexpr double kDefaultCreaseThresholdDeg = 46.0;
 
 // Walk the adjacency, classify every two-face edge, and tally the counts. Edges
@@ -169,60 +154,46 @@ using SpineInterval = std::pair<double, double>;
 
 // A spine: an ordered run of merged vertex indices along one crease. `closed`
 // marks a ring (the hole-mouth case), where the last vertex reconnects to the
-// first. Ordering is canonical (derived from vertex positions, not mesh
-// traversal order) so downstream indices stay put under a small parameter nudge.
+// first. Ordering is canonical (derived from vertex positions, not mesh traversal
+// order) so downstream indices stay put under a small parameter nudge.
 //
-// `keep` is the part of the chain the selection brushes picked out, empty
-// meaning the whole of it — the common case, and the only one when no brush was
-// given at all. A chain the brushes miss entirely is not carried with an empty
-// `keep`; it is dropped from the chain list.
+// `keep` is the part of the chain the selection brushes picked out; empty means
+// the whole of it, which is also the no-brush case. A chain the brushes miss
+// entirely is dropped from the chain list rather than carried with empty `keep`.
 //
-// A chain has two polylines, and the distinction only appears once one has been
-// resampled. `raw` is the crease as the mesh has it, every vertex of it, and is
-// never altered by anything here. The stations — the points the bead's sections
-// are placed at — are `at`, `pts` and `stations` read together: `at[i]` is where
-// station i sits in `raw`'s own parameter (integer k meaning exactly `raw[k]`,
-// k + f meaning f of the way along raw segment k), `pts[i]` is its position, and
-// `stations[i]` is the mesh vertex it IS, or -1 where it is a new point interior
-// to a raw segment.
+// A chain carries two polylines, and they differ only once it has been resampled.
+// `raw` is the crease as the mesh has it and is never altered here. The stations
+// — where the bead's sections are placed — are `at`, `pts` and `stations` read
+// together: `at[i]` is station i's parameter in `raw` (integer k meaning exactly
+// `raw[k]`, k + f meaning f of the way along raw segment k), `pts[i]` its
+// position, and `stations[i]` the mesh vertex it IS, or -1 where it is a new point
+// interior to a raw segment.
 //
-// The list is called `stations` and not `verts` because it is not the vertices
-// of this crease. Reading it as if it were is a bug this builder has shipped
-// four times — in `checkChainSizes`, `filletedEdges`, `chainJunctions` and a
-// seam predicate since removed — each time found at integration and never by a
-// test. It is
-// private for the same reason: the only two questions it can answer from outside
-// are `stationCount()` and `openEnds()`. Anything else about the crease is a
-// question for `rawRun()`, `param()`, `point()`, `inEdge()`, `outEdge()` or
-// `rawMid()`.
+// `stations` is not the vertex list of the crease, and reading it as one has been
+// a bug here four times over. It is private for that reason: from outside, only
+// `stationCount()` and `openEnds()` may ask about it. Everything else about the
+// crease goes through `rawRun()`, `param()`, `point()`, `inEdge()`, `outEdge()`
+// or `rawMid()`.
 //
-// `at` and `pts` empty is the identity: one station per crease vertex, which is
+// `at` and `pts` empty is the identity — one station per crease vertex — which is
 // how every chain leaves buildChains and how it stays unless resampleChains has
 // something to fix. Every accessor below reduces to the plain expression it
-// replaced in that case, so an unresampled chain is built from bit-identical
-// inputs.
+// replaced in that case, so an unresampled chain is built from identical inputs.
 //
-// An OPEN chain's two ends are exact mesh vertices, resampled or not. Chains are
+// An OPEN chain's two ends are exact mesh vertices, resampled or not: chains are
 // cut at every vertex of crease-degree other than two, so a junction is a chain
-// end by construction, and the whole of the junction, brush-coverage and
-// corner-cell bookkeeping identifies ends by their mesh vertex.
+// end by construction, and the junction, brush-coverage and corner-cell
+// bookkeeping all identify ends by mesh vertex.
 //
-// A CLOSED chain has one pinned station and it is station 0. A ring has no last
-// station to pin — station count-1 is placed by arc length like any other — so
-// the last station of a resampled ring IS -1, and station 0 is the only one of
-// it that can be read as a mesh vertex. That is why the end vertices are handed
-// out by `openEnds()`, which answers false on a ring and writes nothing: the
-// question and the guard that makes it legitimate are one call, so no caller can
-// take an end vertex without having handled the ring case. A guard that a caller
-// could forget, or that a build could compile out, would not do — every consumer
-// that reaches for the last station has to skip rings, and this is what makes it
-// so in every build rather than by convention.
+// A CLOSED chain pins only station 0. A ring has no last station to pin — station
+// count-1 is placed by arc length like any other — so the last station of a
+// resampled ring is -1. Hence `openEnds()`: it answers false on a ring, and being
+// the only route to an end vertex it makes the ring case impossible to skip in
+// any build, where an assertion would compile out under NDEBUG.
 //
-// `stationCount()` equals `rawCount()` today, because the resampler emits as
-// many stations as the crease has segments. Nothing enforces that; the invariant
-// is pinned by a test rather than by the type. If the station count ever stops
-// matching, every `stationCount()` here silently changes meaning, so read
-// `rawCount()` when the question is about the crease.
+// `stationCount()` equals `rawCount()` today because the resampler emits as many
+// stations as the crease has segments, but nothing in the type enforces that —
+// only a test does. Read `rawCount()` when the question is about the crease.
 struct Chain
 {
   bool closed = false;
@@ -231,19 +202,15 @@ struct Chain
   std::vector<double> at;
   std::vector<Vector3d> pts;
 
-  // How many stations the bead's sections are placed at. In station space, which
-  // is what `keep`, `at`, `pts` and the section lists are all in. Not a count of
-  // anything the mesh has — that is `rawCount()`.
+  // How many stations the bead's sections are placed at, in station space — what
+  // `keep`, `at`, `pts` and the section lists are all in. Not a mesh count; that
+  // is `rawCount()`.
   int stationCount() const { return static_cast<int>(stations.size()); }
 
   // The two mesh vertices an OPEN chain ends on. False, with neither output
-  // touched, where there is no such pair: a ring, whose last station is placed by
-  // arc length like any interior one and is -1 on any chain the resampler
-  // touched, and a chain of fewer than two stations, which has no two ends. The
-  // guard is the return value and not an assertion, so it is there in a build
-  // with NDEBUG set as much as in one without; and it is the only way to reach a
-  // station's mesh vertex from outside the struct, so the -1 cannot be read as
-  // one by writing the check differently or by leaving it out.
+  // touched, where there is no such pair: a ring (whose last station may be -1)
+  // or a chain of fewer than two stations. The guard is the return value rather
+  // than an assertion so it survives NDEBUG.
   [[nodiscard]] bool openEnds(int& front, int& back) const
   {
     if (closed || stations.size() < 2) return false;
@@ -252,13 +219,12 @@ struct Chain
     return true;
   }
 
-  // Replace the station list. The crease walk, the resampler and the raw-station
-  // rebuild are the only three things that do this.
+  // Replace the station list. Only the crease walk, the resampler and the
+  // raw-station rebuild do this.
   void setStations(std::vector<int> s) { stations = std::move(s); }
 
-  // The crease polyline, which is `raw` once anything has set it and the station
-  // list before that — buildChains fills `raw`, so the fallback is only for a
-  // Chain assembled by hand, as the unit tests do.
+  // The crease polyline: `raw` once set, the station list before that. buildChains
+  // fills `raw`, so the fallback only serves a hand-assembled Chain (the tests).
   const std::vector<int>& rawRun() const { return raw.empty() ? stations : raw; }
   int rawCount() const { return static_cast<int>(rawRun().size()); }
 
@@ -273,10 +239,9 @@ struct Chain
   }
 
   // The mesh edge the crease arrives at station i on, and the one it leaves by.
-  // At a station that is a mesh vertex these are the two crease edges meeting
-  // there, exactly as they always were; at an interpolated station both are the
-  // one raw segment it lies inside, which is what says such a station cannot be
-  // a corner of the crease. {-1, -1} where the crease ends.
+  // At a mesh-vertex station these are the two crease edges meeting there; at an
+  // interpolated station both are the single raw segment it lies inside, which is
+  // what makes such a station never a corner. {-1, -1} where the crease ends.
   std::pair<int, int> inEdge(int i) const
   {
     const std::vector<int>& run = rawRun();
@@ -316,8 +281,7 @@ struct Chain
 
 private:
   // The mesh vertex under each station, or -1 where the station is interior to a
-  // raw segment. Private: see the note above the struct. Everything this can
-  // legitimately be asked is above it.
+  // raw segment. Private: see the note above the struct.
   std::vector<int> stations;
 };
 
@@ -328,51 +292,46 @@ std::vector<Chain> buildChains(const MergedMesh& m, const std::vector<EdgeKey>& 
 
 // Put a chain's stations back at even spacing, before anything is built from it.
 //
-// Where two tessellations cross, the crease they share has wildly unequal
-// segments: on a hole through a curved wall the shortest is a couple of
-// thousandths of the median, and that ratio gets worse with refinement rather
-// than better. One station per crease vertex then puts two stations almost on
-// top of each other; their averaged wall normals are ill-conditioned, the arcs
-// they carry sit at different depths and cross, and the wedge left between them
-// stands in the bore as a fin.
+// Where two tessellations cross, the shared crease has wildly unequal segments —
+// on a hole through a curved wall the shortest is a couple of thousandths of the
+// median, and refinement makes that worse. One station per crease vertex then
+// puts two stations almost on top of each other; their averaged wall normals are
+// ill-conditioned, the arcs they carry sit at different depths and cross, and the
+// wedge between them stands in the bore as a fin.
 //
-// The fix is spacing, and spacing alone: the stations are laid out at equal arc
-// length along the crease, as many of them as the crease has segments. Density
-// is therefore exactly what it was — this buys regularity without paying for it
-// in sampling, which is what dropping vertices instead would do, and what would
-// show up as a bead lofting longer chords and dipping further off the true wall.
+// Stations are laid out at equal arc length, as many as the crease has segments,
+// so density is unchanged: dropping vertices instead would show up as a bead
+// lofting longer chords and dipping further off the true wall.
 //
-// A station that lands between two crease vertices is a new point *on* the
-// crease polyline, so the crease is not moved, only re-divided; its walls are
-// the walls of the raw segment it lies in. The two ends are pinned to their mesh
-// vertices, since they are where corner cells are built and where the brush's
-// coverage is tested, and a ring's canonical first vertex is pinned with them.
+// A station landing between two crease vertices is a new point *on* the crease
+// polyline — the crease is re-divided, not moved — and its walls are those of the
+// raw segment it lies in. The two ends are pinned to their mesh vertices, since
+// that is where corner cells are built and brush coverage is tested; a ring's
+// canonical first vertex is pinned with them.
 void resampleChains(const MergedMesh& m, std::vector<Chain>& chains, double fraction);
 
 // What counts as a sliver, and so whether a chain is resampled at all: a segment
-// shorter than half its chain's median. Strictly below 1 is the whole point — a
-// crease whose segments are all near its median has none, is never resampled,
-// and comes out of the builder bit for bit as it went in. A hole in a flat plate
-// and a crease along a surface of revolution's axis are both in that case.
+// shorter than this fraction of its chain's median. Must stay strictly below 1,
+// so that a crease with near-uniform segments is never resampled and comes out of
+// the builder exactly as it went in — the case for a hole in a flat plate, or a
+// crease along a surface of revolution's axis.
 inline constexpr double kSliverFraction = 0.5;
 
 // Which stretches of a chain the brushes select. The spine is intersected, not
 // the tool volume: each segment is cast against the brush and the crossings
-// become interval ends in chain-parameter space, so a brush boundary landing on
-// a station is a parameter near 0 or 1 rather than a coin flip about whether
-// that station is in.
+// become interval ends in chain-parameter space, so a brush boundary landing on a
+// station gives a parameter near 0 or 1 rather than a coin flip about that
+// station.
 //
 // Intervals the brush cut and left shorter than `debounce` (a length along the
-// spine) are discarded. A brush face nearly tangent to the spine crosses it
-// twice a hair apart, and the stub of bead that would come of it is never what
-// was meant. A stretch the brush did not cut at either end is exempt: the whole
-// crease was selected, nothing is being clipped, and how long the crease happens
-// to be is not the brush's business — a brush containing the entire model has to
-// be a no-op however short the creases in it are.
+// spine) are discarded: a brush face nearly tangent to the spine crosses it twice
+// a hair apart, leaving a stub of bead. A stretch the brush did not cut at either
+// end is exempt, so a brush containing the whole model stays a no-op however
+// short the creases in it are.
 //
-// Returns the intervals covering the whole chain when the brush contains all of
-// it, and nothing at all when it contains none — the caller distinguishes the
-// two, since an empty `Chain::keep` means the opposite of an empty return here.
+// Returns intervals covering the whole chain when the brush contains all of it,
+// and nothing when it contains none. The caller must distinguish the two: an
+// empty `Chain::keep` means the opposite of an empty return here.
 std::vector<SpineInterval> chainSelection(const MergedMesh& m, const Chain& chain,
                                           const BrushVolume& brush, double debounce);
 
@@ -433,18 +392,18 @@ std::vector<int> smoothSurfaces(const MergedMesh& m,
                                 const std::map<EdgeKey, std::vector<int>>& adj,
                                 double thresholdDeg);
 
-// Where the tool meets the model at one chain station, and the ball seated in
-// the crease there. For the rounded tools that ball is the one being rolled; for
-// the wedge tools it is the ball whose tangency points are the setback points,
-// which is the same object for the purpose of asking how much room the tool
-// needs. `surfaceA`/`surfaceB` are the surfaces the two contact points must land
-// on for the tool to meet the model tangentially at all.
+// Where the tool meets the model at one chain station, and the ball seated in the
+// crease there. For the rounded tools that is the ball being rolled; for the wedge
+// tools it is the ball whose tangency points are the setback points, which is the
+// same object for asking how much room the tool needs. `surfaceA`/`surfaceB` are
+// the surfaces the contact points must land on for the tool to meet the model
+// tangentially at all.
 //
-// `TA`/`TB` are the points of those surfaces nearest the ball centre, so they
-// lie on the model rather than being stepped off C along a wall normal — which
-// would assume the wall flat and miss a curved one by its sagitta. `offFace` is
-// non-zero where the nearest point has run onto the boundary of its surface,
-// which is the ball hanging off the end of a wall it is meant to meet.
+// `TA`/`TB` are the points of those surfaces nearest the ball centre, so they lie
+// on the model; stepping off C along a wall normal instead would assume the wall
+// flat and miss a curved one by its sagitta. `offFace` is non-zero where the
+// nearest point has run onto the boundary of its surface — the ball hanging off
+// the end of a wall it is meant to meet.
 struct ChainContact
 {
   Vector3d v;
@@ -460,28 +419,25 @@ struct ChainContact
 // chamfer/bevel reading of `size` (a setback taken directly) over the rounded
 // one (a radius, whose setback is r*tan(phi/2)).
 //
-// Only the stretches of the chain named by `Chain::keep` are answered for: a
-// point the brushes left out carries no bead, so nothing about the model there
-// can refuse a size nobody asked to build. Those points come back in place, as
-// invalid contacts, so the list still runs from one end of the chain to the
-// other.
+// Only the stretches named by `Chain::keep` are answered for: a point the brushes
+// left out carries no bead, so nothing there can refuse a size nobody asked to
+// build. Those points come back in place as invalid contacts, so the list still
+// runs end to end.
 //
-// `samplesPerSegment` is the FEWEST points to add between two stations, with the
-// walls interpolated; a segment long against the size gets more, one sample per
-// size along it. A crease is only ever sampled where the mesh has a vertex, and
-// on a tapering feature — a spike, a wedge running to nothing — the room
-// available between two stations can fall below what the tool needs without
-// either station noticing, so how finely the segment is walked has to follow the
-// size being asked about rather than the mesh.
+// `samplesPerSegment` is the FEWEST points to add between two stations, walls
+// interpolated; a segment long against the size gets one sample per size along
+// it. On a tapering feature the room between two stations can fall below what the
+// tool needs without either station noticing, so the sampling has to follow the
+// size asked about rather than the mesh.
 std::vector<ChainContact> chainContacts(const MergedMesh& m,
                                         const std::map<EdgeKey, std::vector<int>>& adj,
                                         const Chain& chain, double size, bool concave, bool wedge,
                                         const std::vector<int>& surfaceOf,
                                         int samplesPerSegment = 0);
 
-// Distance from a point to a closed triangle — face, edge or corner, whichever
-// is nearest. What the size gate asks with it is whether a contact point still
-// lands on the wall it is meant to touch.
+// Distance from a point to a closed triangle — face, edge or corner, whichever is
+// nearest. The size gate uses it to ask whether a contact point still lands on the
+// wall it is meant to touch.
 double pointTriangleDistance(const Vector3d& p, const Vector3d& a, const Vector3d& b,
                              const Vector3d& c);
 
@@ -509,19 +465,18 @@ struct SizeVerdict
 
 // Check every chain against the size asked for, in two ways.
 //
-// The tool has to *touch* the model: a seated ball whose nearest point on a wall
-// has run onto that wall's boundary is hanging off the end of it, and no
-// size-preserving blend exists there at all (the arms of an L shorter than the
-// radius). And it has to have the room it needs: another crease's contact point
-// inside the corner this blend occupies — between the two tangency lines, which
-// is the material the bead is made of and not the whole of the seated ball — is
-// a crease whose bead this one would eat, and neither can be built as asked.
-// Two beads sharing a face therefore fit until their tangency lines meet, which
-// on a cube is a radius of half the side.
+// The tool has to touch the model: a seated ball whose nearest point on a wall has
+// run onto that wall's boundary is hanging off the end of it, and no
+// size-preserving blend exists there (the arms of an L shorter than the radius).
+// And it has to have room: another crease's contact point inside the corner this
+// blend occupies — between the two tangency lines, which is the material the bead
+// is made of, not the whole seated ball — is a crease whose bead this one would
+// eat. Two beads sharing a face therefore fit until their tangency lines meet,
+// which on a cube is a radius of half the side.
 //
-// Creases that meet at a junction are exempt from the second test; that is what
-// junction cells are for. Both tests are answered per chain, and a chain that
-// fails is dropped whole.
+// Creases meeting at a junction are exempt from the second test; that is what
+// junction cells are for. Both tests are per chain, and a failing chain is dropped
+// whole.
 std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
                                          const std::map<EdgeKey, std::vector<int>>& adj,
                                          const std::vector<Chain>& chains, double size,
@@ -592,17 +547,17 @@ std::vector<RoundSection> roundSections(const MergedMesh& m,
                                         int arcSegments, double thresholdDeg);
 
 // A vertex where three or more creases meet. `faceNormals` are the distinct
-// outward normals of every wall that touches the vertex — not just the walls of
-// the creases this tool selected, since a face arriving on an edge of the other
-// sign is no less solid — and `ballCentres` are the extreme positions the rolling
-// ball can occupy there.
+// outward normals of every wall touching the vertex — not only the walls of the
+// creases this tool selected, since a face arriving on an edge of the other sign
+// is no less solid — and `ballCentres` the extreme positions the rolling ball can
+// occupy there.
 //
-// The legal positions near the vertex are the intersection of the walls' own
+// The legal positions near the vertex are the intersection of the walls'
 // half-spaces pushed in by r, a convex region whose corners are exactly those
 // centres. Three walls pin down one corner, and every spine running into the
-// vertex stops at it simultaneously, which is what lets the corner close
-// exactly. More than three walls generally give several, because pushing them in
-// by r breaks up the single point the originals shared.
+// vertex stops at it simultaneously, which is what lets the corner close exactly.
+// More than three walls generally give several, since pushing them in by r breaks
+// up the single point the originals shared.
 struct Junction
 {
   int vert = -1;
@@ -619,10 +574,10 @@ struct Junction
 // or blow up around; a junction with no centre left simply gets no corner.
 //
 // `noCorner` are the vertices a brush arrived at without covering, as
-// dropUncoveredCorners marks them. Two chain ends at a vertex is enough to build
-// one — a crease left out of the selection does not stop the two that were kept
-// from meeting there — but a corner the brush was cut short of is one the caller
-// asked not to have, and the two rules have to be the same rule.
+// dropUncoveredCorners marks them. Two chain ends at a vertex is enough to build a
+// corner — a crease left out of the selection does not stop the two that were kept
+// from meeting — but a corner the brush was cut short of is one the caller asked
+// not to have.
 std::vector<Junction> chainJunctions(const MergedMesh& m,
                                      const std::map<EdgeKey, std::vector<int>>& adj,
                                      const std::vector<Chain>& chains, double r, bool concave,
@@ -630,33 +585,28 @@ std::vector<Junction> chainJunctions(const MergedMesh& m,
 
 // Drop the selections that arrive at a corner without covering it. A corner is a
 // vertex three or more chain ends land on in `candidates`, the selection as it
-// stood before any brush touched it; it is covered when every one of those ends
-// is selected for `r` of crease back from it in `chains`, which is the stretch
-// the corner cell occupies. Short of that no cell is built, and a bead that stops
-// inside the stretch one would have filled is a stub meeting nothing at a sharp
-// vertex — so the stretch is dropped too, and what the brush asked for at that
-// corner is answered with nothing rather than with half of it.
+// stood before any brush touched it; it is covered when every one of those ends is
+// selected for `r` of crease back from it in `chains`, the stretch the corner cell
+// occupies. Short of that no cell is built, and a bead stopping inside that
+// stretch would be a stub meeting nothing at a sharp vertex, so the stretch is
+// dropped too.
 //
-// The valence has to come from `candidates` rather than from `chains`, because a
-// brush can remove an arm from `chains` altogether — by covering less of it than
-// the debounce keeps, or by covering only its far end — and an arm that is not
-// there is indistinguishable from one the model never had. Counting the arms
-// that survived is what made a corner appear as the brush shrank.
+// The valence must come from `candidates`, not `chains`: a brush can remove an arm
+// from `chains` altogether — by covering less of it than the debounce keeps, or
+// only its far end — and a missing arm is indistinguishable from one the model
+// never had. Counting surviving arms made corners appear as the brush shrank.
 //
-// Returns only the corners where *nothing* was covered, which are the ones a
-// brush was drawn around and gets nothing at. A corner some crease through it
-// does cover is the neighbour-clipping case that makes "this edge and no other"
-// expressible, and is silent on purpose.
+// Returns only the corners where *nothing* was covered. A corner some crease
+// through it does cover is the neighbour-clipping case that makes "this edge and
+// no other" expressible, and is silent on purpose.
 //
-// A chain left with none of its selection is removed from `chains` outright,
-// since an empty `Chain::keep` reads as the whole chain. Selections that reach a
-// chain end no corner stands at are untouched: nothing is being closed there, so
-// there is no stretch a cell has a claim on.
+// A chain left with none of its selection is removed from `chains` outright, since
+// an empty `Chain::keep` reads as the whole chain. Selections reaching a chain end
+// no corner stands at are untouched.
 //
-// `uncovered`, when given, receives every corner that could not be had, which is
-// more than the return value: the return is only the ones where nothing at all
-// was covered and the caller has something to say. chainJunctions needs the
-// whole set, since a corner cell at any of them is material the brush excluded.
+// `uncoveredOut`, when given, receives every corner that could not be had, which
+// is more than the return value. chainJunctions needs the whole set, since a
+// corner cell at any of them is material the brush excluded.
 std::vector<int> dropUncoveredCorners(const MergedMesh& m, std::vector<Chain>& chains,
                                       const std::vector<Chain>& candidates, double r,
                                       std::set<int> *uncoveredOut = nullptr);
