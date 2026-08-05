@@ -329,6 +329,57 @@ fires. That conclusion was derived on `bcurve.scad`, where a selection brush cut
 the same brush withheld the corner through `noCorner`. `cross` uses no brush. The scope of §4's
 claim must be narrowed to brush-cut creases; it is neither vindicated nor refuted here.
 
+### The steep ridges are bead–bead intersections, and ball seating separates them — 2026-08-05
+
+Measured on `cross`'s concave-only output at r=0.5 and r=2.0. Probe on branch
+`probe-convex-gate`, `7c9bf326e` (`FILLET_GATE_DUMP=1`). Dihedral instrument validated first:
+a cube reads twelve edges at 90.000, a `$fn`=8 cylinder eight wall seams at 45.000 and sixteen
+rim edges at 90.000, and the same cylinder rotated by half a facet returns an identical
+distribution.
+
+**There is no step at the tangency boundary, so the proud-bead hypothesis is refuted.** Of the
+640 (r=0.5) and 606 (r=2.0) edges where a face in an original target plane meets a face that is
+not — that set *is* the tangency boundary — **zero are convex**. Splitting all steep convex
+edges three ways gives 114 with both faces in target planes, 72/91 with neither, and **0 with
+exactly one**, which is the only bucket a bead standing proud of a wall could occupy. The bead
+meets the wall exactly.
+
+**They are intersection curves of two rolling-ball surfaces whose centres lie about one radius
+apart.** Implied centre separation is 0.82–1.84·R at r=0.5 and 0.84–1.48·R at r=2.0 — linear in
+r at coefficient ~1. That rules out the `eps` ladder (2e-3 mm against a measured 1.9 mm, 950×),
+a constant epsilon (it moved 4× with r) and tessellation (the 19-gon sagitta is 0.082 mm and
+fixed in r). Two spheres of radius R with centres d apart meet at `arccos(1 − d²/2R²)`:
+0.82R gives 48°, 1.2R gives 74°, against measured dihedrals of 46–89° with median 51. The
+arithmetic closes. Honestly reported by the agent: `|dist(vertex, implied centre) − R|` has a
+median of 1.2e-3 but a maximum of 0.52, so a minority of ridge faces are planar corner-cell
+facets rather than ball surfaces — the ~1R separation is a median statement, not exact.
+
+**So the classifier and `round_tool` are both innocent.** A boolean union of two overlapping
+beads is entitled to leave a real crease where they cross, and a classifier is right to see it.
+The defect is that a tool asked for radius R builds beads against features it cannot seat on.
+
+**Ball seating separates the two populations with thirteen orders of magnitude of daylight.**
+Seat the ball from the two face normals, then check the constructed perpendicular foot on each
+face actually lies on the mesh. Genuine features — `cross`'s 114 cap rims, `boss_plate`'s 38,
+`boss_plate` at `$fn`=8's 20, `tee`'s 48 — read foot-off ≤ 9.8e-15·R, with **zero false
+refusals**. Blend-made ridges read 0.117–1.004·R, **72 of 72 and 91 of 91 caught**. This is not
+new machinery: it is a correction to a measurement `seatOn` already takes, which computes
+`d = nearestOnWall(C, …)` and then never compares it to `r`, only to the rim distance. The
+alternatives measure far worse — a ball-buried test alone catches 14/72 and 64/91, and a
+relief-based cut leaves only a 1.46× gap between the blend-made maximum, 0.158·R, and
+`boss_plate`'s genuine minimum, 0.231·R. **Ball seating is the rule to build.**
+
+**The gate mostly never asks the question.** At r=0.5 the convex pass sees 68 chains and
+accepts 26 — and **15 of those 26 have `ntest`=0**: every contact sample was exempted as a
+chain end or as lying within `2·size` of a junction, so the fit question was deleted rather
+than answered. At r=2.0 it is 8 of 24. The comment at `FilletBuilder.cc:1156` predicts this
+exact failure, naming "a bead's runout lip, which arrives already broken into dozens of two-
+and three-vertex chains."
+
+**Scope:** `tee`, `boss_plate` and `boss_plate` at `$fn`=8 produce **zero** blend-made steep
+convex edges. The signature needs a point where three or more beads meet; `cross`'s eight
+triple points have it, a single junction or a lone foot ring does not.
+
 **Why the second pass is structurally in trouble, and it is not the classifier's fault.**
 `fillet()` uses one R for both passes, so the concave pass leaves surfaces already curved at R
 and an R-radius rolling ball essentially cannot fit against them. The ~2/3 refusal rate is
@@ -613,20 +664,22 @@ measured with this instrument, so it goes first.
 are neither complete nor correct — at least five green cells carry debris. The true failure list
 does not exist yet, and no fix should be evaluated against the old one.
 
-**3. Settle why `round_tool` selects features it cannot blend.** Two hypotheses were under
-measurement when this was written; the agent's report is the next thing to read. Then design,
-against the constraints in `ACCEPTANCE.md` promise 5 — no tagging of first-pass geometry, and a
-tool must work from the mesh in front of it. The leading candidates, all mesh-only and all
-scaled by R, which the user supplies:
-   - **Ball seating**, which needs no constant: the ball's contact point lies R along each face
-     from the edge, so it is seated only if both contact points fall within their faces' extent.
-     At a step of height h ≪ R it never touches the short face at all.
-   - **A relief threshold**, or equivalently the owner's **minimum contact arc** — the same rule
-     in different units. Choose the constant from a visible gap in the measured distribution,
-     the way 46° was chosen, not by fitting one model.
-   Check any candidate against the `$fn`=8 family, which is the coarse-tessellation case where
-   "face extent" is one facet, and against a small but genuine feature — a rule that refuses
-   everything is useless, even though promise 1 makes false refusal the safe direction.
+**3. Build the ball-seating check. Settled by measurement, ready to implement.** See §4d. Two
+parts, and the second may be the larger:
+   - **Compare the seat foot against `r`.** `seatOn` already computes
+     `d = nearestOnWall(C, …)` and compares it only to the rim distance. Compare it to `r` as
+     well, and require the constructed perpendicular foot on each face to lie on the mesh. The
+     separation measured is 9.8e-15·R for genuine features against 0.117–1.004·R for
+     blend-made ridges — thirteen orders of magnitude, zero false refusals over 220 genuine
+     edges on four models, 163 of 163 artifacts caught. No constant needs choosing.
+   - **Make the gate actually ask.** 15 of 26 accepted chains at r=0.5 have `ntest`=0 — every
+     sample exempted as a chain end or as within `2·size` of a junction. A check that is never
+     evaluated cannot refuse. This is the harder half: the exemptions exist for a reason and
+     `FilletBuilder.cc:1156` explains it, so removing them naively will cause false refusals.
+
+   Rejected on measurement, do not revisit: a relief threshold or minimum-arc rule leaves only
+   a 1.46× gap between artifacts and genuine features, and a ball-buried test alone catches
+   14/72. Both are recorded in §4d with numbers.
 
 **4. `CleanupTopology()` without `CollapseShortEdges`** (§4d). Specified, not started. Needs a
 vendored patch widening Manifold's public surface, or a pinch split against `MeshGL64`.
