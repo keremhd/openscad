@@ -757,6 +757,42 @@ and 91 of 91 of them with no false refusal anywhere in the bench.
 **All of this is offline Python on exported meshes.** It does not include the gate's chain
 sampling, its end and junction exemptions, the averaged station normals, or the brushes.
 
+### The threshold split built, and the bench says no value works — 2026-08-05
+
+`kSurfaceGroupingDeg` added beside `kDefaultCreaseThresholdDeg`, and
+`checkChainSizes` hands `smoothSurfaces` that instead of the crease threshold. One constant,
+one call site, nothing else moves. Measured on the bench at stock defaults, one render a cell,
+vertex counts beside every verdict because trap 15 requires it — 46 is attempt 2 unchanged:
+
+| model | seg 46 | seg 40 | seg 30 | seg 20 |
+|---|---|---|---|---|
+| `cross` | 26/42, v=1290 | 26/42, v=1290 | **36/42, v=1143** | **36/42, v=1143** |
+| `box_step` | 0, v=650 | 0, v=650 | **3/15, v=328** | **3/15, v=328** |
+| `lbracket` | 0, v=469 | 0, v=469 | **2/15, v=265** | **2/15, v=265** |
+| `two_bosses` | 8/21, v=945 | 8/21, v=945 | **9/21, v=625** | **9/21, v=625** |
+| `rib` | 12/36, v=484 | **16/36, v=435** | 14/36, v=448 | 16/36, v=435 |
+| `tee_small` | 0, v=182 | 0, v=182 | 0, v=215 | **2/5, v=149** |
+| `tee`, `dome`, `boss_plate`, `pipe_into_face`, `tee_large` | clean | clean | clean | clean |
+
+**The two ends of the range are mutually exclusive.** At 40 and above the gate catches nothing
+it did not already catch on `cross` — 26 of 42, v=1290, byte-for-byte the 46° answer. At 30 and
+below it catches ten more, and in the same step three flat-walled models that have never been
+touched by any of this start refusing and lose 44–50% of their vertices: `box_step` 650 → 328,
+`lbracket` 469 → 265, `two_bosses` 945 → 625. **Those are false refusals** — `lbracket` is a
+planar L of two cubes, its worst miss is 0.0088 on a radius of 2, and both dropped chains are
+the bead's runout lips at the model's y=0 and y=30 faces.
+
+**They are very likely the same defect as the unit suite's**, which is the reason to say "no
+value works" rather than "the route is dead": a contact landing on the edge of its own wall
+reads as a large miss, and grouping finer creates more wall edges for contacts to land on. That
+exemption is unbuilt. Until it is, the size of the window cannot be known — what is measured is
+that with the boundary-contact defect present, the window is empty.
+
+**The unit suite is unmoved by the split: 2230 assertions / 88 cases, 82 passed, 11 assertions
+failed at `kSurfaceGroupingDeg` = 20**, the same six cases and the same eleven assertions
+attempt 2 recorded at 46. The split costs the suite nothing and fixes nothing in it. The eleven
+are the boundary-contact family and the non-monotone magnitude, both still open.
+
 ## 5. Open defects
 
 | defect | state |

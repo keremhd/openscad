@@ -1156,7 +1156,9 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
   std::vector<SizeVerdict> verdicts(chains.size());
   if (!(size > 0) || chains.empty()) return verdicts;
 
-  const std::vector<int> surfaceOf = smoothSurfaces(m, adj, thresholdDeg);
+  // Grouped at its own constant, not at the crease threshold: which faces are
+  // one wall is a different question from which edges the user wants blended.
+  const std::vector<int> surfaceOf = smoothSurfaces(m, adj, kSurfaceGroupingDeg);
 
   std::vector<std::vector<ChainContact>> contacts;
   contacts.reserve(chains.size());
