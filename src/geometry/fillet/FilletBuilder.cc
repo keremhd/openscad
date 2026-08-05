@@ -1463,14 +1463,13 @@ std::vector<std::vector<SpineBulge>> chainBulges(const MergedMesh& m,
 
   const int nstaI = static_cast<int>(nsta);
 
-  // The station segment a chain parameter falls in, and where along it. A
-  // section that overran a seam vertex sits OUTSIDE its chain's own parameter
-  // range: negative at the front end, past the last station at the back. The
-  // segment such a section extrapolates is the chain's end segment, so on an
-  // open chain the index is clamped there and the fraction is left to run
-  // outside [0, 1]. Taken modulo instead, a negative index reads a station
-  // vector from before its first element, and one past the end wraps onto the
-  // chord from the last station back to the first.
+  // The station segment a chain parameter falls in, and where along it. A section
+  // that overran a seam vertex sits outside the chain's parameter range — negative
+  // at the front, past the last station at the back — and extrapolates the chain's
+  // end segment, so on an open chain the index is clamped there and the fraction
+  // left to run outside [0, 1]. Taken modulo instead, a negative index would read
+  // before the station vector's first element and one past the end would wrap onto
+  // the chord from the last station back to the first.
   auto segmentOf = [&](double q, double& f) {
     int i = static_cast<int>(std::floor(q));
     if (chain.closed) i -= static_cast<int>(std::floor(static_cast<double>(i) / nsta)) * nstaI;
@@ -1515,9 +1514,9 @@ std::vector<std::vector<SpineBulge>> chainBulges(const MergedMesh& m,
   for (size_t i = 0; i < segments; ++i) {
     const double q0 = sectionAt[i];
     double q1 = sectionAt[(i + 1) % nsec];
-    // Only a ring's closing cell runs off the end of the parameter. Anywhere
-    // else two sections that do not advance are a ramp doubling back on a
-    // station, and reading that as a wrap would hand the cell the whole crease.
+    // Only a ring's closing cell runs off the end of the parameter. Elsewhere two
+    // sections that do not advance are a ramp doubling back on a station, and
+    // reading that as a wrap would hand the cell the whole crease.
     if (chain.closed && i + 1 == nsec && q1 <= q0) q1 += nsta;
     if (q1 - q0 < 1e-12) continue;
 
@@ -1539,13 +1538,11 @@ std::vector<std::vector<SpineBulge>> chainBulges(const MergedMesh& m,
       Vector3d off = P - (A + s * (B - A));
       if (off.norm() < 1e-12) continue;
 
-      // Only ever grow the cell the way the tool is allowed to grow. A crease
-      // vertex sits either side of its chord, and a cell reaching for one that
-      // leans into the solid takes material no tool asked it to: on a coarse
-      // cone that is enough to cut a fin clean off and leave it loose. The
-      // component of the reach that points into the solid is dropped, and the
-      // one that points out of it - the one the missed material is under - is
-      // kept whole.
+      // Only grow the cell the way the tool is allowed to grow. A crease vertex
+      // can sit either side of its chord, and a cell reaching for one that leans
+      // into the solid takes material nothing asked for — on a coarse cone that is
+      // enough to cut a fin clean off. Drop the component pointing into the solid;
+      // keep whole the one pointing out, which is where the missed material is.
       const Vector3d away = wallsAway(m, adj, run, jj, chain.closed, concave);
       if (!away.isZero()) {
         const double into = off.dot(away);
@@ -1565,17 +1562,16 @@ std::vector<std::vector<SpineBulge>> chainBulges(const MergedMesh& m,
 //
 // A cell also carries the section at every crease vertex its chord passes inside
 // of, slid off the chord onto that vertex. The hull is then of three or more
-// coplanar-ended sections rather than two, and since it contains the two-section
-// hull it can only ever cover more of the crease, never less. The end faces are
-// untouched, so two neighbouring cells still meet on the one plane.
+// sections rather than two, and since it contains the two-section hull it can only
+// cover more of the crease. The end faces are untouched, so two neighbouring cells
+// still meet on the one plane.
 //
 // `runs` restricts the work to the stretches the brushes selected, empty meaning
 // all of it. Where a run starts or ends partway along a segment the two sections
-// are interpolated to that parameter, which is exact rather than approximate:
-// hulling two sections IS the linear interpolation of the cross-section between
-// them, so slicing that cell at a parameter and hulling to the section at that
-// parameter give the same solid. What the caller gets is a flat cap square to
-// the spine, carrying the full cross-section.
+// are interpolated to that parameter, which is exact: hulling two sections IS the
+// linear interpolation of the cross-section between them, so slicing the cell at a
+// parameter and hulling to the section there give the same solid. The result is a
+// flat cap square to the spine, carrying the full cross-section.
 template <typename Section, typename PointsOf, typename LerpOf>
 void appendChainCells(const Chain& chain, const std::vector<Section>& sections,
                       const PointsOf& pointsOf, LerpOf lerpOf,
@@ -1654,9 +1650,9 @@ Vector3d sectionNormal(const Points& pts, const Vector3d& anchor)
 }
 
 // How far a point inside a section is from the section's own outline. The points
-// are walked in the order they come round the anchor rather than the order they
-// are stored in, since a canal section carries two points off its arc; one that
-// falls inside the outline pulls the answer down, which is the safe direction.
+// are walked in angular order about the anchor, not stored order, since a canal
+// section carries two points off its arc; one falling inside the outline pulls
+// the answer down, which is the safe direction.
 template <typename Points>
 double sectionClearance(const Points& pts, const Vector3d& anchor)
 {
@@ -1690,23 +1686,19 @@ double sectionClearance(const Points& pts, const Vector3d& anchor)
 // they meet at.
 //
 // Cells are cut at stations and both of a rounded tool's unions are cut at the
-// same ones, so a station hands the boolean a pair of coincident planes. Which
-// way it resolves them is arithmetic: the seam is left standing as a flap of
-// zero thickness in the finished solid, or cut through as a slit, and the answer
-// moves with the tessellation, the size and where the model stands.
+// same ones, so a station hands the boolean a pair of coincident planes. Which way
+// it resolves them is arithmetic: the seam is left as a zero-thickness flap or cut
+// through as a slit, and the answer moves with the tessellation, the size and
+// where the model stands.
 //
 // The cover is the station's own section hulled with one point inside each
-// neighbouring cell, which straddles the seam. It approximates nothing: the hull
-// of a planar section with a point either side of its plane is the union of two
-// cones, and each cone is the hull of a subset of one cell — the section is that
-// cell's own end face and the apex a point of the axis it is hulled along. So it
-// reaches the rim of the seam, which is the whole of what has to be covered and
-// is what a ball inscribed in the section cannot do: a ball leaves the annulus
-// at the rim, and the flap survives out there.
+// neighbouring cell. It approximates nothing: the hull of a planar section with a
+// point either side of its plane is the union of two cones, each the hull of a
+// subset of one cell, so it reaches the rim of the seam. A ball inscribed in the
+// section cannot — it leaves the annulus at the rim, where the flap survives.
 //
-// `anchorOf` is a point inside the section, which is where the apexes are taken
-// from: the two of them have to see each other through the section's interior
-// for the two cones to meet.
+// `anchorOf` is a point inside the section, where the apexes are taken from; the
+// two must see each other through the section's interior for the cones to meet.
 template <typename Section, typename PointsOf, typename AnchorOf>
 void appendSeamCovers(const Chain& chain, const std::vector<Section>& sections,
                       const PointsOf& pointsOf, const AnchorOf& anchorOf,
@@ -1740,10 +1732,9 @@ void appendSeamCovers(const Chain& chain, const std::vector<Section>& sections,
       if (!(roomBack > 0.0 && roomFwd > 0.0)) continue;
     }
 
-    // Only where the two cells meet at an angle. Where three consecutive
-    // sections lie in a line they are two halves of one prism: the seam has the
-    // same outline on both sides, nothing grazes it, and a cover over it is one
-    // more solid for the boolean to reconcile for nothing.
+    // Only where the two cells meet at an angle. Three collinear sections are two
+    // halves of one prism: the seam has the same outline on both sides, so a cover
+    // is one more solid for the boolean to reconcile for nothing.
     {
       const auto& here = pointsOf(sec);
       const auto& before = pointsOf(prev);
@@ -1757,16 +1748,13 @@ void appendSeamCovers(const Chain& chain, const std::vector<Section>& sections,
       if (off <= 1e-9 * span) continue;
     }
 
-    // How far along the anchors either way the two apexes are taken. An apex may
-    // travel as far as the neighbouring section's own anchor without leaving the
-    // cell, since the whole of that segment is in it. What bounds it instead is
-    // where the segment between the two apexes crosses the section's plane: that
-    // point has to be inside the section, or the hull bridges round the outside
-    // of it and the cover is no longer made of the two cells' own material. The
-    // crossing point leaves the anchor linearly with the reach — scaling both
-    // apexes about the anchor scales the whole figure — so the reach that keeps
-    // it inside is arithmetic rather than a guess. Half the anchor's clearance of
-    // the section's boundary, which leaves the bridge as much room again.
+    // How far along the anchors the two apexes are taken. An apex may travel as
+    // far as the neighbouring section's anchor without leaving the cell. What
+    // bounds it is where the segment between the two apexes crosses the section's
+    // plane: that point must be inside the section, or the hull bridges round the
+    // outside and the cover is no longer the two cells' own material. The crossing
+    // point leaves the anchor linearly with the reach, so half the anchor's
+    // clearance of the section boundary leaves the bridge as much room again.
     const Vector3d here = anchorOf(sec);
     const Vector3d back = anchorOf(prev) - here;
     const Vector3d fwd = anchorOf(next) - here;
@@ -1826,8 +1814,8 @@ bool intervalCovers(const SpineInterval& iv, double lo, double hi)
 }
 
 // Whether a chain's selection merely arrives at its end station. A chain with no
-// two ends — a ring, or one station — has no such station to arrive at, and the
-// answer is no rather than a reading taken at a station that is not an end.
+// two ends — a ring, or one station — has no such station, so the answer is no
+// rather than a reading taken at a station that is not an end.
 bool endTouched(const Chain& chain, bool front)
 {
   int endFront = -1, endBack = -1;
