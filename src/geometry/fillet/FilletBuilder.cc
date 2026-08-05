@@ -1085,12 +1085,11 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
     }
 
   // Vertices where three or more creases meet, and how much crease either side of
-  // one the touching question does not apply to. The spine is cut back short of a
-  // junction and a corner cell takes over, so contacts inside that stretch are
-  // not contacts the tool has — and near one they read wrong for a reason that
-  // has nothing to do with the size: stepping in perpendicular to a crease from a
-  // point close to where it meets another leaves through THAT crease's face,
-  // which is a corner and not an overshoot.
+  // one the touching test does not apply to. The spine is cut back short of a
+  // junction and a corner cell takes over, so contacts inside that stretch are not
+  // contacts the tool has; near one they read wrong for a reason unrelated to the
+  // size, since stepping perpendicular to a crease from a point close to where it
+  // meets another leaves through that other crease's face.
   std::map<int, int> endsAt;
   for (const Chain& chain : chains) {
     int endFront = -1, endBack = -1;
@@ -1110,24 +1109,17 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
     // point on a wall is on that wall's boundary has reached the end of it, and
     // no blend of the size asked for exists there at all.
     //
-    // Not at the two ends of an open chain, though. A crease that stops does so
-    // at the boundary of its own walls — at a junction, or where the feature
-    // simply runs out — so the contact point at that last station sits in the
-    // corner of the wall and steps out of it for reasons that have nothing to do
-    // with the size. On a tetrahedron it is unmissable: the base triangle's
-    // corners are 60 degrees, so stepping perpendicular to one base edge leaves
-    // through the next. A size that genuinely does not fit fails along the
-    // crease, not only at its ends, and the samples in between are what say so.
+    // Not at the two ends of an open chain. A crease stops at the boundary of its
+    // own walls, so the contact at that last station sits in the corner of the
+    // wall and steps out of it for reasons unrelated to the size — on a
+    // tetrahedron, whose base corners are 60 degrees, stepping perpendicular to
+    // one base edge leaves through the next. A size that genuinely does not fit
+    // fails along the crease as well, and the interior samples say so.
     //
-    // Both exemptions are stated as narrowings of the question, and they are
-    // only that while something is left to ask. A crease shorter than the
-    // junction reach has no sample that is neither an end nor beside a
-    // junction, so on that crease the exemptions do not narrow the question,
-    // they delete it — and the shape that produces such creases in bulk is a
-    // bead's runout lip, which arrives already broken into dozens of two- and
-    // three-vertex chains meeting each other inside one reach. The tally below
-    // is what tells the two apart: where nothing at all was tested, the
-    // evidence that was thrown away is all there is, and it is used.
+    // On a crease shorter than the junction reach the two exemptions leave nothing
+    // to test at all, which is the shape of a bead's runout lip: dozens of two-
+    // and three-vertex chains meeting inside one reach. The tally below tells that
+    // apart, and where nothing was tested it falls back on the exempt samples.
     const size_t last = contacts[ci].empty() ? 0 : contacts[ci].size() - 1;
     int nExempt = 0, nTested = 0;
     double offExempt = 0.0;
@@ -1136,10 +1128,9 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
     for (size_t i = 0; i < contacts[ci].size(); ++i) {
       const ChainContact& c = contacts[ci][i];
       if (!c.valid) continue;
-      // How big the numbers being subtracted are, along this crease. A miss is
-      // a nearest point and a wall's boundary taken away from each other, so
-      // whatever the subtraction cannot resolve is a fraction of these, and of
-      // nothing else.
+      // How big the numbers being subtracted are along this crease. A miss is a
+      // nearest point and a wall's boundary subtracted from each other, so what
+      // the subtraction cannot resolve is a fraction of these.
       coordMag = std::max({coordMag, c.v.cwiseAbs().maxCoeff(), c.TA.cwiseAbs().maxCoeff(),
                            c.TB.cwiseAbs().maxCoeff()});
       bool exempt = !chains[ci].closed && (i == 0 || i == last);
@@ -1152,61 +1143,45 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
         continue;
       }
       ++nTested;
-      // A miss of zero is not a miss. Where the contact lands exactly on the
-      // wall's boundary the blend stops precisely at the edge of the wall it is
-      // meant to meet, which is a fit — and the two are told apart by a double's
-      // last bits, since the nearest point and the boundary are then the same
-      // point computed two ways. The margin is far below anything a mesh could
-      // mean and six orders above that noise; a size that really does not fit
-      // misses by a fraction of itself, never by a nanometre.
+      // A miss of zero is not a miss: a contact landing exactly on the wall's
+      // boundary stops at the edge of the wall it is meant to meet, which fits.
+      // There the nearest point and the boundary are one point computed two ways,
+      // so they differ in a double's last bits. The margin sits six orders above
+      // that noise and far below anything a mesh could mean — a size that really
+      // does not fit misses by a fraction of itself, never by a nanometre.
       if (c.offFace > 1e-9 * std::max(1.0, size)) {
         verdict = {SizeFault::OffFace, c.v, c.offFace};
         break;
       }
     }
 
-    // The margin here is not the one the tested samples use, and it must not be.
-    // A tested sample sits in the interior of a wall, where its miss is either
-    // exactly zero or macroscopic, so a nanometre tells the two apart. Every
-    // exempt sample sits *on* a wall's boundary — that is what made it exempt —
-    // and there the miss is the nearest point and the boundary subtracted from
-    // each other, two computations of one point. That difference is not zero and
-    // it would be read as geometry, differently on two edges of the same
-    // bracket, so a floor has to go under it.
+    // A much coarser floor than the tested samples use, and necessarily so. A
+    // tested sample sits in a wall's interior, where its miss is either exactly
+    // zero or macroscopic. Every exempt sample sits *on* a wall's boundary — that
+    // is what made it exempt — where the miss is one point computed two ways, and
+    // that residue would otherwise be read as geometry.
     //
-    // Two quantities set that floor and they are independent, so it is the
-    // larger of them. A crease that genuinely cannot carry the size misses by a
-    // fraction *of the size*: measured misses on the shape this rule exists for
-    // run from 2e-4 of the size upward, so a ten-thousandth of the size sits
-    // below every real miss. What the subtraction cannot resolve, though, has
-    // nothing to do with the size — it is a fraction of the magnitude of the
-    // coordinates being subtracted. Measured on right-angle box models, whose
-    // creases are exact so that every non-zero answer is arithmetic: across 288
-    // runs and 984 such creases, at coordinate magnitudes from 40 to 1e4, the
-    // largest spurious miss is 2.4e-8 mm at 40 and 2.0e-6 mm at 1e4, and never
-    // more than 6e-10 of the coordinate magnitude. A ten-millionth of it clears
-    // that by about 170, and it is not set higher because too low a floor costs
-    // a refusal — a valid solid with an unfilleted crease — while too high a one
-    // costs the shattered solid this gate exists to stop.
+    // Two independent quantities set the floor, hence the max. A crease that
+    // genuinely cannot carry the size misses by a fraction of the size: measured
+    // misses run from 2e-4 of it upward, so 1e-4 sits below every real one. What
+    // the subtraction cannot resolve instead scales with the coordinate magnitude:
+    // measured on right-angle box models (whose creases are exact, so every
+    // non-zero answer is arithmetic), across 288 runs and 984 creases at
+    // magnitudes from 40 to 1e4, the largest spurious miss was 2.4e-8 mm at 40 and
+    // 2.0e-6 mm at 1e4, never over 6e-10 of the magnitude. 1e-7 clears that by
+    // ~170. Too low a floor costs a refusal on a valid solid; too high a one costs
+    // the shattered solid this gate exists to stop.
     //
-    // Past a coordinate magnitude of about 1e4 the evidence on those same exact
-    // creases stops looking like round-off at all: it reaches 0.8 mm at 1e5 and
-    // 1.2 mm at 1e6, a large fraction of the size asked for, because the mesh
-    // the question is asked of has itself degraded. This term does not cover
-    // that and should not pretend to. What happens there is a refusal, which is
-    // the safe answer to a question that can no longer be asked.
+    // Past a coordinate magnitude of about 1e4 the same exact creases stop looking
+    // like round-off — 0.8 mm at 1e5, 1.2 mm at 1e6 — because the mesh itself has
+    // degraded. This term does not cover that; the result there is a refusal.
     //
-    // Both terms scale with the model, which is what a modeller without units
-    // requires: the same shape at any scale gets the same verdicts. An absolute
-    // millimetre would not, and the coordinate term is also what keeps a floor
-    // under a very small size, which is the job an absolute one was doing badly.
+    // Both terms scale with the model, so the same shape gets the same verdicts at
+    // any scale, and the coordinate term also floors a very small size.
     const double blindFloor = std::max(1e-4 * size, 1e-7 * coordMag);
-    // A crease on which the two exemptions discarded every sample is asked about
-    // anyway, from the samples they discarded. A crease that has nothing to test
-    // also has nothing to report, so this is quiet wherever the gate had a
-    // testable sample; it only speaks where every sample was exempt and the
-    // discarded ones miss their wall by more than the floor above. Passing such
-    // a crease unexamined answers "I could not look" as if it were "it fits".
+    // Where both exemptions discarded every sample, fall back on the discarded
+    // ones: passing such a crease unexamined answers "I could not look" as if it
+    // were "it fits". Silent wherever the gate had a testable sample.
     if (verdict.fault == SizeFault::Fits && nTested == 0 && nExempt > 0 &&
         offExempt > blindFloor) {
       verdict = {SizeFault::OffFace, exemptAt, offExempt};
@@ -1219,38 +1194,34 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
     // meet at a junction are exempt: sharing the material there is what a corner
     // cell is.
     //
-    // The material the blend uses is *not* the seated ball. The ball is tangent
-    // to each wall and goes on reaching along that wall for another radius past
-    // where it touches, into material the finished blend never comes near — the
-    // blend is only the corner between the two tangency lines. Asking the ball
-    // refuses two beads that share a face whenever the face is narrower than
-    // three radii, where they in fact fit until it is narrower than two: on a
-    // cube every radius past a third of the side is refused and every one up to
-    // half of it is buildable. So ask whether the other crease's contact point
-    // lands in the corner region itself.
+    // The material the blend uses is *not* the seated ball. The ball reaches
+    // another radius along each wall past where it touches, into material the
+    // finished blend never comes near; the blend is only the corner between the
+    // two tangency lines. Asking the ball refuses two beads sharing a face
+    // narrower than three radii, where they in fact fit down to two — on a cube,
+    // every radius past a third of the side refused, every one up to half
+    // buildable. Hence the test is on the corner region itself.
     for (const ChainContact& c : contacts[ci]) {
       if (!c.valid) continue;
 
-      // The corner region, bounded the way the tool is: between each wall and
-      // the tangency line on it, and no further from the ball centre than the
-      // crease itself. `iA` and `iB` are the unit directions from the centre to
-      // where it touches each wall, reversed — so they point the way the tool
-      // lies, into the material for a round and into the air for a fillet, and
-      // a contact point's component along one is its depth under that wall.
+      // The corner region, bounded the way the tool is: between each wall and its
+      // tangency line, and no further from the ball centre than the crease itself.
+      // `iA`/`iB` are the reversed unit directions from the centre to each contact
+      // point, so they point the way the tool lies (into material for a round,
+      // into air for a fillet) and a point's component along one is its depth
+      // under that wall.
       const Vector3d iA = (c.C - c.TA).normalized();
       const Vector3d iB = (c.C - c.TB).normalized();
       if (!iA.allFinite() || !iB.allFinite()) continue;
-      // How deep under a wall the corner reaches. At a right angle that is the
-      // radius, at a sharper crease more — the tool runs out along the *other*
-      // wall to a point this far under this one — and at a shallow one less.
+      // How deep under a wall the corner reaches: the radius at a right angle,
+      // more at a sharper crease, less at a shallower one.
       const double deep = c.radius * (1.0 - std::clamp(iA.dot(iB), -1.0, 1.0));
       const double apex = (c.C - c.v).norm();
 
       for (size_t cj = 0; cj < chains.size() && verdict.fault == SizeFault::Fits; ++cj) {
         if (cj == ci) continue;
-        // Everything this corner can reach is inside that chain's own box or not
-        // at issue; without the test the question is asked of every pair of
-        // contact points on the model.
+        // Without this the question is asked of every pair of contact points on
+        // the model.
         if (!reach[cj].contains(c.C, apex)) continue;
         bool meets = false;
         for (const int v : chains[cj].rawRun())
@@ -1265,9 +1236,8 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
             const double underB = (T - c.TB).dot(iB);
             if (underA < -faceTol || underA > deep + faceTol) continue;
             if (underB < -faceTol || underB > deep + faceTol) continue;
-            // What the user can act on is how far off this crease the feature
-            // competing with it sits, not where the ball's centre happened to
-            // land.
+            // Report how far off this crease the competing feature sits, not
+            // where the ball's centre happened to land.
             verdict = {SizeFault::Crowded, c.v, (c.v - T).norm()};
             break;
           }
@@ -1285,13 +1255,11 @@ namespace {
 
 // The wedge cross-section shared by every tool: the two setback points, then the
 // same corner pushed past each wall so the tool crosses it transversally rather
-// than lying coplanar with it. Each primed point is displaced along its *own*
-// wall normal, and by that wall's own overshoot — a station standing clear of a
-// flat wall and a curved one at once has two distances to keep, and wallOvershoot
-// says where each comes from. The point on the bisector takes the larger: at a
-// crease the material is the union of two half-spaces, so a point only has to be
-// behind one of them, and behind the deeper wall it is behind both.
-// `dir` is +1 for a concave tool and -1 for a convex one.
+// than lying coplanar with it. Each primed point is displaced along its own wall
+// normal by that wall's own overshoot, since a station clearing a flat wall and a
+// curved one at once has two distances to keep. The point on the bisector takes
+// the larger: the material there is a union of two half-spaces, so being behind
+// the deeper wall puts it behind both. `dir` is +1 concave, -1 convex.
 std::array<Vector3d, 5> pentagonSection(const Vector3d& v, const Vector3d& nA, const Vector3d& nB,
                                         const Vector3d& bis, const Vector3d& TA,
                                         const Vector3d& TB, double dir, double epsA, double epsB)
@@ -1300,27 +1268,22 @@ std::array<Vector3d, 5> pentagonSection(const Vector3d& v, const Vector3d& nA, c
           TA - dir * epsA * nA};
 }
 
-// How far past a wall the tool has to stand at one station: the fixed hair, plus
+// How far past a wall the tool has to stand at one station: a fixed hair, plus
 // however far that wall has fallen away from the plane the hair is measured in.
 //
-// The overshoot is stepped off the crease point along the station's own averaged
-// wall normal, which puts the tool's wall face in a plane tangent to the wall
-// there. A flat wall stays in that plane and a hair is enough, which is why a
-// fixed one ever worked. A curved wall falls away from it — by the sagitta over
-// the setback, which on a coarsely tessellated pipe is twenty times the hair —
-// so the face clears the wall at the station it was measured at and stands proud
-// of it in between. What that leaves in the finished solid is a ledge one
-// overshoot deep along the whole tangency line, with the tool's own faces on
-// both sides of it, and nothing downstream can tell it from a crease of the
-// shape: it is read as a wall wanting rounding.
+// The overshoot is stepped off the crease point along the station's averaged wall
+// normal, putting the tool's wall face in a plane tangent to the wall there. A
+// flat wall stays in that plane, which is why a fixed hair ever worked. A curved
+// wall falls away by the sagitta over the setback — twenty times the hair on a
+// coarsely tessellated pipe — so the face clears the wall at the station and
+// stands proud of it in between, leaving a ledge one overshoot deep along the
+// whole tangency line that nothing downstream can tell from a crease of the shape.
 //
-// The distance is asked at the tangency point, which is the far edge of the
-// tool's footprint and so the deepest the wall gets under it. The wall itself is
-// walked from the triangle the station named, out to the tangency point and no
-// further, and it stops at the first crease: where one wall ends is the question
-// `isFeatureAngle` already answers, and a tangency point that has run off the
-// end of its wall is the size gate's business, not this one's — measured here it
-// would read the next wall along as a dip and bury the tool in it.
+// The distance is asked at the tangency point, the far edge of the footprint and
+// so the deepest the wall gets under it. The wall is walked from the triangle the
+// station named, no further than the tangency point, and stops at the first
+// crease: a tangency point that has run off the end of its wall is the size gate's
+// business, and measured here would read the next wall as a dip.
 double wallOvershoot(const MergedMesh& m, const std::map<EdgeKey, std::vector<int>>& adj,
                      const Vector3d& v, const Vector3d& n, int tri, const Vector3d& T, double eps,
                      double thresholdDeg)
@@ -1345,9 +1308,9 @@ double wallOvershoot(const MergedMesh& m, const std::map<EdgeKey, std::vector<in
       onWall = q;
     }
 
-    // A triangle the tool does not stand on is measured — it may still be the
-    // nearest thing to the tangency point — but not walked through, so the walk
-    // stays the size of the footprint however large the surface is.
+    // A triangle the tool does not stand on is measured — it may still be nearest
+    // to the tangency point — but not walked through, so the walk stays the size
+    // of the footprint however large the surface is.
     if ((closestPointOnTriangle(v, a, b, c) - v).norm() > reach) continue;
 
     for (int k = 0; k < 3; ++k) {
@@ -1368,29 +1331,27 @@ double wallOvershoot(const MergedMesh& m, const std::map<EdgeKey, std::vector<in
   return eps + std::max(0.0, (v - onWall).dot(n));
 }
 
-// Consecutive cells meet along a shared section face, so a union of them has
-// inputs that touch on a set of zero measure. Manifold copes, but it leaves one
-// degenerate four-triangle shell behind per such contact: no volume, no effect
-// on any boolean, and a nonsense genus for anything that inspects the result.
-// Keep only the components that enclose material, and re-unite the survivors so
-// that where two of them touch the contact is resolved rather than left as two
-// shells meeting: the junction tests read genus and self-touching off this.
+// Consecutive cells meet along a shared section face, so their union has inputs
+// touching on a set of zero measure. Manifold copes, but leaves one degenerate
+// four-triangle shell per such contact: no volume, no effect on any boolean, and
+// a nonsense genus for anything inspecting the result. Keep only the components
+// that enclose material, and re-unite the survivors so that a contact between two
+// of them is resolved rather than left as two shells meeting — the junction tests
+// read genus and self-touching off this.
 
-// Above this many surviving components the union is skipped and they are simply
-// carried side by side into one mesh. Uniting them is what a solid carrying many
-// separate beads cannot afford: a cross whose every facet seam is a crease
-// reaches unions of 63 and 64 parts, and on those it took 11 GB in two seconds
-// before the process was killed - the union creates fresh zero-measure contacts
-// faster than this function retires them. The decomposition is not the cost;
-// forcing one on every call costs 32 MB on that model. The largest union a bench
-// model asks for is 14 parts, so the cap is not reached by a sound model.
+// Above this many surviving components the union is skipped and they are carried
+// side by side into one mesh instead. A cross whose every facet seam is a crease
+// reaches unions of 63 and 64 parts, and there the union creates fresh
+// zero-measure contacts faster than this retires them: 11 GB in two seconds
+// before the process was killed. The decomposition is not the cost — forcing one
+// on every call costs 32 MB on that model. The largest union a bench model asks
+// for is 14 parts.
 constexpr size_t kMaxUnitedParts = 32;
 
-// The parts are disjoint components, so carrying them into one mesh is the union
-// already - minus the welding of any zero-measure contact between two of them,
-// which is the price paid for staying within reach on a mesh this fragmented.
-// They are components of one solid, so they carry one property count between
-// them and the vertex blocks concatenate.
+// The parts are disjoint components, so carrying them into one mesh is already the
+// union, minus the welding of any zero-measure contact between two of them. They
+// are components of one solid, so they share a property count and the vertex
+// blocks concatenate.
 manifold::Manifold composeParts(const std::vector<manifold::Manifold>& parts)
 {
   manifold::MeshGL64 out;
@@ -1425,9 +1386,8 @@ manifold::Manifold dropVolumelessParts(manifold::Manifold solid)
 }
 
 // Union in a tree, dropping each pair's volumeless shells as it is made rather
-// than leaving the finished union's to be sorted out at once: a tool carries one
-// shell per cell contact, and a pair can leave only the one shell between its
-// two members.
+// than sorting the finished union's out at once: a tool carries one shell per cell
+// contact, and a pair can leave only the one shell between its two members.
 manifold::Manifold unionCells(std::vector<manifold::Manifold>& cells)
 {
   if (cells.empty()) return {};
@@ -1448,13 +1408,12 @@ manifold::Manifold unionCells(std::vector<manifold::Manifold>& cells)
 }
 
 // A crease vertex a cell has to carry, and how far off the cell's own chord it
-// lies. A cell is the hull of the sections at its two ends, so what it covers
-// along the crease is the straight chord between them. While one section stands
-// at every crease vertex that chord IS the crease and nothing can be missed; as
-// soon as the stations are re-divided a chord can span a crease vertex and pass
-// inside it, and the sliver of material out at that vertex is a hair outside the
-// tool. `s` is where the vertex falls along the cell, `off` the vector from the
-// chord to it.
+// lies. A cell is the hull of its two end sections, so it covers the straight
+// chord between them. With one section per crease vertex that chord is the crease
+// and nothing can be missed; once the stations are re-divided a chord can span a
+// crease vertex and pass inside it, leaving a sliver of material outside the tool.
+// `s` is where the vertex falls along the cell, `off` the vector from the chord
+// to it.
 struct SpineBulge
 {
   double s = 0.0;
