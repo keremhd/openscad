@@ -1120,11 +1120,28 @@ defects are plausibly one bug, so measuring after the fix is worth more than pla
      derived `R(1−tan(Δ/2)) − d` exactly. At the default 46° it is still inert on that control,
      and now for a reason nothing local can reach: the ball genuinely seats on the merged
      wall-and-blend surface, to 8.9e-16. **The rule is finished; the grouping is what is left.**
-   - **Split the threshold in two.** Promoted from an option to the next step by the line above.
-     `FilletBuilder.cc:1068` hands `smoothSurfaces` the same number edge selection uses. One
-     value must stay 46 — that is promise 2, settled. The other has to answer only "is this 7.5°
-     turn a tessellation seam or a chamfer boundary", and Route 2's refutation says an angle
-     alone cannot. Nothing else now blocks the size gate.
+   - **Split the threshold in two — BUILT AND REVERTED 2026-08-05**, restorable with the whole
+     of attempt 2 (see the last two subsections of §4d). `kSurfaceGroupingDeg`, one constant and
+     one call site. Measured on both sides. It does what §4d hoped: grouped below 45° the
+     angular rule catches 72 of 72 and 91 of 91 of `cross`'s blend-made ridges again, against
+     genuine features at ≤2.6e-14, and **§4d's stated reason the split fails does not transfer**
+     — that objection was about a test that read surface extent, and `boss_plate` at `$fn`=8
+     refuses nothing at 20°, 10° or 5°. But on the bench no value works: ≤30° false-refuses
+     `box_step`, `lbracket` and `two_bosses`, each losing about half its vertices, and ≥40°
+     catches nothing 46° did not. **The next thing to build is the item below, not another
+     value for this constant** — the false refusals look like the same boundary-contact defect,
+     and the window cannot be sized until that is gone.
+   - **Exempt a contact landing on its own wall's edge.** The one unbuilt piece, and now the
+     blocker for both the unit suite and the segmentation window. The angular rule has no
+     direction to accept a one-sided normal cone with, so nearest-point-equals-boundary — which
+     `surfaceRim` called a fit — reads as a large miss: 0.9265 on a radius of 2 where the old
+     rule read 4.4e-16. It must not reintroduce a dependency on surface *extent*; the crease's
+     own edge is the obvious case and is not the `turned` exemption, which fires only where the
+     chain changes walls. Note that dropping the walk's surface restriction entirely is
+     **refuted** by measurement, in §4d.
+   - **Stop reporting `r·sin θ` as a distance.** It is bounded by r and turns over, so the
+     perched dome's r=18 refusal reports 0.0124 against r=14's 0.0311. The refusals are right;
+     the number in the warning is not a length any more.
    - **Make the gate actually ask.** 15 of 26 accepted chains at r=0.5 have `ntest`=0 — every
      sample exempted as a chain end or as within `2·size` of a junction. A check that is never
      evaluated cannot refuse. This is the harder half: the exemptions exist for a reason and
