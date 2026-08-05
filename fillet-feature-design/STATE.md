@@ -861,14 +861,17 @@ pinched-vertex family is work.
 what actually survives — not against what this file predicts will survive. Three of the §5 open
 defects are plausibly one bug, so measuring after the fix is worth more than planning before it.
 
-**3. Build the ball-seating check. Settled by measurement, ready to implement.** See §4d. Two
-parts, and the second may be the larger:
-   - **Compare the seat foot against `r`.** `seatOn` already computes
-     `d = nearestOnWall(C, …)` and compares it only to the rim distance. Compare it to `r` as
-     well, and require the constructed perpendicular foot on each face to lie on the mesh. The
-     separation measured is 9.8e-15·R for genuine features against 0.117–1.004·R for
-     blend-made ridges — thirteen orders of magnitude, zero false refusals over 220 genuine
-     edges on four models, 163 of 163 artifacts caught. No constant needs choosing.
+**3. Build the ball-seating check.** See §4d. Two parts, and the second may be the larger:
+   - **Compare the seat foot against `r` — BUILT AND REVERTED 2026-08-05**, `06a12765a`,
+     reverted at `fef81a712`, measured in §4d's last subsection. It confirms the 46° diagnosis
+     on both `handblend_step` axes at the default threshold and it refuses genuine blends on
+     every curved wall in the bench, a stock `tee` included. The prerequisite it exposed: the
+     ball is seated from the crease's tangent planes, so on a wall that curves along the radius
+     the tangency point is offset by, the constructed foot floats off the mesh by about r²/2R
+     — 0.014·R on the tee, up to 0.43·r on a dome — and no local fit test can be believed until
+     the ball is re-seated against the mesh. The 9.8e-15·R against 0.117–1.004·R separation is
+     real for cap rims and flat-walled creases and does not survive adding curved walls to the
+     population.
    - **Make the gate actually ask.** 15 of 26 accepted chains at r=0.5 have `ntest`=0 — every
      sample exempted as a chain end or as within `2·size` of a junction. A check that is never
      evaluated cannot refuse. This is the harder half: the exemptions exist for a reason and
