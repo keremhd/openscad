@@ -738,14 +738,33 @@ network failure. Only committed work survived, every time.
 Ordered so that nothing later invalidates anything earlier. The first item is small and is the
 reason the rest can be trusted.
 
-**1. Fix `mesh.py`'s criterion** (§7, four changes). Until it lands, A1 is measuring the wrong
-thing in both directions: it misses point-attached slivers and detached fragments entirely, and
-it reports a `genus` for pinched surfaces where the number has no referent. Everything below is
-measured with this instrument, so it goes first.
+**1. Fix `mesh.py`'s criterion — DONE 2026-08-05**, `90e62da6e` and `799b9733b`. All four
+changes: `nmvert` counts fans per welded vertex and prints the first pinch's coordinates;
+`genus` is suppressed when pinched; `comp` is compared against a per-model declaration the
+model carries in its own source (`// mesh.py-comp: N`) rather than anything hardcoded, so
+`shallow_crease` declares 2 and everything else expects 1; and a nonzero genus carries a
+`throat` proxy — the first weld tolerance at which the genus stops being what it was.
+`mesh.py --selftest` runs 11 synthetic controls, `sweep.sh --selftest` 49 checks, all passing.
 
-**2. Re-run the 353-cell sweep under the fixed criterion.** The recorded sixteen not-valid cells
-are neither complete nor correct — at least five green cells carry debris. The true failure list
-does not exist yet, and no fix should be evaluated against the old one.
+**Two throat definitions were tried and are wrong**, documented in-source so they are not
+re-derived: the closest non-face-sharing vertex pair reads 0.0015 mm on `hole_plate`'s
+*legitimate* hole, because it measures facet spacing; adding a six-hop separation test then
+reads 0.84 mm on `cross`, because a handle narrower than a facet has its sides one hop apart.
+Welding is the only test that scales with the handle rather than with the tessellation.
+
+**Also fixed, and it mattered:** a greedy-`sed` bug in `sweep.sh`'s `get comp` would have made
+every shed fragment record as `comp=1` and agree with itself. Worth checking any other reader
+of that line.
+
+**2. Re-sweep under the corrected criterion — DONE 2026-08-05**, `b57bb6371`. All 353 cells on
+one pinned binary (md5 `fd3dec78`, `src/` diffed clean against `11b6b3b1`), 3 renders per cell,
+`distinct`=1 everywhere. **The true failure list is 21 cells, against the recorded 16:** five
+newly fail (`tee` r=0.5, `tee_small` at defaults / `$fn`=10 / r=1.5, `cross` r=0.9), four change
+reason from χ-parity to a *located* pinch, twelve are unchanged (the `$fn`=8 family, `cross`
+r=0.3, `refused_neighbour` ×4, `rib_into_boss` 14 and 32), and **none went the other way**.
+Results in `results/sweep-fd3dec78.tsv` and
+`results/sweep-compare-11b6b3b1-vs-fd3dec78.txt`. The row gained three columns appended at the
+end (`nmvert throat wantcomp`), so no recorded field index moved.
 
 **3. Build the ball-seating check. Settled by measurement, ready to implement.** See §4d. Two
 parts, and the second may be the larger:
