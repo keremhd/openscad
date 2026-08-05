@@ -744,16 +744,12 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
   }
 
   // How far a wall may turn away from the triangle the question was asked at
-  // before it stops being that wall. A wall curved enough to matter still turns
-  // only by its sagitta over the tool's own footprint — a radius-2 blend on a
-  // radius-10 boss covers 27 degrees of it — while a bead turns by the whole
-  // crease angle within a couple of millimetres, which is what separates the two
-  // without anything having to be told which pass built what.
-  //
-  // A right angle is exactly the wrong value, and measurably so: at 90 the walk
-  // steps from a rib's side onto the plate its bead lands on, which is at
-  // precisely 90, and four creases are lost again. Anything from 30 to 85 gives
-  // the same answer on every model in the set.
+  // before it stops being that wall. This separates real curvature from a blend
+  // already in the target: a radius-2 blend on a radius-10 boss covers 27 degrees
+  // of that boss, where a bead turns by the whole crease angle within a couple of
+  // millimetres. 90 is measurably wrong — the walk then steps from a rib's side
+  // onto the plate its bead lands on, which meets it at exactly 90. Anything from
+  // 30 to 85 gives the same answer on every bench model.
   constexpr double kWallTurnDeg = 60.0;
   const double turnCap = std::cos(kWallTurnDeg * M_PI / 180.0);
 
@@ -763,14 +759,11 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
   // and never stepping further from the crease than `budget` — which is as far
   // as a point the seated ball touches can possibly be.
   //
-  // Asking the whole surface instead is right until something has been blended
-  // into the target, and wrong the moment one has been. A bead is tangent to
-  // both walls it touches, which is what a fillet is, so the smooth grouping
-  // runs straight through it: a rib with a bead at its foot comes back as ONE
-  // surface — near side, both beads, the plate and the far side. The nearest
-  // point of that to a ball seated on the rib's top corner is on the face
-  // opposite, and every question asked of the contact afterwards is then asked
-  // about the wrong wall.
+  // Asking the whole surface instead breaks as soon as the target already carries
+  // a blend: a bead is tangent to both walls it touches, so the smooth grouping
+  // runs straight through it and a ribbed plate comes back as one surface — near
+  // side, both beads, plate, far side. The nearest point of that to a ball seated
+  // on the rib's top corner is on the opposite face.
 
   auto nearestOnWall = [&](const Vector3d& p, const Vector3d& from, int startTri, int surface,
                            double budget, Vector3d *onWall) {
@@ -794,9 +787,9 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
         if (onWall) *onWall = q;
       }
 
-      // Measured, and walked, from the crease: a triangle out of the tool's
-      // reach is still the nearest thing to `p` if nothing closer exists, but
-      // nothing past it is reachable through it.
+      // Measured and walked from the crease: a triangle out of the tool's reach
+      // can still be the nearest thing to `p`, but nothing past it is reachable
+      // through it.
       if ((closestPointOnTriangle(from, a, b, c) - from).norm() > budget) continue;
 
       for (int k = 0; k < 3; ++k) {
@@ -811,34 +804,27 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
     return best;
   };
 
-  // Where the ball really touches one of its walls, and whether that is a touch
-  // at all. Stepping off the ball centre along an averaged wall normal — the
-  // construction the sections themselves use — assumes the wall is flat, and on
-  // a doubly curved one the point it produces sits off the surface by the
-  // sagitta, r^2/2R, however finely the wall is tessellated: a bead on a dome
-  // would be refused for a miss that is an artefact of the construction. Asking
-  // the wall for its nearest point to the centre instead puts the contact on the
-  // wall by construction, curved or not.
+  // Where the ball really touches one of its walls, and whether that is a touch at
+  // all. Stepping off the ball centre along an averaged wall normal — what the
+  // sections themselves do — assumes the wall flat, and on a doubly curved wall
+  // that point sits off the surface by the sagitta r^2/2R however finely it is
+  // tessellated, so a bead on a dome would be refused for an artefact. The wall's
+  // own nearest point to the centre is on the wall by construction.
   //
-  // That also states the question exactly rather than as a distance against a
-  // tolerance: the blend leaves the surface it is meant to meet precisely when
-  // the nearest point is on the wall's boundary rather than inside it, because
-  // then the wall has ended and the ball is hanging off it. The boundary is part
-  // of the wall, so its distance is never less than the wall's own; equal is
-  // what says the contact sits on it.
+  // It also states the test exactly rather than against a tolerance: the blend
+  // leaves the surface precisely when that nearest point is on the wall's boundary
+  // rather than inside it. The boundary is part of the wall, so its distance is
+  // never less than the wall's own; equal is what says the contact sits on it.
   //
-  // `turned` says the chain changes walls on this side at this station — the
-  // spine's own corner. There the averaged normal is the average of two
-  // different walls' normals, so the point it seats lands on the crease between
-  // them: on the boundary of each, by construction and at any size. That is the
-  // ball rolling from one wall onto the next, which is what a chain that turns
-  // is, and not a wall running out. The question is left to the samples either
-  // side, which each ask about one wall.
+  // `turned` means the chain changes walls on this side at this station — the
+  // spine's own corner. There the averaged normal seats a point on the crease
+  // between two walls, hence on the boundary of each at any size; that is the ball
+  // rolling from one wall onto the next, not a wall running out, so the question is
+  // left to the samples either side, which each ask about one wall.
   auto seatOn = [&](ChainContact& c, const Vector3d& n, int surface, int tri, Vector3d& T,
                     bool turned) {
-    // How far from the crease a point this ball touches can be: out to the
-    // centre, and a radius further. Past that is another feature's wall, however
-    // smoothly the mesh gets there.
+    // How far from the crease a point this ball touches can be: out to the centre
+    // and a radius further. Past that is another feature's wall.
     const double budget = (c.C - c.v).norm() + c.radius;
     Vector3d onWall;
     const double d = nearestOnWall(c.C, c.v, tri, surface, budget, &onWall);
@@ -851,9 +837,8 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
       rim = std::min(rim, pointSegmentDistance(c.C, m.pos[e.first], m.pos[e.second]));
     if (rim > d + 1e-9 * std::max(1.0, d)) return;
 
-    // Hanging off the end of this wall. What the user can act on is how far past
-    // it the blend would stop, so report the miss of the point the bead would
-    // actually be built to.
+    // Hanging off the end of this wall. Report the miss of the point the bead
+    // would actually be built to, which is what says how far past it it stops.
     c.offFace = std::max(
       c.offFace, nearestOnWall(c.C - dir * c.radius * n, c.v, tri, surface, budget, nullptr));
   };
@@ -890,12 +875,11 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
     return c;
   };
 
-  // Which stretches of the chain are being built. The brushes narrow a crease to
-  // the parts they cover, and the question of whether the blend still meets its
-  // walls is only about the parts there is a bead on: the far half of a crease
-  // running off the end of its face says nothing about the near half, which is
-  // all the user asked for. Station i sits at parameter i, and a sample partway
-  // along segment i at parameter i + t; an empty `keep` is the whole chain.
+  // Which stretches of the chain are being built. Whether the blend still meets
+  // its walls is only asked where there is a bead: the far half of a crease
+  // running off the end of its face says nothing about the near half. Station i
+  // sits at parameter i, a sample partway along segment i at i + t; an empty
+  // `keep` is the whole chain.
   auto isBuilt = [&](double param) {
     if (chain.keep.empty()) return true;
     for (const SpineInterval& iv : chain.keep)
@@ -906,10 +890,9 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
   const size_t n = stations.size();
   const size_t segments = n < 2 ? 0 : (chain.closed ? n : n - 1);
 
-  // Which walls the chain has either side of it as it arrives at a station and
-  // as it leaves — the same sided convention the normals are averaged under, so
-  // the two can be compared side by side. A station with only one incident edge
-  // has nothing to turn between.
+  // The walls either side of the chain as it arrives at a station and as it
+  // leaves, under the same sided convention the normals are averaged with, so the
+  // two are comparable.
   auto sideSurfaces = [&](int a, int b, int& sA, int& sB) {
     sA = sB = -1;
     int tA = -1, tB = -1;
@@ -922,16 +905,14 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
   std::vector<ChainContact> out;
   out.reserve(n * (1 + std::max(samplesPerSegment, 0)));
   for (size_t i = 0; i < n; ++i) {
-    // A point the brushes left out is carried as an invalid placeholder rather
-    // than left out of the list, so the ends of the list are still the ends of
-    // the chain — which is what the callers that exempt them are asking about.
+    // A point the brushes left out is carried as an invalid placeholder, so the
+    // ends of the list are still the ends of the chain — which is what the callers
+    // that exempt chain ends are asking about.
     ChainContact station;
     if (isBuilt(static_cast<double>(i))) {
       bool turnedA = false, turnedB = false;
-      // The walls the crease arrives on and leaves by. At an interpolated
-      // station both are the one raw segment it lies inside, so it never reads
-      // as a corner — which is right: a point in the middle of a segment has no
-      // turn in it.
+      // The walls the crease arrives on and leaves by. At an interpolated station
+      // both are the one raw segment it lies inside, so it never reads as a corner.
       const std::pair<int, int> inE = chain.inEdge(static_cast<int>(i));
       const std::pair<int, int> outE = chain.outEdge(static_cast<int>(i));
       int inA = -1, inB = -1, outA = -1, outB = -1;
@@ -947,12 +928,10 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
     out.push_back(std::move(station));
     if (i >= segments || samplesPerSegment <= 0) continue;
 
-    // Between two stations the walls turn from one pair of normals to the
-    // other; interpolating them is what the cell between the two sections is
-    // built from, so it is the same shape being asked about. The walls
-    // themselves are the ones of the segment's own edge — at a corner of a
-    // closed loop the stations' are two different pairs, and only the segment's
-    // is the surface a point on it can be expected to lie on.
+    // Interpolating the two stations' normals is exactly how the cell between
+    // their sections is built, so the same shape is being asked about. The walls
+    // are the segment's own edge's: at a corner the two stations name different
+    // pairs, and only the segment's is a surface a point on it can lie on.
     const StationNormals& a = stations[i];
     const StationNormals& b = stations[(i + 1) % n];
     if (!a.valid || !b.valid) continue;
@@ -961,12 +940,10 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
       chain.rawMid(static_cast<int>(i), static_cast<int>((i + 1) % n));
     if (!sidedTris(m, adj, segEdge.first, segEdge.second, segA, segB)) continue;
 
-    // One sample per size along the segment, and never fewer than asked. A fixed
-    // count is a trap on a long crease: the room a spike leaves its tool runs
-    // out somewhere between the last sample and the vertex, and where that is
-    // depends on the size, so the walk has to be as fine as the size is small.
-    // The cap is there because a crease can be arbitrarily long next to a tool
-    // that is arbitrarily small, and the check is quadratic in its samples.
+    // One sample per size along the segment, never fewer than asked. A fixed count
+    // is a trap on a long crease: where a tapering feature runs out of room for
+    // the tool depends on the size, so the walk has to be as fine as the size is
+    // small. The cap bounds the check, which is quadratic in its samples.
     const double segmentLength = (b.v - a.v).norm();
     const int samples =
       std::clamp(static_cast<int>(std::ceil(segmentLength / std::max(size, 1e-12))),
@@ -1004,11 +981,10 @@ double pointTriangleDistance(const Vector3d& p, const Vector3d& a, const Vector3
 // The same chain, parameterised by the crease as the mesh has it: one station
 // per crease vertex, and the brushes' intervals carried over to that parameter.
 //
-// Whether a size fits is a question about the target and the size, and about
-// nothing else; where the stations happen to sit is not part of it. Re-dividing
-// a crease at equal arc length steps over its slivers by design, so a blend that
-// leaves its wall only across one would go unsampled and be accepted. Asking the
-// crease itself keeps one answer per target, whatever the stations do.
+// Whether a size fits must depend on the target and the size alone, not on where
+// the stations sit. Re-dividing at equal arc length steps over slivers by design,
+// so a blend that leaves its wall only across one would go unsampled and be
+// accepted.
 namespace {
 Chain rawStationChain(const Chain& chain)
 {
@@ -1040,9 +1016,8 @@ Chain rawStationChain(const Chain& chain)
     const SpineInterval mapped{toRaw(iv.first), toRaw(iv.second)};
     if (mapped.second - mapped.first > 1e-12) out.keep.push_back(mapped);
   }
-  // A brush that covers nothing has to stay covering nothing: an empty `keep` is
-  // read as the whole chain, so a stretch that maps away leaves a point rather
-  // than the lot.
+  // A brush covering nothing must stay covering nothing: an empty `keep` reads as
+  // the whole chain, so a stretch that maps away leaves a point instead.
   if (out.keep.empty() && !chain.keep.empty()) out.keep.emplace_back(0.0, 0.0);
   return out;
 }
@@ -1066,15 +1041,12 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
                                      /*samplesPerSegment=*/3));
   }
 
-  // The crowding question is asked of where contact points sit against each
-  // other, and those sit on a tessellated wall: each is within about half a seam
+  // Contact points sit on a tessellated wall, so each is within about half a seam
   // angle of where the smooth surface would put it. The crease threshold is the
-  // largest seam the tessellation can produce, which makes it the bound on that,
-  // and it also swallows the float noise the plan asks be clamped silently
-  // rather than dropped. It widens the region asked about rather than narrowing
-  // it, so the doubtful case is refused: the alternative is accepting a size at
-  // which two beads just touch, which is the tangential contact that leaves
-  // slivers behind.
+  // largest seam the tessellation can produce and so bounds that; it also absorbs
+  // float noise. The tolerance widens the region asked about rather than narrowing
+  // it, so the doubtful case is refused — accepting a size at which two beads just
+  // touch is the tangential contact that leaves slivers behind.
   const double faceTol =
     std::max(size * (1.0 - std::cos(thresholdDeg * M_PI / 180.0)), 1e-9 * size);
 
