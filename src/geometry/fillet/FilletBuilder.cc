@@ -2559,20 +2559,17 @@ std::array<Vector3d, 4> cornerProfile(const RoundSection& s, double over)
 // meets there. Convex by construction, so the hull is faithful; the corner balls
 // are taken out of it by the same global subtraction as the canals.
 //
-// Every point of it is taken `over` past a wall rather than on one, for the
-// reason the edge cells' pentagon is: a face resting exactly on a wall asks a
-// boolean to resolve two coincident surfaces. Each goes out along its own wall's
-// normal, one copy of the vertex per wall, so that every point this cell has
-// near a wall is the same distance past it and the hull's face there is that
-// wall's plane exactly. Displacing the vertex once along the bisector instead
-// put it short of that plane by the cosine, which tilted the face by a hair and
-// left a flake of the model unblended along the junction, at a thickness that
-// scaled with `over`.
+// Every point is taken `over` past a wall rather than on one, for the reason the
+// edge cells' pentagon is: a face resting exactly on a wall asks a boolean to
+// resolve two coincident surfaces. Each goes out along its own wall's normal, one
+// copy of the vertex per wall, so every point near a wall is the same distance
+// past it and the hull's face there is that wall's plane exactly. Displacing the
+// vertex once along the bisector instead falls short of that plane by the cosine,
+// tilting the face and leaving a flake of the model unblended along the junction.
 //
-// `over` must then be larger than the edge cells' own overshoot rather than
-// smaller. Equal, and the corner cell's wall face lands in their plane and the
-// coincidence is back, inside the tool this time; smaller, and it grazes just
-// beneath it, which is worse. Larger, and the two cross at a real angle.
+// `over` must be larger than the edge cells' own overshoot. Equal puts the corner
+// cell's wall face in their plane and the coincidence is back inside the tool;
+// smaller grazes just beneath it, which is worse.
 manifold::Manifold cornerCell(const Junction& j, const Vector3d& vj,
                               const std::vector<std::array<Vector3d, 4>>& endProfiles, double r,
                               double dir, double over)
@@ -2608,24 +2605,22 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   const double eps = std::max(1e-3 * r, 1e-9);
   const int segs = std::max(arcSegments, 3);
 
-  // Under the seam rule a vertex that an unfilleted crease leaves gets no corner
-  // cell and no corner ball: the two beads that do arrive meet each other in a
-  // seam along that crease instead. Nothing else about the vertex changes here —
-  // what the rule does with it is applied further down, where the cell, the ball
-  // and the grouping of the subtraction are decided.
+  // Under the seam rule a vertex an unfilleted crease leaves gets no corner cell
+  // and no corner ball; the two beads that do arrive meet in a seam along that
+  // crease instead. The rule is applied further down, where the cell, the ball and
+  // the grouping of the subtraction are decided.
   const std::set<EdgeKey> filleted = filletedEdges(chains);
   const std::vector<Junction> junctions = chainJunctions(m, adj, chains, r, concave, noCorner);
-  // Whether the crease arrives at the vertex straight or on a curve is not asked.
-  // Withholding a curved arrival from the rule does not hand it to a seated ball:
-  // where a crease leaves a vertex unfilleted because a brush cut it, that same
-  // brush withheld the corner, so chainJunctions finds no junction there and the
-  // withheld vertex falls to the plain stop-a-hair-short branch below. Its two
-  // beads then meet at no angle at the top of their cross-sections, which is the
-  // knife edge the overrun exists to remove. Measured on a rib running out of a
-  // cylindrical boss over 37 tessellations: withheld, 16 invalid solids; served, 2.
+  // Whether the crease arrives straight or on a curve is not asked. Withholding a
+  // curved arrival does not hand the vertex to a seated ball: where a brush cut the
+  // crease, that same brush withheld the corner, so there is no junction and the
+  // vertex falls to the stop-a-hair-short branch below, whose two beads then meet
+  // at no angle at the top of their cross-sections. Measured on a rib running out
+  // of a cylindrical boss over 37 tessellations: withheld, 16 invalid solids;
+  // served, 2.
   //
-  // Every use below asks the same question of the same vertex, and answering it
-  // walks the edge table, so it is answered once.
+  // Answering walks the edge table, and every use below asks about the same
+  // vertices, so it is cached.
   std::map<int, bool> seamCache;
   auto seamVertex = [&](int v) {
     const auto it = seamCache.find(v);
@@ -2635,31 +2630,22 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
     return yes;
   };
   // How far a bead arriving at a seam vertex runs past it, as a fraction of the
-  // radius. A tenth is the measured floor: it is far enough that the two beads
-  // overlap over a region at every opening angle and every tessellation measured,
-  // and short enough to stay well inside the wall it runs into where there is a
-  // wall to stay inside of — where there is less room than that, seamRoom below
-  // takes what there is instead. Below about 0.08 the floor goes ragged and
-  // non-monotone; a sweep over opening angle, radius, tessellation and this
-  // coefficient found no upper edge short of 2.0, so what is measured here is a
-  // floor and not a ceiling. Raising it is nonetheless not indicated: over the
-  // model corpus 0, 0.05, 0.15, 0.2 and 0.3 give 10, 10, 12, 13 and 12 badly
-  // tessellated models against this value's 9 — worse in both directions, and
-  // non-monotone, so the coefficient is not a lever worth pulling.
+  // radius. A tenth is the measured floor: far enough that the two beads overlap
+  // over a region at every opening angle and tessellation measured, short enough
+  // to stay inside the wall it runs into (where there is less room, seamRoom takes
+  // what there is). Below about 0.08 the floor goes ragged and non-monotone. There
+  // is no upper edge short of 2.0, but raising it does not help: over the model
+  // corpus 0, 0.05, 0.15, 0.2 and 0.3 give 10, 10, 12, 13 and 12 badly tessellated
+  // models against this value's 9.
   constexpr double seamOver = 0.10;
 
   std::map<int, const Junction *> junctionAt;
   for (const Junction& j : junctions) {
-    // A seam vertex builds no corner cell, so nothing is going to fill what
-    // truncating the spines into it would empty. Leaving it out of the map is
-    // what stops the truncation, and hands the vertex to the rule below that has
-    // the two beads meet each other instead. The brush already withheld the
-    // junction at the corners it shortened; this is the same withholding at the
-    // corners a crease is missing from for any other reason.
-    //
-    // The withholding is unconditional, and stands on its own: truncating the
-    // spines into a corner that nothing then fills is a hole however far the two
-    // beads afterwards run past the vertex.
+    // A seam vertex builds no corner cell, so nothing would fill what truncating
+    // the spines into it empties. Leaving it out of the map stops the truncation
+    // and hands the vertex to the rule below that has the two beads meet each
+    // other. Unconditional: truncating into a corner nothing fills is a hole
+    // however far the beads afterwards run past the vertex.
     if (seamVertex(j.vert)) continue;
     junctionAt[j.vert] = &j;
   }
@@ -2669,12 +2655,12 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   for (const Chain& chain : chains)
     sections.push_back(roundSections(m, adj, chain, r, concave, segs, thresholdDeg));
 
-  // Where each section sits along its chain, as the chain parameter the brushes'
-  // selection is written in. It starts as the identity — one section per station
-  // — and stops being it below: truncation slides an end section back off its
-  // station, and a runout replaces one with a fan of them. Carrying it is what
-  // lets the selection stay in the space the caller's brush cut it in, which is
-  // the only space where a brush boundary is a fixed physical point.
+  // Where each section sits along its chain, in the chain parameter the brushes'
+  // selection is written in. It starts as the identity, one section per station,
+  // and stops being it below: truncation slides an end section back off its
+  // station, and a runout replaces one with a fan. Carrying it keeps the selection
+  // in the space the caller's brush cut it in, the only space where a brush
+  // boundary is a fixed physical point.
   std::vector<std::vector<double>> sectionAt(chains.size());
   // Where each chain's own far end sits in that space before anything moves it,
   // which is the parameter a selection reaching the end of the chain reaches.
@@ -2717,11 +2703,10 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
       if (!a.valid || !b.valid) continue;
 
       // A junction whose solve found no ball centre gets no corner cell, so
-      // truncating into it would cut every incident spine back and leave the
-      // space they vacated empty. Ramp the radius down to nothing over the last
-      // stretch instead: the beads converge on the sharp vertex, the corner
-      // closes with no patch, and the blend fades out locally rather than
-      // stopping with a step.
+      // truncating into it would cut every incident spine back and leave the space
+      // they vacated empty. Ramp the radius down to nothing over the last stretch
+      // instead, so the beads converge on the sharp vertex and the blend fades out
+      // locally rather than stopping with a step.
       if (it->second->ballCentres.empty()) {
         runout[ci][front ? 0 : 1] = true;
         continue;
@@ -2732,34 +2717,28 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
 
       // Stopping exactly at the corner puts the canal's last section flat on the
       // corner ball — the section is a great disc of it — and two subtracted
-      // surfaces that coincide over a whole face rather than crossing are what a
-      // Nef kernel downstream chokes on. Run a hair past, so they cross. The
-      // overshoot is the same trick and the same size as the pentagon's at the
-      // walls, and what it takes extra is a ring a thousandth of a radius deep
-      // inside the corner cell, which the corner ball removes anyway.
+      // surfaces coinciding over a whole face rather than crossing are what a Nef
+      // kernel downstream chokes on. Run a hair past so they cross; the extra is a
+      // ring a thousandth of a radius deep inside the corner cell, which the
+      // corner ball removes anyway.
       const double step = (b.C - a.C).norm();
       const double nudge = step > 1e-12 ? 1e-3 * r / step : 0.0;
 
-      // Zero means the ball is already blocked at the neighbour station, so the
-      // whole of the last segment is inside the corner and there is no point
-      // along it for the bead to stop at. Where a crease runs into a junction its
-      // stations crowd — on a pipe through a boss they are a fifth of the radius
-      // apart there against a whole radius further along — so this is ordinary
-      // rather than exceptional. Nudged off zero it leaves a cell the width of
-      // the nudge, a sliver a thousandth of a radius long whose end faces and
-      // seam cover are both degenerate. Drop it and let the bead end at the
-      // neighbour station, which is the first station outside the corner anyway.
+      // Zero means the ball is already blocked at the neighbour station: the whole
+      // last segment is inside the corner and there is no point along it for the
+      // bead to stop at. Stations crowd where a crease runs into a junction — a
+      // fifth of a radius apart on a pipe through a boss, against a whole radius
+      // further along — so this is ordinary. Nudged off zero it would leave a cell
+      // the width of the nudge, whose end faces and seam cover are both degenerate;
+      // drop it and let the bead end at the neighbour station, which is the first
+      // station outside the corner anyway.
       //
-      // Three stations with both ends dropped is the one case here that is
-      // reasoned about rather than measured. It would leave only the middle
-      // section valid, so every cell has an invalid end and the bead vanishes
-      // without saying so, with the two corner cells nearly meeting on that
-      // station. Reaching it needs a crease shorter than about two radii running
-      // between two junctions, which is what the size gate refuses as crowded, so
-      // it is unreachable through the node and only a direct caller could build
-      // it. Nothing here is written for it: over the whole test suite and a
-      // 540-configuration sweep the shortest chain this branch was ever taken on
-      // had seventeen stations.
+      // Three stations with both ends dropped would leave only the middle section
+      // valid, so every cell has an invalid end and the bead vanishes silently.
+      // Reaching that needs a crease shorter than about two radii between two
+      // junctions, which the size gate refuses as crowded, so only a direct caller
+      // could build it. Over the whole test suite and a 540-configuration sweep the
+      // shortest chain this branch was taken on had seventeen stations.
       if (s <= 0.0) {
         // Two stations and nothing left between them is no bead at all.
         if (n == 2) {
@@ -2770,13 +2749,11 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
         // Nothing is built out here now, so the entry says the station the bead
         // ends at rather than the one this section used to sit on.
         sectionAt[ci][endIdx] = static_cast<double>(nbrIdx);
-        // The corner cell still has to overlap the bead in a slab rather than
-        // meet it on the neighbour station's plane, so it reaches a hair past
-        // that station into the segment beyond. That is a different segment from
-        // the one `nudge` was measured on, and they are not the same length: a
-        // fraction of a segment is only a distance once the segment it is a
-        // fraction of is named. Capped, since a segment shorter than the hair
-        // itself would otherwise ask for a fraction past the far end of it.
+        // The corner cell still has to overlap the bead in a slab rather than meet
+        // it on the neighbour station's plane, so it reaches a hair past that
+        // station into the segment beyond — a different segment from the one
+        // `nudge` was measured on, and not the same length. Capped, since a segment
+        // shorter than the hair would ask for a fraction past its far end.
         const RoundSection& in = sec[front ? 2 : n - 3];
         const double back = (a.C - in.C).norm();
         const double hair = back > 1e-12 ? std::min(1e-3 * r / back, 0.05) : 0.05;
@@ -2795,11 +2772,11 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
 
       // The corner cell reaches a hair further back than the section the wedge
       // stops at, so the two overlap in a slab instead of meeting on one shared
-      // face. Cells that merely abut leave the union a face that is in both of
-      // them and in neither's interior, and the sub-micron triangles that come of
-      // it survive as far as the first kernel that quantises its input. What it
-      // reaches with is not that section's own pentagon but a profile rebuilt at
-      // the corner cell's distance past the walls; cornerProfile says why.
+      // face. Cells that merely abut leave the union a face in both of them and in
+      // neither's interior, and the sub-micron triangles that come of it survive as
+      // far as the first kernel that quantises its input. It reaches with a profile
+      // rebuilt at the corner cell's distance past the walls, not that section's
+      // own pentagon; see cornerProfile.
       const RoundSection reach = lerpSection(a, b, std::max(0.0, s - 2.0 * nudge));
       if (reach.valid) endSections[j.vert].push_back(reach);
     }
@@ -2812,11 +2789,10 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
     sec = std::move(trimmed);
   }
 
-  // Replace the end station of every chain that runs out with a ramp: a few
-  // samples along the last stretch, each carrying its own radius, ending in the
-  // sharp vertex itself. Sections are no longer one per station past this point,
-  // which is fine — a cell is the hull of two consecutive sections whatever
-  // produced them.
+  // Replace the end station of every chain that runs out with a ramp: a few samples
+  // along the last stretch, each carrying its own radius, ending in the sharp
+  // vertex. Past this point sections are no longer one per station, which is fine —
+  // a cell is the hull of two consecutive sections whatever produced them.
   for (size_t ci = 0; ci < chains.size(); ++ci) {
     if (!runout[ci][0] && !runout[ci][1]) continue;
     const Chain& chain = chains[ci];
@@ -2904,22 +2880,20 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   // Chain ends that land on a vertex another chain also ends at, and that got no
   // corner cell to close them, stop a hair short of it.
   //
-  // Something is always refused there or the corner would have been built - a
-  // third crease too small for the size, most often - and the beads that were
-  // built still arrive at the same point. Stopping both on it has them touch
-  // along one line, with the material of each falling away either side, and a
-  // touch is what the caller's union resolves into a flap of zero thickness. The
-  // hair of crease left bare between them is bare either way: it is the corner
-  // the refused crease runs into, which nothing was going to blend.
+  // Something was refused there or the corner would have been built — most often a
+  // third crease too small for the size — and the beads that were built still
+  // arrive at the same point. Stopping both on it has them touch along one line,
+  // which the caller's union resolves into a flap of zero thickness. The hair of
+  // crease left bare between them is bare either way: it is the corner the refused
+  // crease runs into, which nothing was going to blend.
   //
-  // A seam vertex goes the other way, and runs each bead PAST the vertex instead.
-  // The hair does not actually separate the two surfaces where it matters: the
-  // top of a bead's cross-section is tangent to its own wall, that wall is the one
-  // the other bead's crease ends on, and the two tops therefore converge on the
-  // same point of the sharp edge however far back either bead stops. They meet
-  // there at no angle at all, and a boolean can only resolve that into a knife
-  // edge. Overlapping them over a region instead makes the meeting an ordinary
-  // transversal crossing, and the seam an ordinary intersection curve.
+  // A seam vertex goes the other way and runs each bead PAST it. The hair does not
+  // separate the two surfaces where it matters: the top of a bead's cross-section
+  // is tangent to its own wall, which is the wall the other bead's crease ends on,
+  // so the two tops converge on the same point of the sharp edge however far back
+  // either stops — meeting at no angle, which a boolean can only resolve into a
+  // knife edge. Overlapping them over a region makes it an ordinary transversal
+  // crossing instead.
   {
     std::map<int, int> endsAt;
     for (size_t ci = 0; ci < chains.size(); ++ci) {
