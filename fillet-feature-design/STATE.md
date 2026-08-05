@@ -766,6 +766,21 @@ Results in `results/sweep-fd3dec78.tsv` and
 `results/sweep-compare-11b6b3b1-vs-fd3dec78.txt`. The row gained three columns appended at the
 end (`nmvert throat wantcomp`), so no recorded field index moved.
 
+**2a. A1's scope is settled — owner decision 2026-08-05.** A1 is measured over the whole
+353-cell sweep, but a cell may be closed as a **documented limitation** when the remnant's
+measured scale is orders below the geometry it sits on. The deciding number is measured, never
+argued, and must be recorded in the row that closes the cell. Written up under "A1's scope" in
+`ACCEPTANCE.md`. This is what makes the gate reachable; without it, "every bench model valid"
+had grown to mean 353 cells with no exceptions.
+
+It changes no measurement below. It changes which of the 21 failures are *work*: `cross`'s
+genus at r=1.5/2.0 is the worked example of a release note (1.5 µm throat), and the
+pinched-vertex family is work.
+
+**Sequencing, owner decision 2026-08-05:** do item 3, re-sweep, and scope items 4 and 5 against
+what actually survives — not against what this file predicts will survive. Three of the §5 open
+defects are plausibly one bug, so measuring after the fix is worth more than planning before it.
+
 **3. Build the ball-seating check. Settled by measurement, ready to implement.** See §4d. Two
 parts, and the second may be the larger:
    - **Compare the seat foot against `r`.** `seatOn` already computes

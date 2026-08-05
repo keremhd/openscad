@@ -198,7 +198,29 @@ render is still not sound, because nothing proves the next such fault will annou
 **The A1 blocker is retired; the A1 failures are not.** Sixteen cells are not valid on the fixed
 binary, all reproducing with identical mesh counts on both binaries. Of the seventeen recorded
 before, exactly one — `rib_into_boss` at `$fn`=12 — was the memory fault. **A1 still cannot
-pass, and now fails for reasons that are geometric.**
+pass, and now fails for reasons that are geometric.** Under the corrected criterion the true
+figure is 21, not 16; see STATE.md §9 item 2.
+
+### A1's scope — owner decision 2026-08-05
+
+**A1 is measured over the whole 353-cell sweep, and a cell may be closed as a documented
+limitation rather than fixed.** The bench grew from 24 single-point models to a `$fn` axis and
+a radius axis, and reading A1 as "all 353 cells clean, no exceptions" makes the gate
+unreachable — that reading is what the sweep would cost, not what the feature promises.
+
+A cell qualifies for closure as a limitation only on a **measurement**, never on judgement: the
+remnant's own scale, stated in millimetres, against the scale at which the solid is used. The
+worked example is `cross`'s genus at r=1.5 and 2.0, whose handles measure a **1.5 µm** throat —
+about 130× below a 0.2 mm layer, confirmed by the owner in a third-party slicer to slice as a
+single object with no visible tunnel — and which sit in one octant of a solid with full
+octahedral symmetry, which alone proves them boolean noise rather than intent.
+
+This does not soften promise 1. A false acceptance is still the defect, and a fault at a scale
+the user can reach is still work. What it settles is that a fault three orders of magnitude
+below the geometry it sits on is a release note, and that the deciding number is measured
+rather than argued. **Anything closed this way must carry its measured scale in the row that
+closes it**, so a later reader can re-open it against a different manufacturing scale rather
+than re-derive the whole question.
 
 ### A3 — why the "open bead" clause is gone
 
