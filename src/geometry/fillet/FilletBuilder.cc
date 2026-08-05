@@ -113,12 +113,16 @@ EdgeClass classifyEdge(const MergedMesh& m, const EdgeKey& key, const Tri& A, co
 
   // dot(nA, nB) alone cannot tell an inner corner from an outer one (both give
   // the same angle). Ask whether A's far corner pokes in front of B's plane.
-  int aFar = A.v[0];
+  int aFar = -1;
   for (const int k : A.v)
     if (k != key.first && k != key.second) {
       aFar = k;
       break;
     }
+  // A has no third vertex, so it is degenerate and its normal means nothing.
+  // A negative dihedral is below every threshold, which keeps it out of the
+  // feature edges rather than letting it answer "convex" by default.
+  if (aFar < 0) return {-1.0, false};
   const bool concave = B.normal.dot(m.pos[aFar] - m.pos[key.first]) > 0;
 
   return {phi, concave};
