@@ -547,16 +547,6 @@ Vector3d closestPointOnTriangle(const Vector3d& p, const Vector3d& a, const Vect
   return a + ab * (vb * denom) + ac * (vc * denom);
 }
 
-// Distance from a point to a closed segment.
-double pointSegmentDistance(const Vector3d& p, const Vector3d& a, const Vector3d& b)
-{
-  const Vector3d ab = b - a;
-  const double len2 = ab.squaredNorm();
-  if (len2 < 1e-24) return (p - a).norm();
-  const double t = std::clamp(ab.dot(p - a) / len2, 0.0, 1.0);
-  return (p - (a + t * ab)).norm();
-}
-
 }  // namespace
 
 std::vector<StationNormals> chainNormals(const MergedMesh& m,
@@ -729,27 +719,14 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
   const double dir = concave ? 1.0 : -1.0;
 
   // The walls, as surfaces rather than triangles: which triangles each is made
-  // of, and the segments that bound it. A wall's boundary is the creases around
-  // it — including the one being blended — so a ball whose nearest point on a
-  // wall lands on one of those segments has reached the end of that wall.
+  // of. The walk below needs a surface id it can trust, and this is what makes
+  // one valid.
   std::vector<std::vector<int>> surfaceTris;
   for (size_t t = 0; t < surfaceOf.size() && t < m.tris.size(); ++t) {
     if (surfaceOf[t] < 0) continue;
     if (static_cast<size_t>(surfaceOf[t]) >= surfaceTris.size())
       surfaceTris.resize(surfaceOf[t] + 1);
     surfaceTris[surfaceOf[t]].push_back(static_cast<int>(t));
-  }
-  std::vector<std::vector<EdgeKey>> surfaceRim(surfaceTris.size());
-  for (const auto& [key, ts] : adj) {
-    std::set<int> touching;
-    for (const int t : ts)
-      if (static_cast<size_t>(t) < surfaceOf.size() && surfaceOf[t] >= 0)
-        touching.insert(surfaceOf[t]);
-    // Two triangles of the same surface make an interior seam; anything else —
-    // a crease, a non-manifold edge, a border — ends the surface.
-    if (ts.size() == 2 && touching.size() == 1) continue;
-    for (const int s : touching)
-      if (static_cast<size_t>(s) < surfaceRim.size()) surfaceRim[s].push_back(key);
   }
 
   // How far a wall may turn away from the triangle the question was asked at
@@ -782,10 +759,19 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
   // about the wrong wall.
 
   auto nearestOnWall = [&](const Vector3d& p, const Vector3d& from, int startTri, int surface,
-                           double budget, Vector3d *onWall) {
+                           double budget, Vector3d *onWall, int *onTri = nullptr,
+                           std::vector<int> *tied = nullptr) {
     double best = std::numeric_limits<double>::infinity();
+    if (tied) tied->clear();
     if (surface < 0 || static_cast<size_t>(surface) >= surfaceTris.size()) return best;
     if (startTri < 0 || static_cast<size_t>(startTri) >= m.tris.size()) return best;
+
+    // Every triangle's own nearest point, kept only when the caller wants to
+    // know which of them share the contact: a ball touching a seam touches both
+    // triangles that carry it, and reading only one of them mistakes half the
+    // tessellation's own turn for a miss.
+    std::vector<std::pair<Vector3d, int>> nearby;
+    Vector3d bestQ = p;
 
     std::set<int> seen{startTri};
     std::vector<int> stack{startTri};
@@ -798,9 +784,12 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
       const Vector3d& c = m.pos[tri.v[2]];
 
       const Vector3d q = closestPointOnTriangle(p, a, b, c);
+      if (tied) nearby.emplace_back(q, t);
       if ((p - q).norm() < best) {
         best = (p - q).norm();
+        bestQ = q;
         if (onWall) *onWall = q;
+        if (onTri) *onTri = t;
       }
 
       // Measured, and walked, from the crease: a triangle out of the tool's
@@ -817,7 +806,95 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
             stack.push_back(nb);
       }
     }
+    if (tied) {
+      // A part in a million of the contact's own distance: far below anything a
+      // mesh means, and far above the last bits two computations of one seam
+      // point differ in.
+      const double join = 1e-6 * std::max(1.0, best);
+      for (const auto& [q, t] : nearby)
+        if ((q - bestQ).norm() <= join) tied->push_back(t);
+    }
     return best;
+  };
+
+  // How far the direction from the contact to the ball centre is from any
+  // direction the mesh can call "out" there. Inside a triangle that is the
+  // triangle's normal and nothing else; on a seam it is the whole fan between
+  // the normals that meet on it, because a smooth surface tessellated into those
+  // triangles has every one of those normals somewhere on the seam and a ball
+  // resting on it is tangent to that surface. Where the wall has simply ended
+  // the fan is one-sided and the direction falls outside it, which is the miss.
+  //
+  // Every angle here is taken from a cross product rather than from acos. A
+  // seated ball's answer is zero, and acos loses half its bits approaching it:
+  // it reads 1.5e-8 rad on directions that agree to the last bit, which is
+  // above the margin the gate refuses at.
+  auto angleBetween = [](const Vector3d& a, const Vector3d& b) {
+    return std::atan2(a.cross(b).norm(), a.dot(b));
+  };
+  auto angleToNormalCone = [&](const Vector3d& u, const std::vector<int>& tris) {
+    double best = M_PI;
+    for (const int t : tris) best = std::min(best, angleBetween(u, m.tris[t].normal));
+    for (size_t i = 0; i < tris.size(); ++i)
+      for (size_t j = i + 1; j < tris.size(); ++j) {
+        const Vector3d& na = m.tris[tris[i]].normal;
+        const Vector3d& nb = m.tris[tris[j]].normal;
+        Vector3d ax = na.cross(nb);
+        if (ax.norm() < 1e-12) continue;
+        ax.normalize();
+        Vector3d proj = u - u.dot(ax) * ax;
+        if (proj.norm() < 1e-12) continue;
+        proj.normalize();
+        // Only the arc between the two normals counts, not the great circle
+        // through them: past either end the nearer normal is already the answer.
+        const double span = na.dot(nb);
+        if (proj.dot(na) < span - 1e-12 || proj.dot(nb) < span - 1e-12) continue;
+        best = std::min(best, angleBetween(u, proj));
+      }
+    return best;
+  };
+
+  // The ball centre, seated against the mesh instead of against the crease's two
+  // tangent planes. The planes are exact only at the crease itself, and the
+  // contact is a whole radius away along each wall, so a wall that curves over
+  // that distance leaves the constructed centre off its true seat by the
+  // sagitta, r^2/2R — 0.43 r for a radius-10 bead on a radius-8 dome. Newton on
+  // the two distances-to-mesh puts it back: each step asks the mesh how far it
+  // is on each side and moves the centre until both are r. The third row holds
+  // the centre in the crease's own section plane, which is the only place a
+  // rolling ball's centre may sit; without it the two distance equations leave a
+  // free direction and the centre slides along the crease.
+  constexpr int kSeatIters = 12;
+  auto reseat = [&](ChainContact& c, const StationNormals& s) {
+    Vector3d t = s.nA.cross(s.nB);
+    if (t.norm() < 1e-9) return;
+    t.normalize();
+    const Vector3d C0 = c.C;
+    for (int it = 0; it < kSeatIters; ++it) {
+      const double budget = (c.C - c.v).norm() + c.radius;
+      Vector3d pA, pB;
+      const double dA = nearestOnWall(c.C, c.v, s.triA, c.surfaceA, budget, &pA);
+      const double dB = nearestOnWall(c.C, c.v, s.triB, c.surfaceB, budget, &pB);
+      if (!std::isfinite(dA) || !std::isfinite(dB)) return;
+      if (dA < 1e-12 || dB < 1e-12) return;
+      Matrix3d M;
+      M.row(0) = (c.C - pA) / dA;
+      M.row(1) = (c.C - pB) / dB;
+      M.row(2) = t;
+      // Two walls meeting at a shallow enough angle make the two rows nearly
+      // parallel and the step meaningless; the constructed seat is what stands.
+      if (std::abs(M.determinant()) < 1e-6) { c.C = C0; return; }
+      Vector3d step = M.inverse() * Vector3d(c.radius - dA, c.radius - dB, 0.0);
+      if (!step.allFinite()) { c.C = C0; return; }
+      // A step of half a radius is not a refinement of this seat, it is a jump
+      // to a different one; capping keeps the walk near the crease it started at
+      // and keeps a non-converging case bounded rather than divergent.
+      const double lim = 0.5 * c.radius;
+      if (step.norm() > lim) step *= lim / step.norm();
+      c.C += step;
+      if (step.norm() < 1e-12 * std::max(1.0, c.radius)) break;
+    }
+    if (!c.C.allFinite()) c.C = C0;
   };
 
   // Where the ball really touches one of its walls, and whether that is a touch
@@ -829,12 +906,22 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
   // the wall for its nearest point to the centre instead puts the contact on the
   // wall by construction, curved or not.
   //
-  // That also states the question exactly rather than as a distance against a
-  // tolerance: the blend leaves the surface it is meant to meet precisely when
-  // the nearest point is on the wall's boundary rather than inside it, because
-  // then the wall has ended and the ball is hanging off it. The boundary is part
-  // of the wall, so its distance is never less than the wall's own; equal is
-  // what says the contact sits on it.
+  // Whether it is a touch at all is asked of the seated ball itself: a ball of
+  // radius r seated on the crease stands exactly r off each wall, with its
+  // perpendicular foot on that wall. So build the foot and ask how far it is
+  // from the wall. Zero — to a part in 1e14 measured — is a seated ball, and a
+  // wall that has run out or curved away leaves the foot a fraction of a radius
+  // off it, measured from 0.117 r upward. That is the same question as the
+  // centre's distance d against r, since d^2 = r^2 + off^2 on a flat wall, but
+  // the difference of squares resolves nothing below about 1e-8 r while the
+  // foot is exact.
+  //
+  // Nothing here asks how far the surface extends. Which triangles are grouped
+  // into one smooth surface is decided by the crease threshold, which is a
+  // statement about user intent and not about tangency: at the default a 45
+  // degree chamfer joins the wall it sits on, so a wall with any blend already
+  // built into it reaches past everything the ball could hang off and the
+  // question can never be answered no.
   //
   // `turned` says the chain changes walls on this side at this station — the
   // spine's own corner. There the averaged normal is the average of two
@@ -850,21 +937,22 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
     // smoothly the mesh gets there.
     const double budget = (c.C - c.v).norm() + c.radius;
     Vector3d onWall;
-    const double d = nearestOnWall(c.C, c.v, tri, surface, budget, &onWall);
+    int onTri = -1;
+    std::vector<int> tied;
+    const double d = nearestOnWall(c.C, c.v, tri, surface, budget, &onWall, &onTri, &tied);
     if (!std::isfinite(d)) return;  // no wall to ask; leave the constructed point
     T = onWall;
     if (turned) return;
+    if (d < 1e-12 || tied.empty()) return;
 
-    double rim = std::numeric_limits<double>::infinity();
-    for (const EdgeKey& e : surfaceRim[surface])
-      rim = std::min(rim, pointSegmentDistance(c.C, m.pos[e.first], m.pos[e.second]));
-    if (rim > d + 1e-9 * std::max(1.0, d)) return;
-
-    // Hanging off the end of this wall. What the user can act on is how far past
-    // it the blend would stop, so report the miss of the point the bead would
-    // actually be built to.
-    c.offFace = std::max(
-      c.offFace, nearestOnWall(c.C - dir * c.radius * n, c.v, tri, surface, budget, nullptr));
+    // The seated centre stands off its contact along the wall's own outward
+    // direction. Where the wall has run out the nearest point is its last edge
+    // and the centre stands off it sideways instead, by an angle no normal there
+    // accounts for; the miss is what that angle subtends at the radius asked
+    // for, which is also the length of wall that is not there.
+    const Vector3d u = dir * (c.C - onWall) / d;
+    const double off = c.radius * std::sin(angleToNormalCone(u, tied));
+    if (std::isfinite(off)) c.offFace = std::max(c.offFace, off);
   };
 
   auto contactAt = [&](const StationNormals& s, bool turnedA = false, bool turnedB = false) {
@@ -893,6 +981,9 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
       c.surfaceB = surfaceOf[s.triB];
     c.valid = std::isfinite(r) && c.C.allFinite();
     if (c.valid) {
+      reseat(c, s);
+      c.TA = c.C - dir * r * s.nA;
+      c.TB = c.C - dir * r * s.nB;
       seatOn(c, s.nA, c.surfaceA, s.triA, c.TA, turnedA);
       seatOn(c, s.nB, c.surfaceB, s.triB, c.TB, turnedB);
     }
