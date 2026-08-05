@@ -663,6 +663,66 @@ question that threshold has to answer has narrowed to exactly one thing: is a 7.
 tessellation seam or a chamfer boundary. Route 2's refutation still stands against answering it
 with an angle alone.
 
+### The angular rule still catches the artifacts, but only below 46° — 2026-08-05
+
+The check attempt 2 never ran. It changed what is measured from a linear distance to an angular
+residual, and the whole justification for the rule is §4d's separation: blend-made ridges at
+0.117–1.004·R against genuine features at ≤9.8e-15·R, 72 of 72 and 91 of 91 caught. Measured
+now, on the same meshes and the same populations.
+
+**Instrument.** `fillet-bench/work/coneseat/cone.py`, a port of `reseat()` and `seatOn()` as
+`042bf9dff` has them — Newton in the crease section plane, then `r·sin(angle to the normal cone
+at the contact)` — run over the edge population `agent-ridge/battery.py` measured for §4d, whose
+counts it reproduces (114/72 and 114/91). **Validated on the known answer**: on
+`handblend_step`'s convex test edge at `min_angle=5` it prints **0.914457 / 0.434457 /
+5.6535e-05** at D = 0.02 / 0.5 / 0.9344 and 1.8e-15 at D=0.95 — the C++ rule's own recorded
+numbers to six figures — and ~1e-13 at the default 46°, the merged-surface answer.
+
+**At the production threshold the separation is gone.** Grouping at 46°:
+
+| population | r | genuine max | blend-made min | caught | separation |
+|---|---|---|---|---|---|
+| `cross` | 0.5 | 4.88e-15 | 9.81e-18 | **32 of 72** | 0.002× |
+| `cross` | 2.0 | 1.60e-14 | **0** | **76 of 91** | 0× |
+
+The forty and fifteen that escape do not merely fall below a threshold, they read machine zero —
+*below* the genuine maximum. No cut separates them. Same cause as everything else in this
+section: the ball rolls onto the merged wall-and-blend surface and seats there honestly.
+
+**Grouped below 45° the separation returns in full, and nothing is falsely refused.** Selection
+stays at 46°; only `smoothSurfaces` moves:
+
+| segmentation | `cross` r=0.5 | `cross` r=2.0 | separation | genuine false refusals |
+|---|---|---|---|---|
+| 46° | 32/72 | 76/91 | 0.002× / 0× | 0 |
+| 20° | **72/72** | **91/91** | 3.6e13× / 2.7e13× | **0** |
+| 10° | 72/72 | 91/91 | 4.3e13× / 3.9e13× | 22 of `cross`'s 97 concave |
+| 5° | 72/72 | 91/91 | 4.3e13× / 3.9e13× | (10°'s failure stands) |
+
+Genuine populations checked at every value, convex and concave: `cross`'s 114 cap rims and 97
+concave creases, `boss_plate`'s 38 and 26, `boss_plate` at `$fn`=8's 20 and 8, `tee`'s 48 and 12,
+`dome`'s 30, `lbracket`'s 1. All read ≤2.6e-14 at 20°.
+
+**So §4d's stated reason the split fails does not transfer, and it was specific to the rule it
+was written against.** "At 10° a `$fn`=8 cylinder's wall shatters into eight surfaces and each
+face's extent becomes one facet" is true, and it broke a test that *read extent*. The angular
+rule reads a normal cone at the contact and reads no extent, so a shattered `$fn`=8 wall costs it
+nothing: `boss_plate` at `$fn`=8 refuses none of its 20 convex or 8 concave creases at 20°, 10°
+or 5°. **Route 2's refutation is untouched** — it is about the classifier, and selection stays a
+constant 46°.
+
+**The floor is real and it is the model's own facet angle.** At 10° `cross`'s 12° cylinder seams
+become surface boundaries and 22 of its 97 genuine concave creases are refused, worst 0.32.
+Segmentation must sit above the tessellation's seam and below 45°; 20° is the only value
+measured clean on both sides, and it is the value `FilletBuilder_test.cc:2176` already hardcodes.
+**Not measured:** anything between 20° and 45°, and the `$fa`-default seam of a model finer than
+`cross`'s 12° — a solid tessellated at more than 20° per facet would fail this the way `cross`
+fails at 10°, and `$fn`=8's 45° seam is exactly such a solid. That it passes anyway is measured,
+not explained.
+
+**All of this is offline Python on exported meshes.** It does not include the gate's chain
+sampling, its end and junction exemptions, the averaged station normals, or the brushes.
+
 ## 5. Open defects
 
 | defect | state |
