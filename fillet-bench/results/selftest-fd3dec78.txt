@@ -1,0 +1,72 @@
+binary: /private/tmp/claude-501/-Users-kerem-Devel-openscad/86517c18-0145-4bf3-879b-972815bd1c7a/scratchpad/pin-adf2beef/OpenSCAD.app/Contents/MacOS/OpenSCAD
+        built Aug  5 14:51:20 2026
+flags:  --enable=fillet --backend=manifold
+reader: exact ASCII STL, OFF read alongside and compared
+weld:   1e-6
+runs:   3 per cell
+*** 567 SOURCE FILES ARE NEWER THAN THE BINARY -- these numbers are about the old build ***
+../src/handle_dep.h
+../src/version.h
+../src/core/OffsetNode.h
+../src/core/ColorUtil.cc
+../src/core/progress.h
+
+the reader's synthetic controls
+    PASS  cube: VALID v=8 e=12 f=6 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06
+    PASS  torus: VALID v=128 e=256 f=128 comp=1 bnd=0 nonman=0 nmvert=0 chi=0 genus=1 tol=1e-06
+    PASS  two disjoint cubes, comp declared 1: INVALID v=16 e=24 f=12 comp=2 bnd=0 nonman=0 nmvert=0 chi=4 genus=0 tol=1e-06 (wanted comp=1) smallest=6f 1x1x1mm at (0.5,0.5,0.5)
+    PASS  two disjoint cubes, comp declared 2: VALID v=16 e=24 f=12 comp=2 bnd=0 nonman=0 nmvert=0 chi=4 genus=0 tol=1e-06 smallest=6f 1x1x1mm at (0.5,0.5,0.5)
+    PASS  two cubes at ONE SHARED VERTEX (the pinch): INVALID CHI-ODD v=15 e=24 f=12 comp=2 bnd=0 nonman=0 nmvert=1 chi=3 genus=n/a tol=1e-06 (wanted comp=1) pinch@(1,1,1) smallest=6f 1x1x1mm at (0.5,0.5,0.5)
+    PASS  two cubes at ONE SHARED EDGE: INVALID CHI-ODD v=14 e=23 f=12 comp=1 bnd=0 nonman=1 nmvert=0 chi=3 genus=n/a tol=1e-06
+    PASS  three cubes chained at corners (two pinches, even chi): INVALID v=22 e=36 f=18 comp=3 bnd=0 nonman=0 nmvert=2 chi=4 genus=n/a tol=1e-06 (wanted comp=1) pinch@(1,1,1)+1more smallest=6f 1x1x1mm at (0.5,0.5,0.5)
+    PASS  the pinch is located at (1,1,1), the shared corner
+    PASS  a closed cube's cyclic vertex fans are one fan each
+    PASS  a 4 mm torus hole survives every weld tried and reports no throat
+    PASS  a 0.0002 mm torus hole reads throat<=0.001 mm
+  
+  MESH.PY SELFTEST PASSED. 11 controls, weld tolerance 1e-06.
+known answers -- rib_into_boss across $fn (nondeterministic model)
+  PASS  rib_into_boss fn=11 -> INVALID nonman=2 nmvert=0 chi=3 comp=1/1 tol=1e-6 (3 runs)
+  PASS  rib_into_boss fn=25 -> INVALID nonman=4 nmvert=0 chi=5 comp=1/1 tol=1e-6 (3 runs)
+  PASS  rib_into_boss fn=32 -> INVALID nonman=4 nmvert=0 chi=4 comp=1/1 tol=1e-6 (3 runs)
+  PASS  rib_into_boss fn=26 -> VALID nonman=0 nmvert=0 chi=2 comp=1/1 tol=1e-6 (3 runs)
+  PASS  rib_into_boss fn=48 -> VALID nonman=0 nmvert=0 chi=2 comp=1/1 tol=1e-6 (3 runs)
+known answers -- refused_neighbour across r (deterministic model)
+  PASS  refused_neighbour r=0.2 -> INVALID nonman=1 nmvert=0 chi=2 comp=1/1 tol=1e-6 (3 runs)
+  PASS  refused_neighbour r=0.8 -> INVALID nonman=1 nmvert=0 chi=2 comp=1/1 tol=1e-6 (3 runs)
+  PASS  refused_neighbour r=0.9 -> INVALID nonman=1 nmvert=0 chi=2 comp=1/1 tol=1e-6 (3 runs)
+  PASS  refused_neighbour r=0.95 -> INVALID nonman=2 nmvert=0 chi=2 comp=1/1 tol=1e-6 (3 runs)
+  PASS  refused_neighbour r=1.0 -> INVALID nonman=1 nmvert=0 chi=2 comp=1/1 tol=1e-6 (3 runs)
+  PASS  refused_neighbour r=1.05 -> INVALID nonman=2 nmvert=0 chi=2 comp=1/1 tol=1e-6 (3 runs)
+  PASS  refused_neighbour r=0.3 -> VALID nonman=0 nmvert=0 chi=2 comp=1/1 tol=1e-6 (3 runs)
+  PASS  refused_neighbour r=0.5 -> VALID nonman=0 nmvert=0 chi=2 comp=1/1 tol=1e-6 (3 runs)
+  PASS  refused_neighbour r=1.2 -> VALID nonman=0 nmvert=0 chi=2 comp=1/1 tol=1e-6 (3 runs)
+known answers -- the debris the old criterion could not see
+  PASS  tee r=0.5 is two pinches, not a handle -- valid=INVALID nmvert=2 nonman=0 comp=3 genus=n/a chi=4
+  PASS  tee_small sheds a detached fragment (defaults) -- valid=INVALID comp=2 nmvert=0 nonman=0
+  PASS  tee_small sheds it at $fn=10 too -- valid=INVALID comp=2
+  PASS  tee_small sheds it at r=1.5 too -- valid=INVALID comp=2
+  PASS  cross r=0.9 sheds a shard outside the body -- valid=INVALID comp=2 nmvert=0 nonman=0
+  PASS  tee r=0.9 is one pinch, located -- valid=INVALID nmvert=1 chi=3 genus=n/a
+  PASS  tee_oblique r=0.2 is one pinch -- valid=INVALID nmvert=1
+  PASS  tee_oblique r=0.3 is one pinch -- valid=INVALID nmvert=1
+  PASS  tee_oblique r=0.8 is one pinch -- valid=INVALID nmvert=1
+  PASS  shallow_crease legitimately renders two plates -- valid=VALID comp=2 nmvert=0
+  PASS  cross r=2.0 genus 4 is real, and micron-scale -- valid=VALID genus=4 comp=1 nmvert=0
+  PASS  cross r=2.0 handles close under a 0.01mm weld -- micron-scale, 20x under a 0.2 mm layer
+  PASS  hole_plate's genus 1 survives every weld the tessellation allows, as a real hole must
+the determinism pair -- neither model may return two meshes
+  PASS  rib_into_boss fn=32 gave one mesh across 16 runs, as it must since the seam-vertex read was fixed
+  PASS  refused_neighbour r=0.9 was deterministic across 3 runs, as it should be
+the OFF exporter loses precision; it must be seen, and must not change the verdict
+  PASS  refused_neighbour r=0.8: the OFF loses a vertex and the harness sees it
+  PASS  refused_neighbour r=0.8: OFF and STL still reach the same verdict
+plumbing -- the axes must move the mesh
+  PASS  -D FNSET reaches the model (cyl_control v: 96 at 12, 1248 at 48)
+  PASS  -D R reaches the model (refused_neighbour v: 356 at 0.5, 358 at 0.9)
+self-proof -- a facet rotation is a rigid motion
+  PASS  selfproof fn=16 rot 0 == rot 1: VALID v=332 e=990 f=660 chi=2 nonman=0 nmvert=0 comp=1
+  PASS  selfproof fn=24 rot 0 == rot 1: VALID v=656 e=1962 f=1308 chi=2 nonman=0 nmvert=0 comp=1
+  PASS  selfproof fn=32 rot 0 == rot 1: VALID v=1096 e=3282 f=2188 chi=2 nonman=0 nmvert=0 comp=1
+
+SELFTEST PASSED. Weld tolerance 1e-6.

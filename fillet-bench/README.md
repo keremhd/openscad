@@ -64,8 +64,66 @@ Models carrying no curvature render once; `expect.txt` marks them `-`.
 |---|---|
 | `bnd` | edges on exactly one face — an open surface. **Identically zero on anything this pipeline exports; see below.** |
 | `nonman` | edges on more than two faces |
+| `nmvert` | **pinched vertices**: a vertex whose incident faces form two or more edge-connected fans. The surface touches itself at a point |
+| `comp` | connected components, against the number the model's source builds (`--comp`, default 1) |
 | `chi` | Euler characteristic. **Odd is a proof of invalidity**, not a measurement — no closed orientable surface has one |
-| `genus` | reported only when the mesh is closed and orientable |
+| `genus` | reported only when the mesh is closed, orientable **and unpinched** |
+| `throat` | beside a nonzero genus: how narrow the handle is, by proxy |
+
+### The criterion was wrong until 2026-08-05, and it was wrong by omission
+
+It checked non-manifold *edges* and never non-manifold *vertices*, and printed a
+`genus` regardless. A surface pinched at a point has **no** offending edge — every
+edge at the pinch is still carried by exactly two faces — so it announced itself
+only through χ parity, which is a coin flip on the pinch count. `tee` at r=0.5 has
+**two** point-attached slivers and no tunnel anywhere, and read `VALID χ=4 genus=1
+comp=3`. Four changes, all in the criterion and none of them the tolerance:
+
+1. **`nmvert`**, its own count, located on the output line. A vertex's incident
+   faces are joined when an edge *at that vertex* carries both; more than one
+   group is more than one fan. A closed surface's fan is a cycle rather than an
+   open strip and the check does not care — it counts fans, not their shape.
+2. **`genus` is suppressed when `nmvert` is nonzero**, as it already was for
+   `bnd`/`nonman`. A pinched surface is not a closed orientable one and its genus
+   is a number with no referent.
+3. **`comp` is compared against what the model builds.** A single-union model
+   returning two components has shed a fragment — `tee_small` sheds a fully
+   detached 6-triangle 0.35 × 0.10 × 0.40 mm piece that shares *no* vertex with
+   the body, and `cross` at r=0.9 a 4-triangle shard of 3.45e-7 mm³ floating
+   outside the solid. The expectation is **declared by the model**, in a
+   `// mesh.py-comp: N` line that `sweep.sh` reads; `shallow_crease` declares 2
+   because it renders two plates on purpose, and its nine `comp=2` rows stay
+   green. Nothing is hardcoded in the reader.
+4. **`throat` beside a nonzero genus**, so a 1.5 µm handle is not weighed the same
+   as a 0.4 mm loose sliver. Implemented as a **proxy, and it says so**: the first
+   weld tolerance on a decade ladder at which the genus stops being what it was,
+   capped at the median edge length so the weld is closing throats and not
+   facets. `throat<=0.01mm` reads *these handles do not survive welding at
+   0.01 mm*; a hole the model is meant to have survives every weld tried and
+   reports nothing at all. `cross` r=1.5 and r=2.0 read `throat<=0.01mm`, against
+   the 1.5 µm ball-removal throat and a 0.2 mm layer. `hole_plate`'s genus 1 —
+   same genus, same every other number — reports no throat at all, at all twenty
+   of its cells. The exact instrument is the shortest non-contractible cycle and
+   it is not worth its cost here.
+
+   **Two narrower-looking definitions were tried first and both were wrong**, in
+   opposite directions, and the pair is why the selftest asserts `cross` and
+   `hole_plate` together rather than either alone. The closest pair of vertices
+   sharing no face read 0.0015 mm on `hole_plate` — it was measuring facet
+   spacing across a fillet seam. Adding a six-hop separation test to that read
+   0.84 mm on `cross`, because a handle narrower than a facet has its two sides
+   one hop apart, so the test blinded the instrument to exactly what it was added
+   for. Welding is the one test that scales with the handle rather than with the
+   tessellation.
+
+A mesh is **VALID** when `bnd == 0`, `nonman == 0`, `nmvert == 0`, χ is even, and
+`comp` is what the model declares. `./mesh.py --selftest` runs the synthetic
+controls — a cube, a torus, two disjoint cubes under both declarations, two cubes
+meeting at exactly one vertex, two cubes sharing exactly one edge, three cubes
+chained corner to corner (which reproduces `tee` r=0.5's exact signature, χ=4
+comp=3 and no non-manifold edge, from arithmetic alone), and a pair of tori whose
+holes are 4 mm and 0.0002 mm and which differ in no other number. `sweep.sh
+--selftest` runs it before it renders anything.
 
 ### `bnd` cannot fire here, and this README used to say it could
 
@@ -283,6 +341,11 @@ seam-vertex fix), exact ASCII STL, weld 1e-6, 3 renders per cell aggregated to
 the worst outcome. **16 cells are not valid**, and **no cell disagreed with
 itself** — `distinct` is 1 on all 353, against 14 cells at 2 before the fix.
 
+> **This table is the criterion that had no pinched-vertex check.** It is kept
+> because the twelve edge faults in it are unchanged and because the diff against
+> it is how the five missed cells were counted. The true failure list is 21 cells
+> and it is the section below.
+
 | model | fn | r | outcome | nonman | chi | warn |
 |---|---|---|---|---|---|---|
 | `boss_plate` | 8 | own | INVALID | 8 | 6 | 0 |
@@ -301,6 +364,52 @@ itself** — `distinct` is 1 on all 353, against 14 cells at 2 before the fix.
 | `refused_neighbour` | def | 0.8 | INVALID | 1 | 2 | 2 |
 | `refused_neighbour` | def | 0.9 | INVALID | 1 | 2 | 2 |
 | `refused_neighbour` | def | 1.0 | INVALID | 1 | 2 | 2 |
+
+### What the corrected criterion found — 21 cells, 2026-08-05
+
+The table above is what the **old** criterion saw. The same 353 cells, re-swept on
+one pinned binary (`md5 fd3dec78`, the same source tree as `11b6b3b1`), exact
+ASCII STL, weld 1e-6, 3 renders per cell aggregated to the worst outcome:
+`results/sweep-fd3dec78.tsv`, diffed in
+`results/sweep-compare-11b6b3b1-vs-fd3dec78.txt`.
+
+**21 cells are not valid, not 16.** No cell went the other way — nothing the old
+criterion called invalid is valid under the new one — and `distinct` is 1 on all
+353 again.
+
+**Five cells newly fail**, all of them debris the old criterion had no check for:
+
+| model | fn | r | why it now fails |
+|---|---|---|---|
+| `tee` | def | 0.5 | **2 pinched vertices**, comp 3. Two point-attached slivers, 4 and 8 triangles, at (1.913417162, ∓4.619397663, 8.086582838). It read `VALID χ=4 genus=1 comp=3`: two pinches make an even χ, and there is no tunnel anywhere for that genus to describe |
+| `tee_small` | def | def | a **fully detached** 6-triangle fragment, 0.35 × 0.10 × 0.40 mm, sharing zero vertices with the body |
+| `tee_small` | 10 | def | the same fragment, same size |
+| `tee_small` | def | 1.5 | the same fault, 0.79 × 0.25 × 0.79 mm |
+| `cross` | def | 0.9 | a detached 4-triangle shard, 0.044 × 0.108 × 0.057 mm at (4.5797, −5.0608, −3.8475), outside the solid |
+
+**Four cells keep their verdict and change their reason** — the χ-odd family,
+`tee` at r=0.9 and `tee_oblique` at r 0.2/0.3/0.8. Each is now reported as one
+pinched vertex *with its coordinates*, rather than as an odd Euler characteristic;
+parity was the symptom and the pinch is the fault. For `tee` the pinch is at
+(1.913417162, −4.619397663, 8.086582838), the same vertex at every radius.
+
+**The other twelve are unchanged in verdict and in reason**: the `$fn`=8 family
+(`boss_plate`, `hole_plate`, `two_bosses`, `dome`, `pipe_into_face`), `cross` at
+r=0.3, `refused_neighbour` at r 0.2/0.8/0.9/1.0, and `rib_into_boss` at `$fn` 14
+and 32. All are non-manifold *edges*, which the old criterion did see.
+
+Two things that did **not** move, and both were checked rather than assumed:
+
+- **`shallow_crease`'s nine `comp=2` rows stay green.** The model declares
+  `// mesh.py-comp: 2` in its own source, because it renders two plates on
+  purpose. Nothing else in the bench declares anything.
+- **`cross` at r=1.5 and r=2.0 stay valid**, genus 2 and 4, now carrying
+  `throat<=0.01mm` — the handles do not survive a 0.01 mm weld, i.e. they are
+  micron-scale boolean noise 20× under a print layer. `hole_plate`'s genus 1, at
+  every one of its twenty cells, survives every weld the tessellation allows: it
+  is the hole the plate is named for. Same genus, same every other number,
+  opposite meanings, and until this column existed nothing in the table
+  distinguished them.
 
 ### Which of these were the memory bug: one of them
 
