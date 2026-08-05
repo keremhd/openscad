@@ -3327,11 +3327,10 @@ std::shared_ptr<const Geometry> buildFilletTool(
 
   // debug = true swaps the tool solid for a visualization: colored markers along
   // every edge (concave/convex/rejected), plus the spine's per-vertex tangency
-  // frame (ball center and the two tangency points) walked from the selected
-  // edges. It is off by default because those markers are hundreds of disjoint
-  // cubes rather than one solid, and anything downstream that expects a
-  // well-formed mesh — Minkowski, which falls back to CGAL's Nef kernel, above
-  // all — either grinds for minutes or dies on them.
+  // frame walked from the selected edges. Off by default because those markers are
+  // hundreds of disjoint cubes rather than one solid, and anything downstream that
+  // expects a well-formed mesh — Minkowski above all, which falls back to CGAL's
+  // Nef kernel — either grinds for minutes or dies on them.
   if (node.debug) {
     std::vector<SpineFrame> frames;
     for (const Chain& chain : chains) {
@@ -3355,12 +3354,11 @@ std::shared_ptr<const Geometry> buildFilletTool(
     return nullptr;
   }
 
-  // An empty tool is byte-for-byte what an operator that did nothing at all
-  // would return, so selecting nothing has to be said out loud rather than left
-  // for the user to infer from a model that did not change. Two ways to get
-  // here, and the message separates them: a target with no crease sharp enough
-  // at this tessellation, and — far more likely — a tool of the wrong sign,
-  // since the edges the other one takes are right there in the count.
+  // An empty tool is indistinguishable from an operator that did nothing, so
+  // selecting nothing is said out loud. Two ways to get here, and the message
+  // separates them: a target with no crease sharp enough at this tessellation, and
+  // — more likely — a tool of the wrong sign, since the edges the other one takes
+  // are in the count.
   if (selected == 0) {
     const size_t others = wantConcave ? c.featureConvex : c.featureConcave;
     const char *sibling = type == FilletType::FILLET    ? "round_tool"
@@ -3368,11 +3366,10 @@ std::shared_ptr<const Geometry> buildFilletTool(
                           : type == FilletType::ROUND   ? "fillet_tool"
                                                         : "chamfer_tool";
     // fillet() builds both signs from the one target, so "no concave edge" on a
-    // convex model is its ordinary case and says nothing worth hearing — the
-    // other half is doing the work. Two things are still worth hearing, and the
-    // second is the reason this is not simply silence: a half left to work alone
-    // is the whole operator, so when the creases all turn the other way that
-    // node does nothing at all, and the switch that would fix it is named.
+    // convex model is its ordinary case and is not worth reporting — the other half
+    // is doing the work. A half left to work alone is the whole operator, though,
+    // so if its creases all turn the other way the node does nothing at all and the
+    // switch that would fix it is named.
     if (node.type == FilletType::APPLY) {
       // Exactly one half enabled; only that half reaches here, so this cannot
       // fire twice.
@@ -3404,33 +3401,25 @@ std::shared_ptr<const Geometry> buildFilletTool(
   }
 
   // The brushes narrow what is built to the stretches of crease they cover. They
-  // are asked about the spine rather than about the tool's volume, so what comes
-  // back is a set of parameter intervals and the bead ends on a flat cap square
-  // to the crease, at a fixed physical point that does not move when the target
-  // is retessellated.
+  // are asked about the spine rather than the tool's volume, so what comes back is
+  // a set of parameter intervals and the bead ends on a flat cap square to the
+  // crease, at a fixed physical point that survives retessellation.
   //
-  // This comes before the size gate, so that the gate is asked about the bead
-  // that is actually going to be built. Whether the blend still meets the
-  // surface it is meant to meet is a question about a place on the crease, and
-  // selecting half of one genuinely does change the answer: the half that runs
-  // off the end of its face is not being built, and refusing the half that fits
-  // — with a warning naming a crease the user never picked out — is refusing
-  // work nobody asked for.
+  // Before the size gate, so the gate is asked about the bead actually being built:
+  // whether the blend still meets its surface is a question about a place on the
+  // crease, and selecting half of one changes the answer.
   std::vector<Chain> usable = chains;
   // The corners a brush reached without covering. They get no cell, the same way
   // they get none of the stretches that ran into them.
   std::set<int> noCorner;
   if (brush && !brush->isEmpty()) {
     const BrushVolume volume(brush->getManifold().GetMeshGL64());
-    // A brush face nearly tangent to the spine crosses it twice a hair apart.
-    // The stub that would leave is never intentional, and a hundredth of the
-    // size is far below any bead a user would ask for by hand. It is a debounce
-    // and nothing else: it applies only where the brush cut the stretch it is
-    // measuring, never to a crease selected end to end, whose length is the
-    // model's business and not the brush's. Nothing else rests on the value —
-    // what makes the one-edge-only selection of the documentation reachable is
-    // dropUncoveredCorners below, which drops the neighbouring stubs whatever
-    // this is set to.
+    // A brush face nearly tangent to the spine crosses it twice a hair apart, and
+    // the stub that would leave is never intentional; a hundredth of the size is
+    // far below any bead asked for by hand. A debounce and nothing else: it applies
+    // only where the brush cut the stretch it is measuring, never to a crease
+    // selected end to end. Nothing else rests on the value — the one-edge-only
+    // selection comes from dropUncoveredCorners below, whatever this is set to.
     const double debounce = 0.01 * node.size;
 
     std::vector<Chain> selected;
@@ -3451,13 +3440,11 @@ std::shared_ptr<const Geometry> buildFilletTool(
       selected.push_back(std::move(chain));
     }
 
-    // A corner the selection arrives at without covering the stretch a corner
-    // cell occupies gets neither the cell nor the stretches that would have met
-    // in it. What comes back is the corners where that took everything, which is
-    // the one case where a brush drawn around a corner is answered with nothing:
-    // the neighbour stubs a brush along one edge clips off its corners go the
-    // same way and are silent, since that is the rule working. The wedge tools
-    // build no corner cell, so nothing there overshoots and nothing is dropped.
+    // A corner the selection arrives at without covering the stretch a corner cell
+    // occupies gets neither the cell nor the stretches that would have met in it.
+    // What comes back is the corners where that took everything; neighbour stubs a
+    // brush along one edge clips off go the same way and are silent, since that is
+    // the rule working. The wedge tools build no corner cell and drop nothing.
     const std::vector<int> uncovered =
       isWedgeOnly ? std::vector<int>{}
                   : dropUncoveredCorners(m, selected, chains, node.size, &noCorner);
@@ -3488,11 +3475,10 @@ std::shared_ptr<const Geometry> buildFilletTool(
           }
     }
 
-    // Only blame the brush when there was something for it to miss. A target
-    // with no crease of this sign has already said so and returned, so what is
-    // left here is a brush that really did cover none of them — unless the
-    // corners above took the last of it, which has already been reported and in
-    // more detail than "the brush covers none".
+    // Only blame the brush when there was something for it to miss. A target with
+    // no crease of this sign has already returned, so what is left is a brush that
+    // really covered none — unless the corners above took the last of it, which has
+    // already been reported in more detail.
     if (selected.empty() && candidates > 0 && uncovered.empty())
       LOG(message_group::Warning, node.modinst->location(), "",
           "%1$s: the selection brush covers none of the %2$d candidate edge(s); nothing is built "
@@ -3506,11 +3492,10 @@ std::shared_ptr<const Geometry> buildFilletTool(
     usable = std::move(selected);
   }
 
-  // A size the feature cannot carry is refused, one crease at a time, and never
-  // quietly resized: a clamp would have to be agreed with every crease this one
-  // meets, and following that through runs a minimum over the whole connected
-  // network, so one tight corner would shrink a fillet on the far side of the
-  // part where nobody is looking.
+  // A size the feature cannot carry is refused per crease, never quietly resized: a
+  // clamp would have to be agreed with every crease this one meets, and following
+  // that through runs a minimum over the whole connected network, so one tight
+  // corner would shrink a fillet on the far side of the part.
   const std::vector<SizeVerdict> verdicts =
     checkChainSizes(m, adj, usable, node.size, wantConcave, isWedgeOnly, thresholdDeg);
   std::vector<Chain> fitting;
@@ -3528,11 +3513,8 @@ std::shared_ptr<const Geometry> buildFilletTool(
       continue;
     }
     ++refused;
-    // The one worth leading with is the one that misses by the most: it is the
-    // crease to look at first, and on a target with many it is the one whose
-    // size the caller most likely meant to ask about. The rest are named after
-    // it — a refusal the user cannot locate is a refusal they cannot answer, and
-    // the count alone locates none of them.
+    // Lead with the one that misses by the most: it is the crease to look at first.
+    // The rest are named after it, since the count alone locates none of them.
     if (!worst || verdict.amount > worst->amount) worst = &verdict;
     if (named < kMaxNamedRefusals) {
       if (named) refusedAt += ", ";
@@ -3541,10 +3523,8 @@ std::shared_ptr<const Geometry> buildFilletTool(
       ++named;
     }
   }
-  // One line however many creases went, because a crease is refused per crease
-  // and read per model. A target that refuses one is a size to reconsider; a
-  // target that refuses thirty is the same message thirty times, and the count
-  // is the part that was not already obvious.
+  // One line however many creases went: a crease is refused per crease but read per
+  // model, and thirty separate lines would be the same message thirty times.
   if (worst) {
     const std::string why =
       worst->fault == SizeFault::OffFace
@@ -3567,11 +3547,10 @@ std::shared_ptr<const Geometry> buildFilletTool(
   }
   usable = std::move(fitting);
 
-  // A corner the solve refuses — walls too nearly parallel to pin a point down,
-  // or a ball seated so far from the vertex that the answer is not a corner of
-  // this feature at all — gets no corner cell, and the blends that meet there
-  // fade out to the sharp vertex instead. Say so: the shape is valid but it is
-  // not the constant-radius blend that was asked for.
+  // A corner the solve refuses — walls too nearly parallel to pin a point down, or
+  // a ball seated so far from the vertex that it is not a corner of this feature —
+  // gets no cell, and the blends there fade out to the sharp vertex. Worth saying:
+  // the shape is valid but not the constant-radius blend that was asked for.
   if (!isWedgeOnly)
     for (const Junction& j : chainJunctions(m, adj, usable, node.size, wantConcave, noCorner))
       if (j.ballCentres.empty())
