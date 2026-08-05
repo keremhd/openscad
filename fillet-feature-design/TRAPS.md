@@ -92,12 +92,6 @@ refusal counts beside every number. One reported win was byte-identical inertnes
     touch. The four models that would actually prove the geometry are slated for deletion before
     merge — do not delete them without a replacement.
 
-21. **`acos` cannot measure an angle that is supposed to be zero.** It loses half its bits
-    there: `acos(clamp(a.dot(b)))` reads **1.5e-8 rad** on two unit vectors that agree to the
-    last bit, and a gate whose refusal margin is 1e-9 refuses on that alone — it took
-    `boss_plate` and `dome`, both previously untouched, at 2.98e-08 and 2.24e-08. Use
-    `atan2(a.cross(b).norm(), a.dot(b))`, which is exact near zero and near pi both.
-
 ## Instruments found broken
 
 | # | instrument | what was wrong |

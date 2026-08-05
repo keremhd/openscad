@@ -24,6 +24,8 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <limits>
 #include <functional>
 #include <map>
@@ -865,6 +867,7 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
   // rolling ball's centre may sit; without it the two distance equations leave a
   // free direction and the centre slides along the crease.
   constexpr int kSeatIters = 12;
+  static const bool seatDump = std::getenv("FILLET_SEAT_DUMP") != nullptr;
   auto reseat = [&](ChainContact& c, const StationNormals& s) {
     Vector3d t = s.nA.cross(s.nB);
     if (t.norm() < 1e-9) return;
@@ -892,6 +895,9 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
       const double lim = 0.5 * c.radius;
       if (step.norm() > lim) step *= lim / step.norm();
       c.C += step;
+      if (seatDump)
+        std::fprintf(stderr, "RESEAT it=%d dA=%.9g dB=%.9g r=%.9g step=%.9g\n", it, dA, dB,
+                     c.radius, step.norm());
       if (step.norm() < 1e-12 * std::max(1.0, c.radius)) break;
     }
     if (!c.C.allFinite()) c.C = C0;
@@ -952,6 +958,9 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
     // for, which is also the length of wall that is not there.
     const Vector3d u = dir * (c.C - onWall) / d;
     const double off = c.radius * std::sin(angleToNormalCone(u, tied));
+    if (seatDump)
+      std::fprintf(stderr, "SEAT v=%.6f,%.6f,%.6f d=%.9g r=%.9g tied=%zu off=%.9g\n", c.v.x(),
+                   c.v.y(), c.v.z(), d, c.radius, tied.size(), off);
     if (std::isfinite(off)) c.offFace = std::max(c.offFace, off);
   };
 
