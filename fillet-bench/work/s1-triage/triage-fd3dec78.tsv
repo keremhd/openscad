@@ -1,0 +1,37 @@
+# S1 triage of the 21 not-valid cells of results/sweep-fd3dec78.tsv.
+# Binary md5 fd3dec78, pinned aside before measuring; STLs in stl/, raw
+# instrument output in remnant-fd3dec78.txt, instrument in remnant.py
+# (four known answers reproduced before any new cell was read).
+# Weld tolerance 1e-6 throughout. Scales are millimetres.
+#
+# THE CUT between a documented limitation and a known defect, applied
+# uniformly: a cell closes as a limitation only when its remnant has a
+# measured extent that is both under 10 um absolute -- an order below the
+# finest manufacturing resolution in common use -- and at least three orders
+# below the solid it sits on. That is what the two worked precedents read
+# (cross's 1.5 um throat in a 40 mm solid, refused_neighbour's 0.34 um
+# sliver in a 33 mm one). A remnant with no extent to measure -- a
+# zero-thickness membrane -- cannot be closed on a measurement at all and
+# ships as a defect.
+model	fn	r	nonman	chi	comp	nmvert	remnant	remnant_mm	model_mm	verdict
+tee	def	0.5	0	4	3	2	two slivers attached at one vertex each, 4f and 8f	0.267 and 0.438 diag; vol 2.9e-15 and 1.2e-15 mm^3	26.9	known defect
+tee	def	0.9	0	3	2	1	4-triangle tetrahedral sliver attached at one vertex	0.590 diag (0.378 x 0.137 x 0.433)	26.9	known defect
+tee_oblique	def	0.2	0	3	2	1	4-triangle sliver attached at one vertex	0.0679 diag	27.3	known defect
+tee_oblique	def	0.3	0	3	2	1	4-triangle sliver attached at one vertex	0.203 diag	27.3	known defect
+tee_oblique	def	0.8	0	3	2	1	4-triangle sliver attached at one vertex	0.430 diag	27.2	known defect
+tee_small	def	def	0	4	2	0	fully detached 6-triangle fragment, shares no vertex	0.353 x 0.101 x 0.401, diag 0.544	18.7	known defect
+tee_small	10	def	0	4	2	0	the same detached fragment	0.353 x 0.101 x 0.401, diag 0.544	18.7	known defect
+tee_small	def	1.5	0	4	2	0	the same fragment, grown with R	0.785 x 0.253 x 0.785, diag 1.139	18.8	known defect
+cross	def	0.3	1	3	1	0	sliver wedge on 4 faces at a bead-bead tangency	0.0799 across; smallest triangle 3.7e-6 mm^2	69.3	known defect
+cross	def	0.9	0	4	2	0	detached 4-triangle shard, winding number 0, outside the solid	0.130 diag; 3.45e-7 mm^3	69.3	known defect
+boss_plate	8	def	8	6	1	0	zero-area duplicate triangle pair along the rim tangency line	no thickness; spans 36.0; bead overrun 2.0e-3	60.0	known defect
+hole_plate	8	def	8	4	1	0	zero-area duplicate triangle pair along the rim tangency line	no thickness; spans 37.0; bead overrun 1.5e-3	57.4	known defect
+two_bosses	8	def	6	5	1	0	zero-area duplicate triangle pairs, three of them	no thickness; spans 37.0 and 47.0; bead overrun 1.5e-3	66.5	known defect
+dome	8	def	4	4	1	0	zero-area duplicate triangle pair along the rim tangency line	no thickness; spans 37.0; bead overrun 1.5e-3	59.1	known defect
+pipe_into_face	8	def	2	3	1	0	zero-area duplicate triangle pair along the rim tangency line	no thickness; spans 38.0; bead overrun 1.0e-3	63.5	known defect
+rib_into_boss	14	def	3	4	1	0	duplicate triangle pair, opposite orientation, at a section plane	no thickness; membrane 0.439 across	87.2	known defect
+rib_into_boss	32	def	4	4	1	0	duplicate triangle pair, opposite orientation, at a section plane	no thickness; membrane 0.448 across	87.2	known defect
+refused_neighbour	def	0.2	1	2	1	0	sliver wedge on 4 faces at a bead-bead tangency	7.35e-5 across; smallest triangle 7.3e-9 mm^2	32.9	documented limitation
+refused_neighbour	def	0.8	1	2	1	0	sliver wedge on 4 faces at a bead-bead tangency	4.05e-3 across; smallest triangle 1.6e-6 mm^2	32.8	documented limitation
+refused_neighbour	def	0.9	1	2	1	0	sliver wedge on 4 faces at a bead-bead tangency	3.37e-4 across; smallest triangle 1.5e-7 mm^2	32.8	documented limitation
+refused_neighbour	def	1.0	1	2	1	0	sliver wedge on 4 faces at a bead-bead tangency	3.75e-4 across; smallest triangle 1.9e-7 mm^2	32.8	documented limitation

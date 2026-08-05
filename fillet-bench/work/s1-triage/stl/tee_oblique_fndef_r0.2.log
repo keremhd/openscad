@@ -1,0 +1,11 @@
+WARNING: fillet: radius 0.2 does not fit 2 of the 5 crease(s) selected; the worst is at [3.528, 3.559, 6.983] - the blend would leave the surface it is meant to meet, by 0.169096. Dropped at: [3.52836, 3.55875, 6.98337], [3.52836, -3.55875, 6.98337] in file models/tee_oblique.scad, line 5
+Geometries in cache: 4
+Geometry cache size in bytes: 11488
+CGAL Polyhedrons in cache: 2
+CGAL cache size in bytes: 71500
+Total rendering time: 0:00:00.034
+   Top level object is a 3D object (manifold):
+   Status:     NoError
+   Genus:      -1
+   Vertices:      222
+   Facets:        436

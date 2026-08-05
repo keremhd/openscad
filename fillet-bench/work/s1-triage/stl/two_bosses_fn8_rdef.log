@@ -1,0 +1,11 @@
+WARNING: fillet: radius 1.5 does not fit 30 of the 44 crease(s) selected; the worst is at [1.754, 6.241, 5.315] - the blend would leave the surface it is meant to meet, by 3.85335. Dropped at: [-12.87, -5.71858, 3.00238], [-12.87, 5.71858, 3.00238], [-7.89441, -8.47553, 3.00371], [-7.89441, 8.47553, 3.00371], [-3.98685, -7.16613, 4.4677], [-3.98685, 7.16613, 4.4677], [-2.41088, -7.92538, 3], [-2.41088, 7.92538, 3], [-0.48661, -7.50583, 3.24337], [-1.75449, -6.24145, 5.31473], [-2.31607, -7.13027, 9.20391], [-2.17567, -6.90806, 15], [-1.75449, 6.24145, 5.31473], [-0.48661, 7.50583, 3.24337], [-2.31607, 7.13027, 9.20391], [1.75449, -6.24145, 5.31473], [1.75449, 6.24145, 5.31473], [0.48661, -7.50583, 3.24337], [0.48661, 7.50583, 3.24337], [2.41088, -7.92538, 3], [2.41088, 7.92538, 3], [2.31607, -7.13027, 9.20391], [2.17567, -6.90806, 15], [2.31607, 7.13027, 9.20391], and 6 more in file models/two_bosses.scad, line 5
+Geometries in cache: 4
+Geometry cache size in bytes: 5440
+CGAL Polyhedrons in cache: 2
+CGAL cache size in bytes: 140250
+Total rendering time: 0:00:00.033
+   Top level object is a 3D object (manifold):
+   Status:     NoError
+   Genus:      0
+   Vertices:      521
+   Facets:       1038

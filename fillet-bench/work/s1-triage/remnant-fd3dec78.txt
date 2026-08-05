@@ -1,0 +1,140 @@
+
+== boss_plate_fn8_rdef.stl  v=288 f=580 comp=1  tol=1e-06
+   model  40 x 40 x 20 mm, diag 60 mm
+   NONMAN 8 edges on 24 faces; edge length 2 um .. 36 mm
+          locus 38.83 x 36 x 4.828 mm, diag 53.17 mm, 4 cluster(s): 36 mm, 36 mm, 36 mm, 36 mm
+          smallest incident triangle: area 1.599e-14 mm^2, 0 x 36 x 8.88e-16 mm, diag 36 mm
+          smallest incident triangle: area 1.599e-14 mm^2, 0 x 36 x 8.88e-16 mm, diag 36 mm
+          DUPLICATE TRIANGLES: 4 sets 2x diag 36 mm area 6.83e-14 mm^2, 2x diag 36 mm area 1.6e-14 mm^2, 2x diag 36 mm area 1.6e-14 mm^2, 2x diag 36 mm area 6.83e-14 mm^2  -- zero-thickness membrane, no thickness to report
+
+== cross_fndef_r0.3.stl  v=1519 f=3034 comp=1  tol=1e-06
+   model  40 x 40 x 40 mm, diag 69.28 mm
+   NONMAN 1 edges on 4 faces; edge length 79.92 um .. 79.92 um
+          locus 0.05188 x 0.05769 x 0.01916 mm, diag 79.92 um, 1 cluster(s): 79.92 um
+          smallest incident triangle: area 3.729e-06 mm^2, 0.0519 x 0.0577 x 0.0192 mm, diag 79.92 um
+          smallest incident triangle: area 2.218e-05 mm^2, 0.0524 x 0.0586 x 0.02 mm, diag 81.15 um
+
+== cross_fndef_r0.9.stl  v=1346 f=2684 comp=2  tol=1e-06
+   model  40 x 40 x 40 mm, diag 69.28 mm
+   PART   4f 4v  0.04397 x 0.1084 x 0.05708 mm  diag 0.1302 mm  vol 3.45e-07 mm^3  at (4.57971,-5.06076,-3.84753)
+
+== dome_fn8_rdef.stl  v=288 f=576 comp=1  tol=1e-06
+   model  40 x 40 x 17.09 mm, diag 59.09 mm
+   NONMAN 4 edges on 12 faces; edge length 1.5 um .. 37 mm
+          locus 39.12 x 37 x 5.121 mm, diag 54.09 mm, 2 cluster(s): 37 mm, 37 mm
+          smallest incident triangle: area 1.643e-14 mm^2, 0 x 37 x 2.22e-15 mm, diag 37 mm
+          smallest incident triangle: area 1.643e-14 mm^2, 0 x 37 x 2.22e-15 mm, diag 37 mm
+          DUPLICATE TRIANGLES: 2 sets 2x diag 37 mm area 2.46e-14 mm^2, 2x diag 37 mm area 1.64e-14 mm^2  -- zero-thickness membrane, no thickness to report
+
+== hole_plate_fn8_rdef.stl  v=288 f=584 comp=1  tol=1e-06
+   model  40 x 40 x 10 mm, diag 57.45 mm
+   NONMAN 8 edges on 24 faces; edge length 1.5 um .. 37 mm
+          locus 37 x 39.12 x 9.121 mm, diag 54.61 mm, 4 cluster(s): 37 mm, 37 mm, 37 mm, 37 mm
+          smallest incident triangle: area 0 mm^2, 37 x 0 x 0 mm, diag 37 mm
+          smallest incident triangle: area 0 mm^2, 37 x 0 x 0 mm, diag 37 mm
+          DUPLICATE TRIANGLES: 4 sets 2x diag 37 mm area 0 mm^2, 2x diag 37 mm area 0 mm^2, 2x diag 37 mm area 0 mm^2, 2x diag 37 mm area 0 mm^2  -- zero-thickness membrane, no thickness to report
+
+== pipe_into_face_fn8_rdef.stl  v=339 f=676 comp=1  tol=1e-06
+   model  40 x 40 x 28.9 mm, diag 63.52 mm
+   NONMAN 2 edges on 6 faces; edge length 1 um .. 38 mm
+          locus 38 x 0 x 0 mm, diag 38 mm, 1 cluster(s): 38 mm
+          smallest incident triangle: area 0 mm^2, 38 x 0 x 0 mm, diag 38 mm
+          smallest incident triangle: area 0 mm^2, 38 x 0 x 0 mm, diag 38 mm
+          DUPLICATE TRIANGLES: 1 sets 2x diag 38 mm area 0 mm^2  -- zero-thickness membrane, no thickness to report
+
+== refused_neighbour_fndef_r0.2.stl  v=357 f=712 comp=1  tol=1e-06
+   model  18.01 x 15 x 23.15 mm, diag 32.94 mm
+   NONMAN 1 edges on 4 faces; edge length 73.51 nm .. 73.51 nm
+          locus 0 x 7.351e-05 x 0 mm, diag 73.51 nm, 1 cluster(s): 73.51 nm
+          smallest incident triangle: area 7.348e-09 mm^2, 0.000197 x 0.000274 x 3.47e-05 mm, diag 0.3395 um
+          smallest incident triangle: area 7.461e-09 mm^2, 0.000203 x 0.000274 x 0 mm, diag 0.3413 um
+
+== refused_neighbour_fndef_r0.8.stl  v=358 f=714 comp=1  tol=1e-06
+   model  17.9 x 15 x 23.07 mm, diag 32.83 mm
+   NONMAN 1 edges on 4 faces; edge length 4.049 um .. 4.049 um
+          locus 0 x 0.004049 x 0 mm, diag 4.049 um, 1 cluster(s): 4.049 um
+          smallest incident triangle: area 1.617e-06 mm^2, 0.000786 x 0.00484 x 0.000139 mm, diag 4.909 um
+          smallest incident triangle: area 1.644e-06 mm^2, 0.000812 x 6.41 x 0 mm, diag 6.411 mm
+
+== refused_neighbour_fndef_r0.9.stl  v=358 f=714 comp=1  tol=1e-06
+   model  17.89 x 15 x 23.06 mm, diag 32.81 mm
+   NONMAN 1 edges on 4 faces; edge length 0.3368 um .. 0.3368 um
+          locus 0 x 0.0003368 x 0 mm, diag 0.3368 um, 1 cluster(s): 0.3368 um
+          smallest incident triangle: area 1.515e-07 mm^2, 0.000886 x 0.00123 x 0.000156 mm, diag 1.528 um
+          smallest incident triangle: area 1.538e-07 mm^2, 0.000914 x 0.00123 x 0 mm, diag 1.536 um
+
+== refused_neighbour_fndef_r1.0.stl  v=358 f=714 comp=1  tol=1e-06
+   model  17.87 x 15 x 23.05 mm, diag 32.79 mm
+   NONMAN 1 edges on 4 faces; edge length 0.3752 um .. 0.3752 um
+          locus 0 x 0.0003752 x 0 mm, diag 0.3752 um, 1 cluster(s): 0.3752 um
+          smallest incident triangle: area 1.875e-07 mm^2, 0.000984 x 0.00137 x 0.000174 mm, diag 1.697 um
+          smallest incident triangle: area 1.904e-07 mm^2, 0.00102 x 0.00137 x 0 mm, diag 1.707 um
+
+== rib_into_boss_fn14_rdef.stl  v=222 f=442 comp=1  tol=1e-06
+   model  60 x 60 x 20 mm, diag 87.18 mm
+   NONMAN 3 edges on 8 faces; edge length 7.546 um .. 0.4334 mm
+          locus 0.2799 x 0.1885 x 0.2813 mm, diag 0.4393 mm, 1 cluster(s): 0.4393 mm
+          smallest incident triangle: area 0.001017 mm^2, 0.28 x 0.189 x 0.281 mm, diag 0.4393 mm
+          smallest incident triangle: area 0.001017 mm^2, 0.28 x 0.189 x 0.281 mm, diag 0.4393 mm
+          DUPLICATE TRIANGLES: 2 sets 2x diag 0.4334 mm area 0.0036 mm^2, 2x diag 0.4393 mm area 0.00102 mm^2  -- zero-thickness membrane, no thickness to report
+
+== rib_into_boss_fn32_rdef.stl  v=556 f=1112 comp=1  tol=1e-06
+   model  60 x 60 x 20 mm, diag 87.18 mm
+   NONMAN 4 edges on 13 faces; edge length 75.16 um .. 0.3754 mm
+          locus 0.004093 x 8.024 x 0.3263 mm, diag 8.03 mm, 2 cluster(s): 0.4482 mm, 0.472 mm
+          smallest incident triangle: area 3.853e-06 mm^2, 0.00353 x 0.294 x 0.251 mm, diag 0.3866 mm
+          smallest incident triangle: area 0.003836 mm^2, 0.00393 x 0.328 x 0.306 mm, diag 0.4482 mm
+          DUPLICATE TRIANGLES: 1 sets 2x diag 0.4482 mm area 0.00384 mm^2  -- zero-thickness membrane, no thickness to report
+
+== tee_fndef_r0.5.stl  v=232 f=456 comp=3  tol=1e-06
+   model  15 x 10 x 20 mm, diag 26.93 mm
+   PART   4f 4v  0.2025 x 0.07587 x 0.1568 mm  diag 0.2671 mm  vol 2.92e-15 mm^3  at (1.96946,-4.64457,8.12581)
+   PART   8f 6v  0.3049 x 0.07587 x 0.3049 mm  diag 0.4378 mm  vol 1.15e-15 mm^3  at (1.94746,4.65201,8.09884)
+   PINCH  2 fans of 9 faces at (1.913417162,-4.619397663,8.086582838)
+          patch 4f  0.2025 x 0.07587 x 0.1568 mm  diag 0.2671 mm
+   PINCH  2 fans of 8 faces at (1.913417162,4.619397663,8.086582838)
+          patch 8f  0.3049 x 0.07587 x 0.3049 mm  diag 0.4378 mm
+
+== tee_fndef_r0.9.stl  v=227 f=448 comp=2  tol=1e-06
+   model  15 x 10 x 20 mm, diag 26.93 mm
+   PART   4f 4v  0.3777 x 0.1366 x 0.4327 mm  diag 0.5903 mm  vol 3.55e-15 mm^3  at (1.94446,-4.67399,8.08115)
+   PINCH  2 fans of 9 faces at (1.913417162,-4.619397663,8.086582838)
+          patch 4f  0.3777 x 0.1366 x 0.4327 mm  diag 0.5903 mm
+
+== tee_oblique_fndef_r0.2.stl  v=221 f=436 comp=2  tol=1e-06
+   model  15.68 x 10 x 20 mm, diag 27.31 mm
+   PART   4f 4v  0.04543 x 0.02261 x 0.04512 mm  diag 67.9 um  vol 5.56e-17 mm^3  at (1.90087,-4.62725,12.2953)
+   PINCH  2 fans of 9 faces at (1.913417162,-4.619397663,12.28032178)
+          patch 4f  0.04543 x 0.02261 x 0.04512 mm  diag 67.9 um
+
+== tee_oblique_fndef_r0.3.stl  v=222 f=438 comp=2  tol=1e-06
+   model  15.66 x 10 x 20 mm, diag 27.3 mm
+   PART   4f 4v  0.1555 x 0.05517 x 0.1185 mm  diag 0.2032 mm  vol 1.12e-16 mm^3  at (1.94845,-4.64478,12.2652)
+   PINCH  2 fans of 9 faces at (1.913417162,-4.619397663,12.28032178)
+          patch 4f  0.1555 x 0.05517 x 0.1185 mm  diag 0.2032 mm
+
+== tee_oblique_fndef_r0.8.stl  v=222 f=438 comp=2  tol=1e-06
+   model  15.58 x 10 x 20 mm, diag 27.25 mm
+   PART   4f 4v  0.2676 x 0.1471 x 0.3023 mm  diag 0.4297 mm  vol 1.62e-15 mm^3  at (1.82845,-4.66662,12.3781)
+   PINCH  2 fans of 9 faces at (1.913417162,-4.619397663,12.28032178)
+          patch 4f  0.2676 x 0.1471 x 0.3023 mm  diag 0.4297 mm
+
+== tee_small_fn10_rdef.stl  v=313 f=618 comp=2  tol=1e-06
+   model  11 x 5.808 x 14 mm, diag 18.73 mm
+   PART   6f 5v  0.3527 x 0.1014 x 0.4012 mm  diag 0.5437 mm  vol 2.12e-16 mm^3  at (0.991583,2.90062,6.103)
+
+== tee_small_fndef_r1.5.stl  v=193 f=378 comp=2  tol=1e-06
+   model  11 x 5.96 x 14 mm, diag 18.78 mm
+   PART   6f 5v  0.7854 x 0.2534 x 0.7854 mm  diag 1.139 mm  vol 2.42e-15 mm^3  at (1.11074,2.93839,7.80527)
+
+== tee_small_fndef_rdef.stl  v=215 f=422 comp=2  tol=1e-06
+   model  11 x 5.808 x 14 mm, diag 18.73 mm
+   PART   6f 5v  0.3527 x 0.1014 x 0.4012 mm  diag 0.5437 mm  vol 2.05e-16 mm^3  at (0.991583,2.90062,6.103)
+
+== two_bosses_fn8_rdef.stl  v=518 f=1038 comp=1  tol=1e-06
+   model  50 x 40 x 18 mm, diag 66.51 mm
+   NONMAN 6 edges on 18 faces; edge length 1.5 um .. 47 mm
+          locus 48.06 x 38.06 x 5.121 mm, diag 61.52 mm, 3 cluster(s): 37 mm, 37 mm, 47 mm
+          smallest incident triangle: area 1.643e-14 mm^2, 0 x 37 x 2.22e-15 mm, diag 37 mm
+          smallest incident triangle: area 1.643e-14 mm^2, 0 x 37 x 2.22e-15 mm, diag 37 mm
+          DUPLICATE TRIANGLES: 3 sets 2x diag 47 mm area 5.22e-14 mm^2, 2x diag 37 mm area 1.64e-14 mm^2, 2x diag 37 mm area 2.46e-14 mm^2  -- zero-thickness membrane, no thickness to report
