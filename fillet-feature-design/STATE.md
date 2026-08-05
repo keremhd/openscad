@@ -473,6 +473,69 @@ sits *proud* of the wall by the deliberate `eps` offset §5 already names — a 
 has a steep dihedral, so a micron-high step would explain both the 46°–91° ridges and debris at
 the micron scale, as one phenomenon rather than two.
 
+### Ball seating made local: it fires, and it refuses curved walls — 2026-08-05
+
+Built and measured, `06a12765a`. `seatOn`'s comparison against `surfaceRim` is replaced by the
+constructed perpendicular foot measured against the wall, and `surfaceRim` and
+`pointSegmentDistance` are deleted with it. The binary is md5 `f6d06ecb`.
+
+**The root-cause diagnosis above is confirmed in full, on both of its axes and at the default
+threshold.** On `handblend_step` with the test brush, the default 46° now refuses exactly the
+set `min_angle=5` refused and accepts exactly what it accepted: D = 0.02, 0.2, 0.5, 0.9, 0.93,
+0.9344 refused, D = 0.95, 1.0, 2.0, 4.0 accepted — the boundary at the independently derived
+R(1−tan(Δ/2)) = 0.934457. Second axis, tool radius at D=0.2: accepts ≤0.26, refuses ≥0.27,
+bracketing the predicted `RT* = 0.26555`. Unbrushed, the model's abundant-clearance control
+edge is not refused at any D, and at D=2.0 nothing on the model is refused at all.
+
+The reported miss differs from `min_angle=5`'s `0.934457 − d`, and the difference is
+understood: with wall and blend still merged, the nearest mesh to the floating foot is the
+blend, not the wall's end, so the number is the perpendicular distance to the arc,
+sqrt(1+(1−d)²)−1 — measured 0.400071, 0.116034, 0.00449748, 7.3793e-06 at d = 0.02, 0.5, 0.9,
+0.9344, against the closed form 0.400125, 0.118034, 0.004988 and the small-gap limit
+sin(3.75°)·(0.934457−d) = 7.39e-06. The verdict boundary is unaffected.
+
+**But the rule does not hold, and §4d's "Not verified" resolves NO.** The seated ball's centre
+is constructed from the crease's two tangent planes. Where the wall curves in the direction the
+tangency point is offset — a full radius along the wall — the constructed foot floats off the
+mesh by about r²/2R for a genuine, comfortably-fitting blend. Measured, all on features that do
+fit and that the previous binary blends without a warning:
+
+| feature | r | foot miss | as a fraction of r |
+|---|---|---|---|
+| unit-test dome, R=8 sphere on a plate | 0.3 | 0.0074 | 0.025 |
+| same | 1.0 | 0.0356 | 0.036 |
+| same | 2.0 | 0.168 | 0.084 |
+| same | 10.0 | 4.27 | 0.427 |
+| `dome.scad`, R=12 | 1.5 | 0.00115 | 7.7e-4 |
+| `tee.scad`, two d=10 cylinders, stock defaults | 1.0 | 0.0142 | 0.014 |
+| `cross.scad`, concave pass | 1.2 | 0.0723 | 0.060 |
+
+Against the artifact floor of 0.117·R that measurement recorded, the daylight is at best 1.4×
+— the same gap the relief rule was rejected for — and it **inverts** once r approaches the
+wall's own curvature radius. The thirteen orders of magnitude are a property of the populations
+§4d measured, cap rims and creases on flat walls, and not of ball seating. `FilletBuilder.cc`'s
+own comment above `seatOn` already stated this hazard as fact; it turns out to bound the whole
+rule, not just the choice of contact point.
+
+**The cost is total on cylinder-to-cylinder models.** `tee` at stock defaults now refuses 2 of
+its 2 concave creases, `tee_small` and `tee_oblique` likewise across the whole `$fn` and radius
+axes. Vertex counts collapse toward the unfilleted solid: `tee` at `$fn`=8 goes 220 → 80
+against a plain union of 64, at defaults 224 → 160, `cross` 1239 → 435. The unit suite goes
+from 88/88 to 85/88 — the dome case, the rib-with-a-bead case, and the boss/rib refusal count.
+
+**So eleven of `sweep.sh --selftest`'s known answers now "fail" because their defect is gone,
+and that is inertness, not repair.** `tee` r=0.5 and r=0.9, `tee_oblique` r=0.2/0.3/0.8,
+`tee_small` at defaults / `$fn`=10 / r=1.5, `cross` r=0.9 and r=2.0 all come back clean —
+because no bead is built on them any more. Standing rule: the debris and the fillet went
+together. Do not read this as eleven cells fixed.
+
+**What a successor has to do first.** The seat construction, not the seat test, is what fails on
+a curved wall: the ball is placed from planes and then asked whether it touches a surface that
+is not one. Any local fit test — the foot, or `d` against `r`, which is the same question since
+d² = r² + off² on a flat wall — inherits that error. Re-seating the ball against the mesh
+before asking is the prerequisite; until then the two-parameter split of §4d's last paragraph
+is the live option, and it needs the tessellation-versus-chamfer problem solved.
+
 ## 5. Open defects
 
 | defect | state |
