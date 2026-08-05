@@ -547,16 +547,6 @@ Vector3d closestPointOnTriangle(const Vector3d& p, const Vector3d& a, const Vect
   return a + ab * (vb * denom) + ac * (vc * denom);
 }
 
-// Distance from a point to a closed segment.
-double pointSegmentDistance(const Vector3d& p, const Vector3d& a, const Vector3d& b)
-{
-  const Vector3d ab = b - a;
-  const double len2 = ab.squaredNorm();
-  if (len2 < 1e-24) return (p - a).norm();
-  const double t = std::clamp(ab.dot(p - a) / len2, 0.0, 1.0);
-  return (p - (a + t * ab)).norm();
-}
-
 }  // namespace
 
 std::vector<StationNormals> chainNormals(const MergedMesh& m,
@@ -729,27 +719,14 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
   const double dir = concave ? 1.0 : -1.0;
 
   // The walls, as surfaces rather than triangles: which triangles each is made
-  // of, and the segments that bound it. A wall's boundary is the creases around
-  // it — including the one being blended — so a ball whose nearest point on a
-  // wall lands on one of those segments has reached the end of that wall.
+  // of. The walk below needs a surface id it can trust, and this is what makes
+  // one valid.
   std::vector<std::vector<int>> surfaceTris;
   for (size_t t = 0; t < surfaceOf.size() && t < m.tris.size(); ++t) {
     if (surfaceOf[t] < 0) continue;
     if (static_cast<size_t>(surfaceOf[t]) >= surfaceTris.size())
       surfaceTris.resize(surfaceOf[t] + 1);
     surfaceTris[surfaceOf[t]].push_back(static_cast<int>(t));
-  }
-  std::vector<std::vector<EdgeKey>> surfaceRim(surfaceTris.size());
-  for (const auto& [key, ts] : adj) {
-    std::set<int> touching;
-    for (const int t : ts)
-      if (static_cast<size_t>(t) < surfaceOf.size() && surfaceOf[t] >= 0)
-        touching.insert(surfaceOf[t]);
-    // Two triangles of the same surface make an interior seam; anything else —
-    // a crease, a non-manifold edge, a border — ends the surface.
-    if (ts.size() == 2 && touching.size() == 1) continue;
-    for (const int s : touching)
-      if (static_cast<size_t>(s) < surfaceRim.size()) surfaceRim[s].push_back(key);
   }
 
   // How far a wall may turn away from the triangle the question was asked at
@@ -829,12 +806,22 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
   // the wall for its nearest point to the centre instead puts the contact on the
   // wall by construction, curved or not.
   //
-  // That also states the question exactly rather than as a distance against a
-  // tolerance: the blend leaves the surface it is meant to meet precisely when
-  // the nearest point is on the wall's boundary rather than inside it, because
-  // then the wall has ended and the ball is hanging off it. The boundary is part
-  // of the wall, so its distance is never less than the wall's own; equal is
-  // what says the contact sits on it.
+  // Whether it is a touch at all is asked of the seated ball itself: a ball of
+  // radius r seated on the crease stands exactly r off each wall, with its
+  // perpendicular foot on that wall. So build the foot and ask how far it is
+  // from the wall. Zero — to a part in 1e14 measured — is a seated ball, and a
+  // wall that has run out or curved away leaves the foot a fraction of a radius
+  // off it, measured from 0.117 r upward. That is the same question as the
+  // centre's distance d against r, since d^2 = r^2 + off^2 on a flat wall, but
+  // the difference of squares resolves nothing below about 1e-8 r while the
+  // foot is exact.
+  //
+  // Nothing here asks how far the surface extends. Which triangles are grouped
+  // into one smooth surface is decided by the crease threshold, which is a
+  // statement about user intent and not about tangency: at the default a 45
+  // degree chamfer joins the wall it sits on, so a wall with any blend already
+  // built into it reaches past everything the ball could hang off and the
+  // question can never be answered no.
   //
   // `turned` says the chain changes walls on this side at this station — the
   // spine's own corner. There the averaged normal is the average of two
@@ -855,16 +842,11 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
     T = onWall;
     if (turned) return;
 
-    double rim = std::numeric_limits<double>::infinity();
-    for (const EdgeKey& e : surfaceRim[surface])
-      rim = std::min(rim, pointSegmentDistance(c.C, m.pos[e.first], m.pos[e.second]));
-    if (rim > d + 1e-9 * std::max(1.0, d)) return;
-
-    // Hanging off the end of this wall. What the user can act on is how far past
-    // it the blend would stop, so report the miss of the point the bead would
-    // actually be built to.
-    c.offFace = std::max(
-      c.offFace, nearestOnWall(c.C - dir * c.radius * n, c.v, tri, surface, budget, nullptr));
+    // How far the foot the bead would actually be built to misses the wall by,
+    // which is also what the user can act on: the length of wall that is not
+    // there.
+    const double off = nearestOnWall(c.C - dir * c.radius * n, c.v, tri, surface, budget, nullptr);
+    if (std::isfinite(off)) c.offFace = std::max(c.offFace, off);
   };
 
   auto contactAt = [&](const StationNormals& s, bool turnedA = false, bool turnedB = false) {
