@@ -2918,52 +2918,41 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
         const double step = (sec[endIdx].v - sec[nbrIdx].v).norm();
         if (step < 1e-12) continue;
         // The hair, or a twentieth of the last segment where that is shorter: a
-        // crease whose stations are the intersection curve of two curved walls
-        // has segments a fraction of the hair long, and taking the hair off one
-        // of those is taking off the whole cell.
+        // crease that is the intersection curve of two curved walls has segments a
+        // fraction of the hair long, and taking the hair off one of those takes
+        // the whole cell.
         double back = std::min(eps / step, 0.05);
-        // At a seam vertex, run the bead PAST the vertex instead of stopping
-        // short of it.
-        //
+        // At a seam vertex, run the bead PAST it rather than stopping short.
         // Stopping short leaves the two beads a hair apart with their surfaces
-        // parallel across the gap; running exactly to the vertex has them touch.
-        // Either way the two surfaces meet at no angle at the one place they both
-        // reach - the top of each bead's cross section, where it is tangent to the
-        // wall the other bead's own wall crosses - and a boolean can only resolve
-        // that into a knife edge. Overrunning makes the two bodies overlap over a
-        // region instead, so their surfaces cross transversally and the seam is an
-        // ordinary intersection curve.
+        // parallel; running exactly to the vertex has them touch. Either way they
+        // meet at no angle at the top of each cross-section, and a boolean can only
+        // resolve that into a knife edge. Overrunning makes the two bodies overlap
+        // over a region, so their surfaces cross transversally.
         //
         // Past the vertex the bead is inside the wall the refused crease runs
-        // along - solid for a concave blend the caller unions on, outside the
-        // part for a convex one the caller cuts with - so where that wall goes on
-        // past the vertex the overrun costs nothing. Where it does not, seamRoom
-        // says how much of it there is and the overrun takes a share of that
-        // instead; a bead that ran past the far side of a thin wall would stand
-        // proud of a face nothing was blending.
+        // along, so where that wall continues the overrun costs nothing. Where it
+        // does not, seamRoom says how much room there is and the overrun takes a
+        // share; a bead running past the far side of a thin wall would stand proud
+        // of a face nothing was blending.
         if (seamVertex(vert)) {
           std::vector<Vector3d> swept(sec[endIdx].w.begin(), sec[endIdx].w.end());
           swept.push_back(sec[endIdx].v);
           const Vector3d dir = (sec[endIdx].v - sec[nbrIdx].v) / step;
           const double want = seamOver * r;
           // Half the room, never all of it: landing the bead's end exactly on the
-          // far face puts two coincident surfaces in front of the caller's
-          // boolean, which is the thing the overrun exists to avoid. Looking out
-          // to twice what is wanted is therefore looking exactly as far as it can
-          // matter — past that the half is more than the whole of the want.
+          // far face puts two coincident surfaces in front of the caller's boolean.
+          // Looking out to twice the want is therefore as far as it can matter.
           const double room = seamRoom(m, vert, swept, dir, 2.0 * want);
           const double over = std::min(want, 0.5 * room);
           if (over > 1e-12) {
             back = -std::min(over / step, 0.5);
           } else {
             // No room at all: the bead is against a wall thinner than its own
-            // profile and there is nothing past the vertex to run into. The two
-            // beads cannot be made to overlap, so make sure they do not merely
-            // graze either — stopping them a definite distance short instead of a
-            // hair short turns a tangential touch into a plain gap, which a
-            // boolean can resolve. Half the overrun, by the same halving rule the
-            // room is shared out under. Only ever less material, never more, so
-            // it cannot put the bead through the wall the overrun was refused for.
+            // profile. The two beads cannot be made to overlap, so make sure they
+            // do not merely graze — a definite distance short turns a tangential
+            // touch into a plain gap, which a boolean can resolve. Half the
+            // overrun, by the same halving rule. Only ever less material, so it
+            // cannot put the bead through the wall the overrun was refused for.
             back = std::max(back, std::min(0.5 * want / step, 0.5));
           }
         }
@@ -2971,13 +2960,9 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
         if (!stop.valid) continue;
 
         sec[endIdx] = stop;
-        // The section moved, so where it sits in chain-parameter space moves with
-        // it, overrun and hair alike. Leaving the parameter behind would not hold
-        // the caller's brush boundaries still - it would reparameterise the whole
-        // last segment under them, and slide every boundary on it by a share of
-        // the overrun. The overrun itself is still reached: a run of the selection
-        // that asked for the chain's own end asks for a parameter beyond the last
-        // station now, and toSectionSpace clamps it onto that station.
+        // The section moved, so its chain-parameter position moves with it. Leaving
+        // the parameter behind would reparameterise the whole last segment and
+        // slide every brush boundary on it by a share of the overrun.
         sectionAt[ci][endIdx] -= (sectionAt[ci][endIdx] - sectionAt[ci][nbrIdx]) * back;
       }
     }
@@ -2990,19 +2975,15 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   // junction.
   //
   // An empty list means the whole chain downstream, so a selection that maps to
-  // nothing cannot be passed on as one: the two say opposite things. A run lying
-  // wholly inside the stretch a junction truncates away has no sections left in
-  // it, and the material it asked for is the corner cell's already — so the
-  // chain builds no bead, which is what the brush asked for. Whether the corner
-  // itself is built is a separate question, already settled by endAnchored.
+  // nothing must not be passed on as one. A run lying wholly inside the stretch a
+  // junction truncates away has no sections left, and the material it asked for is
+  // the corner cell's already.
   //
-  // A run that reaches an end of the chain reaches whatever that end became. An
-  // overrun puts the end station past the chain's own last parameter, and a run
-  // stopping at that last parameter would then stop short of it — the caller
-  // asked for the whole crease and would get it minus the overrun at each end.
-  // So a run touching an end is carried out to where the end went. Only ever
-  // outward: an end a junction truncated sits inside the chain instead, and the
-  // clamp in toSectionSpace already answers for that.
+  // A run reaching an end of the chain reaches whatever that end became. An overrun
+  // puts the end station past the chain's own last parameter, so a run stopping at
+  // that parameter would stop short of it and the caller would get the whole crease
+  // minus the overrun at each end. Only ever outward: an end a junction truncated
+  // sits inside the chain, which toSectionSpace's clamp already answers for.
   std::vector<std::vector<SpineInterval>> keepOf(chains.size());
   for (size_t ci = 0; ci < chains.size(); ++ci) {
     std::vector<SpineInterval> keep = chains[ci].keep;
@@ -3018,31 +2999,22 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   }
 
   // Group the subtraction by the chains a corner ball actually ties together,
-  // instead of globally.
+  // rather than globally.
   //
-  // The recorded reason the subtraction is global is that a corner ball has to
-  // cut the wedges of every chain meeting at its vertex. That requirement is
-  // local to the vertex, so it is met by putting exactly those chains in one
-  // group. Where no ball is built the requirement is vacuous, and the chains may
-  // be kept apart — which is what lets two beads arriving at a brush-shortened
-  // corner run into each other and leave a seam instead of one canal gouging the
-  // other's bead.
+  // A corner ball has to cut the wedges of every chain meeting at its vertex. That
+  // requirement is local, so putting exactly those chains in one group meets it.
+  // Where no ball is built the requirement is vacuous and the chains may be kept
+  // apart, which is what lets two beads arriving at a seam vertex run into each
+  // other rather than one canal gouging the other's bead.
   //
-  // chainJunctions already drops every vertex in `noCorner` — the vertices where
-  // the brush covered fewer arms than the corner has creases — so the junction
-  // list is precisely the set of corners that get a ball, and linking the chains
-  // at those vertices is the whole rule. At a corner where every crease is
-  // selected, all its chains land in one group and the result is the global
-  // subtraction unchanged.
+  // chainJunctions already drops every vertex in `noCorner`, so the junction list
+  // is precisely the corners that get a ball. Where every crease of a corner is
+  // selected, all its chains land in one group and this is the global subtraction
+  // unchanged.
   //
-  // Chains are linked only where a ball is built, so a vertex that emits no
-  // junction at all links nothing — and a brushed corner emits none, because the
-  // brush pass already put it in `noCorner`. Splitting the subtraction there is
-  // only ever a means to serve a seam vertex, so where the rule serves none the
-  // grouping must be the one it would have had without it: the split is what
-  // lets two beads meet in a seam, and with no seam to make it is a plain loss of
-  // the coincident-face cover a single subtraction gives. So the grouping is
-  // taken from what the rule actually served — no vertex served, one group.
+  // Splitting only ever serves a seam vertex; with no seam to make, a split is a
+  // plain loss of the coincident-face cover a single subtraction gives. So the
+  // grouping follows what the rule actually served — no vertex served, one group.
   std::vector<int> parent(chains.size());
   for (size_t i = 0; i < chains.size(); ++i) parent[i] = static_cast<int>(i);
   std::function<int(int)> findRoot = [&](int x) {
@@ -3056,16 +3028,11 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
     chainsAt[endFront].push_back(static_cast<int>(ci));
     chainsAt[endBack].push_back(static_cast<int>(ci));
   }
-  // Whether a chain is kept apart is asked of the chain, not of the model. A
-  // model can carry a served corner in one place and a withheld one in another,
-  // and one answer for the whole call would give the served corner's answer to
-  // every withheld one: their chains meet at a vertex that emits no junction, so
-  // nothing links them and each subtracts alone — the split with none of the
-  // seam it exists to make.
-  //
-  // So a chain no served seam vertex touches is put back in the one group
-  // everything was in before the rule existed. A seam is two beads meeting, so a
-  // lone chain end has no seam to make and does not count as served.
+  // Asked per chain, not per model: one model can carry a served corner in one
+  // place and a withheld one in another, and one answer for the whole call would
+  // split the withheld ones too, giving the split with none of the seam it exists
+  // to make. A chain no served seam vertex touches goes back in the single group.
+  // A seam is two beads meeting, so a lone chain end does not count as served.
   auto servedEnd = [&](size_t ci) {
     int endFront = -1, endBack = -1;
     if (!chains[ci].openEnds(endFront, endBack)) return false;
@@ -3136,12 +3103,11 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   const manifold::Manifold ball = manifold::Manifold::Sphere(r, segs);
   const std::vector<Vector3d> ballShell = hullPoints(ball);
 
-  // How far past its walls one corner stands: further than any bead arriving
-  // there, since a corner cell resting inside one of them is the coincident-face
-  // problem the overshoot exists to avoid, and the beads no longer all stand the
-  // same distance past a wall.
-  // endSections carries a vertex only where a bead reached it, so this is a
-  // lookup and not an insertion: operator[] would grow the map while reading it.
+  // How far past its walls one corner stands: further than any bead arriving there,
+  // since a corner cell resting inside one is the coincident-face problem the
+  // overshoot exists to avoid, and the beads no longer all stand the same distance
+  // past a wall. A lookup and not an insertion — operator[] would grow the map
+  // while reading it.
   static const std::vector<RoundSection> kNoSections;
   auto sectionsAt = [&](int vert) -> const std::vector<RoundSection>& {
     const auto it = endSections.find(vert);
@@ -3155,13 +3121,11 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
   };
 
   // How far short of a wall a tessellated ball seated against it stops. Its
-  // vertices are on the sphere and its faces are therefore chords, so the face
-  // that meets the wall reaches only that face's own distance from the centre,
-  // and the ball is short of the wall by the rest everywhere on it but its
-  // corners. At the tessellations these tools are drawn at, that shortfall is
-  // several times the whole overshoot ladder, so it is what a point meant to
-  // stand past the wall has to clear first. Measured off the mesh rather than
-  // assumed from the segment count, because it is the mesh that does the cutting.
+  // vertices are on the sphere, so its faces are chords and it is short of the wall
+  // everywhere but its corners. At the tessellations these tools are drawn at that
+  // shortfall is several times the whole overshoot ladder, so a point meant to
+  // stand past the wall must clear it first. Measured off the mesh rather than
+  // assumed from the segment count, since it is the mesh that does the cutting.
   const double ballShort = r - inradius(ball);
 
   for (const Junction& j : junctions) {
@@ -3186,26 +3150,20 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
     wedgeCells.push_back(std::move(cell));
     tag(wedgeCells, wedgeGroup, gid);
     // One ball per reachable centre, hulled together. The hull is not an
-    // approximation: dilating a convex hull of points by a ball gives the hull
-    // of the balls at those points, and the centres are the corners of a convex
-    // region every point of which the ball may sit at — so the hull is exactly
-    // the material it can sweep out there.
+    // approximation: dilating a convex hull of points by a ball gives the hull of
+    // the balls at those points, and the centres are the corners of a convex region
+    // every point of which the ball may sit at.
     //
     // Each ball also gets one point per wall it is seated against, out past the
-    // tangency. Seated means tangent, and a cutter that arrives at a wall along
-    // it rather than across it leaves everything the cells stand past that wall
-    // — at a corner, a lens of the overshoot around the tangency point, which the
-    // canals running in sever from the rest of the tool as they cut deeper still.
-    // That is what came away from a curved junction as a detached wafer, once the
-    // tessellation was fine enough that the ball no longer blundered past the
-    // wall by its own coarseness. The two points every arc already carries past
-    // its walls are the same answer along a crease; this is it at the one place a
-    // ball rather than a canal is what cuts.
+    // tangency. Seated means tangent, and a cutter arriving at a wall along it
+    // rather than across it leaves everything the cells stand past that wall — at a
+    // corner, a lens of overshoot around the tangency point that the canals running
+    // in then sever from the tool, which came away from a curved junction as a
+    // detached wafer. The two points every arc carries past its walls are the same
+    // answer along a crease; this is it where a ball rather than a canal cuts.
     //
-    // The point only deepens the cut where the cone it raises is still below the
-    // wall, and above the wall the surface is the ball's own, so nothing of the
-    // blend goes with it and the corner does not step away from the canals it
-    // hands over to.
+    // The point only deepens the cut below the wall; above it the surface is the
+    // ball's own, so nothing of the blend goes with it.
     std::vector<manifold::vec3> pts;
     pts.reserve(j.ballCentres.size() * (ballShell.size() + j.faceNormals.size()));
     for (const Vector3d& P : j.ballCentres) {
@@ -3223,13 +3181,11 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
     tag(canalCells, canalGroup, gid);
   }
 
-  // One subtraction over everything. The spines stop where the ball does, so the
-  // canal is exactly the set of positions the ball can occupy and nothing in it
-  // is material another crease still needs — while the corner ball, conversely,
-  // has to cut the wedges of every chain meeting at its vertex, which grouping
-  // the subtraction per chain would prevent.
-  // One subtraction per group. With the global grouping above every chain is in
-  // group zero, so this is the single global subtraction unchanged.
+  // One subtraction per group. The spines stop where the ball does, so a canal is
+  // exactly the set of positions the ball can occupy and nothing in it is material
+  // another crease still needs; the grouping above is what keeps a corner ball
+  // together with every chain it has to cut. Where nothing was split, every chain
+  // is in one group and this is a single global subtraction.
   std::map<int, std::vector<manifold::Manifold>> wedgeOf, canalOf;
   for (size_t i = 0; i < wedgeCells.size(); ++i)
     wedgeOf[wedgeGroup[i]].push_back(std::move(wedgeCells[i]));
@@ -3237,9 +3193,8 @@ manifold::Manifold buildRoundSolid(const MergedMesh& m,
     canalOf[canalGroup[i]].push_back(std::move(canalCells[i]));
 
   // Volumeless parts are what a subtraction leaves behind, so a wedge that never
-  // met a canal has none to drop and is handed back exactly as it was built —
-  // which is what HEAD does with the one group the grouping-off path leaves, and
-  // the reason the drop is asked for once at the end rather than per group.
+  // met a canal has none to drop and is handed back exactly as built. That is why
+  // the drop is asked for once at the end rather than per group.
   std::vector<manifold::Manifold> parts;
   bool subtracted = false;
   for (auto& [gid, cells] : wedgeOf) {
