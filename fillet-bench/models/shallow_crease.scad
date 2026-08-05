@@ -14,6 +14,11 @@
 // r/tan(15) = 14.9 mm along each face, and less than that is not visible in a
 // contact-sheet tile, and the plate is 20 thick so that r = 4 fits between its
 // own top and bottom creases rather than being refused for crowding.
+// mesh.py-comp: 2
+// This tile renders two plates on purpose, so two connected components is the
+// right answer HERE AND NOWHERE ELSE in the bench. sweep.sh reads this line and
+// passes it to `mesh.py --comp`; a model that declares nothing gets 1, and a
+// single-union model that comes back with two components has shed a fragment.
 FNSET = 0; $fn = FNSET;
 R = 4;
 
