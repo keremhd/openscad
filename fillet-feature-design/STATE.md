@@ -380,6 +380,58 @@ and three-vertex chains."
 convex edges. The signature needs a point where three or more beads meet; `cross`'s eight
 triple points have it, a single junction or a lone foot ring does not.
 
+### Root cause: the 46° threshold disables the size gate — 2026-08-05
+
+Proved on hand-built geometry with no fillet module in the model, so nothing is entangled with
+`fillet_tool`. Models committed at `f23d7652c`: `handblend_step.scad` (the measurement model,
+with a built-in abundant-clearance control edge and a brush isolating one crease),
+`handblend_controls.scad` (positive: cube corner; negative: a 0.1·R fin), and
+`handblend_fillettool_ref.scad`. All three set `$fn` and are deliberately absent from
+`expect.txt`, so `sheet.sh` ignores them and tile ids are unchanged.
+
+**A tangent blend cannot reach the crease threshold, so the wall and the blend become one
+surface.** `kDefaultCreaseThresholdDeg` is 46° (`FilletBuilder_internal.h:146`). The coarsest
+tangent blend of a right angle is a single 45° chamfer, and 45 < 46. So `smoothSurfaces` unions
+wall + blend + floor into a single surface; `seatOn` asks `nearestOnWall` for the contact point
+and gets a point *on the blend*; it compares that against `surfaceRim`, which is now the far
+outer boundary of the whole merged surface; `rim > d`, so it returns early and `offFace` stays
+0. The edge fits. **The check cannot fire** — this is not a margin error.
+
+One-parameter proof: at `min_angle=5`, below the blend's 7.5° facet so every facet is its own
+surface, the *identical geometry at the identical radius* is refused, and the gate prints
+exactly `0.934457 − d`. The default threshold accepts every d from 0.02 to 4.0; at d=0.02 it
+accepts with 0.914 mm of wall missing, 91% of R. A second, independent axis agrees: sweeping
+the tool radius at fixed d=0.2, ball seating predicts the limit at
+`RT* = d + R·tan(Δ/2) = 0.26555`, and `min_angle=5` accepts ≤0.26 and refuses ≥0.27.
+
+The geometric limit, derived independently rather than fitted: with the wall at x=0, the floor
+at y=0, a blend arc of radius R tangent at (0,R) and (R,0), and the convex edge at (0,H) with
+H=R+d, the seated ball's centre is (−R, d) and its wall contact is (0, d) — which lies on the
+flat wall iff d ≥ R smooth, or d ≥ R(1−tan(Δ/2)) = 0.934457 as tessellated.
+
+**This makes the rule easier to build than §4d implied.** Ball seating is *already implemented*
+in `seatOn`; the defect is only that "the face's extent" is taken as the whole 46°-smooth
+surface rather than the face the contact was meant to land on.
+
+**And it strengthens the case against the arc/relief alternative.** The `offFace` distribution
+here is 0.914457, 0.734457, 0.434457, 0.0344565, 0.00445653, 5.65e-05, 0 — linear in d and
+*continuous through zero*. There is no gap to put a constant in; any cut misclassifies a band
+of d its own width. Caveat from the agent: this is a straight extruded crease against a flat
+wall, and a doubly-curved wall might separate the two rules differently.
+
+**A scope correction to the section above.** `fillet_tool`'s blend surface is genuinely tangent
+— on the same straight corner it reads 7.5° interior and 4.6232°/6.6268° at the boundary. So
+the 46–91° ridges are **not** a property of the blend. On `cross` they are the bead's *runout
+onto the cylinder near the triple points*, at min-axis radius 5.93–5.96, measured up to
+103.797°. The finding stands; its scope is junctions, not blends.
+
+**Instrument note.** The agent's own control caught its component counter reading `comp=19` on
+a plain box — a Python chained-assignment bug corrupting union-find. Also: a plain rounded cube
+carries 792 creases above 11.25°, **all** on triangles below 1e-4 area, so an area floor is
+mandatory in any crease census here. **Not done:** `--repeat` on these cells, so trap 14's
+flakiness check is outstanding; the results are structural and reproduce across two axes and
+both brushed and unbrushed variants, but that is not the same thing.
+
 **Why the second pass is structurally in trouble, and it is not the classifier's fault.**
 `fillet()` uses one R for both passes, so the concave pass leaves surfaces already curved at R
 and an R-radius rolling ball essentially cannot fit against them. The ~2/3 refusal rate is
