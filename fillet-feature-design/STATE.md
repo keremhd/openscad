@@ -652,7 +652,9 @@ bead refusal counts are back. Six cases fail, in three families, and two of them
 **So it is not shipped.** The code is reverted for the same reason `06a12765a` was, and restored
 the same way: `git revert 32344c0da 9bfe516c8 0867e9f45 d0f10f6c0` puts back the local seat
 test, the mesh re-seat and the normal cone, in that order, and nothing else on the branch moves.
-`src/` at the revert is byte-identical to `2f8fad57d`, so the branch is where it was.
+`src/` at the revert is byte-identical to `2f8fad57d`, and the binary rebuilt from it is md5
+**`fd3dec78`** — the same binary the 21-cell baseline sweep was measured on, so no re-sweep is
+needed to say the branch is unchanged. The unit suite at the revert is 2230/2230, 88/88.
 
 **What that leaves.** The two-parameter split of §4d's last paragraph is now the only thing
 between this rule and a working size gate, and the rule to pair it with exists, is measured, and
