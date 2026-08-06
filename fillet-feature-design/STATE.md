@@ -1301,7 +1301,26 @@ by `167536b62`** and this list was wrong to carry it; an agent was sent to redo 
 that had landed two days earlier. `fillet-bench/README.md`'s stale table is removed,
 `7d7f13e16`. The user-facing known-defects section is written, `d3bf02df7`.
 
-**S4. Regenerate `fillet-bench/sheets/` and review them — A5, the one human check.** See item
+**S4. Regenerate `fillet-bench/sheets/` — RENDERED 2026-08-06. The human review is what remains.**
+Rendered on the shipping binary, md5 `fd3dec78` — the comment register produced a
+byte-identical binary, so these sheets and the 21-cell baseline sweep come from the same code.
+Two known answers verified before reading anything else: `tee_small` at defaults and at
+`$fn`=10 now read INVALID and name the fragment with its coordinates, where the old sheets said
+VALID; `shallow_crease` reads VALID, where a first regeneration false-redded it. Only those two
+tiles are not valid, which is consistent — the sheets are single-point at stock defaults, and
+the other 19 not-valid cells live on the `$fn` and radius axes the sheets do not walk.
+
+**Fixing the false red found instrument #17**, recorded in `TRAPS.md`: `sheet.sh` called
+`mesh.py` without the model's `// mesh.py-comp: N` declaration, so it got the answer wrong in
+both directions from one cause. `sweep.sh` had always passed it.
+
+**What the review is for**, since the numbers are now all green bar the two known rows: the
+junction renders. No pass in this effort has ever looked at one, and the record shows that
+blind spot cost twice — the corpus called the `arrivesStraight` branch clean and a single
+rendered junction found a fin with odd Euler characteristic inside it. The millimetre-scale
+slivers from S1's triage should be visible at tile size.
+
+*Original:* See item
 3a above for why the current sheets are not merely stale but carry a false acceptance. Do this
 after S2, on the binary that ships.
 

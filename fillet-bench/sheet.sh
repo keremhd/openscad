@@ -82,8 +82,14 @@ for entry in $tiles; do
       $=args -o $png models/$name.scad > $log 2>&1
   ${=BIN} $=FLAGS --backend=manifold --render $=args -o $off models/$name.scad >> $log 2>&1
 
+  # How many solids the model's source builds, declared in the .scad itself.
+  # Without it every model is asked for one solid, and shallow_crease -- which
+  # renders two plates as its whole point -- reads INVALID on a correct render.
+  wc=$(sed -n 's|^// *mesh\.py-comp: *\([0-9][0-9]*\).*|\1|p' models/$name.scad | head -1)
+  wc=${wc:-1}
+
   if [[ -f $off ]]; then
-    stat=$(python3 mesh.py $off 2>&1 | sed "s|$off: ||")
+    stat=$(python3 mesh.py --comp $wc $off 2>&1 | sed "s|$off: ||")
   else
     stat="NO OUTPUT"
   fi
