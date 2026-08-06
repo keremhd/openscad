@@ -804,23 +804,17 @@ std::vector<ChainContact> chainContacts(const MergedMesh& m,
     return best;
   };
 
-  // Where the ball really touches one of its walls, and whether that is a touch at
-  // all. Stepping off the ball centre along an averaged wall normal — what the
-  // sections themselves do — assumes the wall flat, and on a doubly curved wall
-  // that point sits off the surface by the sagitta r^2/2R however finely it is
-  // tessellated, so a bead on a dome would be refused for an artefact. The wall's
-  // own nearest point to the centre is on the wall by construction.
+  // Where the ball touches one of its walls, and whether that is a touch at all.
+  // The contact is the wall's own nearest point to the centre, not a step off the
+  // centre along an averaged normal: that assumes the wall flat and misses a
+  // curved one by the sagitta r^2/2R however finely it is tessellated. The blend
+  // has then left the surface precisely when that nearest point is on the wall's
+  // boundary rather than inside it — an exact test, not one against a tolerance.
   //
-  // It also states the test exactly rather than against a tolerance: the blend
-  // leaves the surface precisely when that nearest point is on the wall's boundary
-  // rather than inside it. The boundary is part of the wall, so its distance is
-  // never less than the wall's own; equal is what says the contact sits on it.
-  //
-  // `turned` means the chain changes walls on this side at this station — the
-  // spine's own corner. There the averaged normal seats a point on the crease
-  // between two walls, hence on the boundary of each at any size; that is the ball
-  // rolling from one wall onto the next, not a wall running out, so the question is
-  // left to the samples either side, which each ask about one wall.
+  // `turned` means the chain changes walls on this side here, at the spine's own
+  // corner. The averaged normal then seats a point on the crease between two walls,
+  // on the boundary of each at any size, so the question is left to the samples
+  // either side, which each ask about one wall.
   auto seatOn = [&](ChainContact& c, const Vector3d& n, int surface, int tri, Vector3d& T,
                     bool turned) {
     // How far from the crease a point this ball touches can be: out to the centre
@@ -1155,29 +1149,19 @@ std::vector<SizeVerdict> checkChainSizes(const MergedMesh& m,
       }
     }
 
-    // A much coarser floor than the tested samples use, and necessarily so. A
-    // tested sample sits in a wall's interior, where its miss is either exactly
-    // zero or macroscopic. Every exempt sample sits *on* a wall's boundary — that
-    // is what made it exempt — where the miss is one point computed two ways, and
-    // that residue would otherwise be read as geometry.
+    // Much coarser than the margin the tested samples use, because every exempt
+    // sample sits *on* a wall's boundary, where the miss is one point computed two
+    // ways and that residue would otherwise read as geometry.
     //
-    // Two independent quantities set the floor, hence the max. A crease that
-    // genuinely cannot carry the size misses by a fraction of the size: measured
-    // misses run from 2e-4 of it upward, so 1e-4 sits below every real one. What
-    // the subtraction cannot resolve instead scales with the coordinate magnitude:
-    // measured on right-angle box models (whose creases are exact, so every
-    // non-zero answer is arithmetic), across 288 runs and 984 creases at
-    // magnitudes from 40 to 1e4, the largest spurious miss was 2.4e-8 mm at 40 and
-    // 2.0e-6 mm at 1e4, never over 6e-10 of the magnitude. 1e-7 clears that by
-    // ~170. Too low a floor costs a refusal on a valid solid; too high a one costs
-    // the shattered solid this gate exists to stop.
-    //
-    // Past a coordinate magnitude of about 1e4 the same exact creases stop looking
-    // like round-off — 0.8 mm at 1e5, 1.2 mm at 1e6 — because the mesh itself has
-    // degraded. This term does not cover that; the result there is a refusal.
-    //
-    // Both terms scale with the model, so the same shape gets the same verdicts at
-    // any scale, and the coordinate term also floors a very small size.
+    // Two independent quantities set it, hence the max. A crease that genuinely
+    // cannot carry the size misses by a fraction of the size — measured misses run
+    // from 2e-4 of it upward. What the subtraction cannot resolve instead scales
+    // with the coordinate magnitude: on right-angle box models, whose creases are
+    // exact, 288 runs over 984 creases at magnitudes 40 to 1e4 gave a largest
+    // spurious miss of 6e-10 of the magnitude, which 1e-7 clears by ~170. Past a
+    // magnitude of 1e4 the same creases miss by 0.8 mm and up because the mesh
+    // itself has degraded; this does not cover that, and the result there is a
+    // refusal. Both terms scale with the model, so verdicts are scale-invariant.
     const double blindFloor = std::max(1e-4 * size, 1e-7 * coordMag);
     // Where both exemptions discarded every sample, fall back on the discarded
     // ones: passing such a crease unexamined answers "I could not look" as if it
@@ -1270,19 +1254,15 @@ std::array<Vector3d, 5> pentagonSection(const Vector3d& v, const Vector3d& nA, c
 
 // How far past a wall the tool has to stand at one station: a fixed hair, plus
 // however far that wall has fallen away from the plane the hair is measured in.
+// The hair is stepped off the crease point along the station's averaged wall
+// normal, so the tool's wall face lies in a plane tangent to the wall there; a
+// curved wall falls away from that plane by the sagitta over the setback — twenty
+// times the hair on a coarsely tessellated pipe — leaving a ledge one overshoot
+// deep along the tangency line that nothing downstream can tell from a real crease.
 //
-// The overshoot is stepped off the crease point along the station's averaged wall
-// normal, putting the tool's wall face in a plane tangent to the wall there. A
-// flat wall stays in that plane, which is why a fixed hair ever worked. A curved
-// wall falls away by the sagitta over the setback — twenty times the hair on a
-// coarsely tessellated pipe — so the face clears the wall at the station and
-// stands proud of it in between, leaving a ledge one overshoot deep along the
-// whole tangency line that nothing downstream can tell from a crease of the shape.
-//
-// The distance is asked at the tangency point, the far edge of the footprint and
-// so the deepest the wall gets under it. The wall is walked from the triangle the
-// station named, no further than the tangency point, and stops at the first
-// crease: a tangency point that has run off the end of its wall is the size gate's
+// Asked at the tangency point, the far edge of the footprint and so the deepest
+// the wall gets under it. The wall is walked no further than that point and stops
+// at the first crease: a tangency point off the end of its wall is the size gate's
 // business, and measured here would read the next wall as a dip.
 double wallOvershoot(const MergedMesh& m, const std::map<EdgeKey, std::vector<int>>& adj,
                      const Vector3d& v, const Vector3d& n, int tri, const Vector3d& T, double eps,
@@ -1561,17 +1541,14 @@ std::vector<std::vector<SpineBulge>> chainBulges(const MergedMesh& m,
 // collapsed) hull to nothing rather than to a bad solid and are dropped.
 //
 // A cell also carries the section at every crease vertex its chord passes inside
-// of, slid off the chord onto that vertex. The hull is then of three or more
-// sections rather than two, and since it contains the two-section hull it can only
-// cover more of the crease. The end faces are untouched, so two neighbouring cells
-// still meet on the one plane.
+// of, slid off the chord onto that vertex; the hull then contains the two-section
+// hull, so it can only cover more of the crease. End faces are untouched, so
+// neighbouring cells still meet on one plane.
 //
 // `runs` restricts the work to the stretches the brushes selected, empty meaning
-// all of it. Where a run starts or ends partway along a segment the two sections
-// are interpolated to that parameter, which is exact: hulling two sections IS the
-// linear interpolation of the cross-section between them, so slicing the cell at a
-// parameter and hulling to the section there give the same solid. The result is a
-// flat cap square to the spine, carrying the full cross-section.
+// all of it. Interpolating the two sections to a run's boundary is exact rather
+// than approximate: hulling two sections IS the linear interpolation of the
+// cross-section between them.
 template <typename Section, typename PointsOf, typename LerpOf>
 void appendChainCells(const Chain& chain, const std::vector<Section>& sections,
                       const PointsOf& pointsOf, LerpOf lerpOf,
@@ -1687,18 +1664,16 @@ double sectionClearance(const Points& pts, const Vector3d& anchor)
 //
 // Cells are cut at stations and both of a rounded tool's unions are cut at the
 // same ones, so a station hands the boolean a pair of coincident planes. Which way
-// it resolves them is arithmetic: the seam is left as a zero-thickness flap or cut
-// through as a slit, and the answer moves with the tessellation, the size and
-// where the model stands.
+// it resolves them is arithmetic — a zero-thickness flap or a slit — and the answer
+// moves with the tessellation, the size and where the model stands.
 //
 // The cover is the station's own section hulled with one point inside each
-// neighbouring cell. It approximates nothing: the hull of a planar section with a
-// point either side of its plane is the union of two cones, each the hull of a
-// subset of one cell, so it reaches the rim of the seam. A ball inscribed in the
-// section cannot — it leaves the annulus at the rim, where the flap survives.
-//
-// `anchorOf` is a point inside the section, where the apexes are taken from; the
-// two must see each other through the section's interior for the cones to meet.
+// neighbouring cell. That approximates nothing: the hull of a planar section with
+// a point either side of its plane is the union of two cones, each the hull of a
+// subset of one cell, so it reaches the rim of the seam where a ball inscribed in
+// the section cannot. `anchorOf` gives the point inside the section the apexes are
+// taken from; the two must see each other through the interior for the cones to
+// meet.
 template <typename Section, typename PointsOf, typename AnchorOf>
 void appendSeamCovers(const Chain& chain, const std::vector<Section>& sections,
                       const PointsOf& pointsOf, const AnchorOf& anchorOf,
@@ -1866,22 +1841,16 @@ bool endWindow(const MergedMesh& m, const Chain& chain, bool front, double reach
 // from it: `reach` of crease measured back from the end vertex, which is where
 // the bead is truncated and the corner takes over.
 //
-// Touching the vertex is not enough because the cell is a fixed size — hulled from
-// the seated ball and the sections the beads stop at, with no perpendicular to
-// clip it against in three directions at once. A brush reaching a corner by a
-// fraction of `reach` would still get the whole of it. The decision is therefore
-// binary at `reach`: cover it and get a corner, fall inside it and get none, with
-// the stretch that fell inside dropped by dropUncoveredCorners rather than built
-// as a stub meeting nothing.
+// Touching the vertex is not enough: the cell is a fixed size, with no
+// perpendicular to clip it against in three directions at once, so a brush
+// reaching a corner by a fraction of `reach` would still get the whole cell. The
+// decision is binary at `reach` — cover it and get a corner, fall inside it and
+// get none, with the stretch that fell inside dropped by dropUncoveredCorners.
 //
-// `reach` is the tool's own size — r for a rounded tool, not the trigonometric
-// setback r * tan(phi/2) the cross-section works in. The two agree only at a right
-// angle.
-//
-// A crease that was never selected does not stop a corner: two beads that were
-// built still meet at the vertex whether the third crease was refused for size,
-// turned the other way, or fell below the threshold. This rule protects only the
-// corner the caller reached for and did not cover.
+// `reach` is the tool's own size, r for a rounded tool, not the setback
+// r * tan(phi/2) the cross-section works in; the two agree only at a right angle.
+// A crease that was never selected does not stop a corner — this rule protects
+// only the corner the caller reached for and did not cover.
 bool endAnchored(const MergedMesh& m, const Chain& chain, bool front, double reach)
 {
   SpineInterval window;
@@ -2130,21 +2099,18 @@ std::vector<int> dropUncoveredCorners(const MergedMesh& m, std::vector<Chain>& c
     }
   }
 
-  // Three creases make a corner, and covering every one of them for `r` back from
-  // the vertex is what lets it be built. A vertex over the first count and short
-  // of the second is a corner that cannot be had, and everything cut short at it
-  // goes: the stubs here, and the cell itself through the set handed back.
+  // Three creases make a corner, and covering every one for `r` back from the
+  // vertex is what lets it be built. Short of that, everything cut short at the
+  // vertex goes: the stubs here, and the cell itself through the set handed back.
   //
-  // Both counts must be of the same arms or the rule inverts. Measured against the
-  // arms that survived the brush, a corner appeared as the brush shrank — an arm
-  // covered by less than the debounce leaves the selection outright, so two arms
-  // remained where three arrived, the vertex was never marked, and the cell came
-  // back at full size.
+  // Both counts must be of the same arms or the rule inverts: measured against the
+  // arms that survived the brush, an arm covered by less than the debounce leaves
+  // the selection outright, so two arms remain where three arrived, the vertex is
+  // never marked, and the cell comes back at full size — less brush, more material.
   //
-  // A vertex fewer than three creases arrive at is not this rule's business: two
-  // meeting because the third was never a candidate is a corner chainJunctions
-  // closes on its own. Nor is a corner the brush is nowhere near, which has no end
-  // covering its vertex and was never going to get a cell.
+  // A vertex fewer than three creases arrive at is chainJunctions' business, not
+  // this rule's; so is a corner the brush is nowhere near, which was never going to
+  // get a cell.
   std::set<int> uncovered;
   for (const auto& [v, count] : arms)
     if (count >= 3 && touching[v] > 0 && covering[v] < count) uncovered.insert(v);
@@ -2194,20 +2160,15 @@ std::vector<int> dropUncoveredCorners(const MergedMesh& m, std::vector<Chain>& c
 
 // Does a crease of the model leave this vertex unfilleted?
 //
-// A corner ball rounds across everything that arrives at a vertex. Where a sharp
-// edge of the model continues out of that vertex, there is nothing a ball can do
-// that lines up with it — it rounds the edge's own start away — so the two beads
-// that do arrive have to meet each other in a seam along that edge instead. Where
-// nothing sharp leaves, there is nothing to line up with and the ball is right.
+// A corner ball rounds across everything arriving at a vertex, so where a sharp
+// edge of the model continues out of it there is nothing a ball can do that lines
+// up — it rounds the edge's own start away — and the two beads that do arrive have
+// to meet each other in a seam along that edge instead.
 //
 // Why an edge counts is not asked: a crease the brush excluded, one refused for
-// size, and one turning the other way all leave the same sharp edge in the output.
-//
-// What counts as a crease of the model is `isFeatureAngle` and nothing else, the
-// same threshold the selection is made on. That keeps a tessellated wall out of
-// this — a cylinder's facet seams turn by a fraction of the threshold, so two bead
-// segments meeting at one still get their ball. Reading curvature off the
-// tessellation instead would put a seam at every facet boundary.
+// size, and one turning the other way all leave the same sharp edge. What counts
+// as a crease is `isFeatureAngle` and nothing else, the same threshold the
+// selection is made on, which is what keeps a tessellated wall out of this.
 std::set<EdgeKey> filletedEdges(const std::vector<Chain>& chains)
 {
   // Of the crease, not of the stations: a station placed along the spine is not a
@@ -2247,32 +2208,26 @@ bool creaseLeavesUnfilleted(const MergedMesh& m,
 // How far a bead may run past a seam vertex before it runs out of the part it is
 // running through.
 //
-// The overrun is free only where the part continues past the vertex: the bead runs
-// into the wall the unfilleted crease lies along, which for a concave blend is
-// solid and for a convex one is air outside the part. None of that holds for a
-// wall thinner than the overrun, one that turns away inside it, or one that ends
-// inside it — there the bead crosses a face nothing was blending and stands proud
-// of it.
+// The overrun is free only where the part continues past the vertex. It is not
+// free at a wall thinner than the overrun, one that turns away inside it, or one
+// that ends inside it — there the bead crosses a face nothing was blending and
+// stands proud of it. So the swept end of the bead is measured against the mesh:
+// every corner of the end profile is carried along the overrun direction and the
+// first face it crosses bounds the room.
 //
-// So the swept end of the bead is measured against the mesh: every corner of the
-// end profile is carried along the overrun direction and the first face it crosses
-// bounds the room. Faces of the vertex's own fan are not crossings — they are the
-// walls the bead is tangent to — and neither are faces the overrun merely runs
-// along, since a bead sliding tangentially past a curved wall's facets never
-// leaves it. Only a face the run pushes the bead OUT through can bound it, which
-// is what the outward normal is read for.
+// Faces of the vertex's own fan are not crossings — they are the walls the bead is
+// tangent to — and neither are faces the overrun merely runs along, since a bead
+// sliding tangentially past a curved wall's facets never leaves it. Only a face
+// the run pushes the bead OUT through can bound it, hence the outward normal test.
 //
-// A crossing counts whether it lies ahead of the profile corner or behind it.
-// Behind means the corner started on the far side already: at an opening angle
-// under a right angle the end profile's corner sits r*cos(theta) into the
+// A crossing counts behind the profile corner as well as ahead of it: at an
+// opening angle under a right angle the corner already sits r*cos(theta) into the
 // neighbouring wall, so a thinner wall has the bead poking out before the overrun
-// begins. Reading forward only left the overrun unbounded and put a bead a quarter
-// of a millimetre proud of a wall one and a half millimetres thick.
+// begins. Reading forward only left a bead a quarter of a millimetre proud of a
+// wall one and a half millimetres thick.
 //
 // `reach` is how far to look in BOTH directions, and the answer where nothing was
-// found. Backward it bounds how far out a face may already have been breached and
-// still be one this overrun would worsen: a bead standing more than its whole
-// overrun proud of a wall is a complaint about the radius, not about the seam.
+// found.
 double seamRoom(const MergedMesh& m, int vert, const std::vector<Vector3d>& from,
                 const Vector3d& dir, double reach)
 {
@@ -2344,24 +2299,18 @@ std::vector<Junction> chainJunctions(const MergedMesh& m,
   // An end the brushes cut short of r does not count: the corner cell is the full
   // seated ball whatever is selected, so building one where the brush covers only
   // part of the stretch it occupies puts material outside what was asked for. That
-  // is `noCorner`, handed over by the brush pass — the same vertices it drops the
-  // arriving stubs at, so cell and stubs go together.
+  // is `noCorner`, the same vertices the brush pass drops the arriving stubs at.
   //
-  // Two ends is enough anywhere else. Three creases may meet at a vertex with only
-  // two selected — the third refused for size, turning the other way, or too
-  // shallow — and the two beads that were built arrive tangent to the wall they
-  // share, their footprints crossing about a radius out at no angle at all. That
-  // cusp is something a boolean can only resolve into a flap; it happens at
-  // opening angles of 60, 75, 105 and 120 degrees. Ninety comes back clean only
-  // because the two beads are then mirror images and their intersection lands on
-  // the symmetry plane, which is a property of the mesh and not of the shape. The
-  // corner cell fills the valley, and is solved against every wall at the vertex,
-  // so the missing crease's wall is already one of the ball's constraints.
+  // Two ends is enough anywhere else, even where a third crease exists but was not
+  // selected: the two beads that were built arrive tangent to the wall they share,
+  // their footprints crossing about a radius out at no angle at all, and a boolean
+  // can only resolve that cusp into a flap. Measured at opening angles of 60, 75,
+  // 105 and 120 degrees; 90 comes back clean only because the beads are then mirror
+  // images, which is a property of the mesh and not of the shape.
   //
-  // Count only. Recording the station beside each end is wrong: a chain whose
-  // stations were placed along the spine carries no mesh vertex there, so the
-  // entry would be -1 and the next reader would index the mesh at -1. Where the
-  // neighbouring mesh vertex is wanted it is rawRun()[1].
+  // Count only — recording the station beside each end would store -1 for a chain
+  // whose stations were placed along the spine, and the next reader would index the
+  // mesh at -1. Where the neighbouring mesh vertex is wanted it is rawRun()[1].
   std::map<int, int> ends;  // vertex -> how many chain ends land on it
   for (const Chain& chain : chains) {
     int endFront = -1, endBack = -1;
