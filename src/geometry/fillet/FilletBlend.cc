@@ -26,6 +26,7 @@
 #include <cstdint>
 #include <map>
 #include <memory>
+#include <optional>
 #include <set>
 #include <utility>
 #include <vector>
@@ -404,6 +405,47 @@ struct Blender
   // points and arc points around u, fan-filled. Single-signed corners come out
   // as a crude fan for now (step 3 refines them to a ball cap); mixed-sign
   // vertices are the deferred saddle (step 5) and are filled crudely too.
+  // The ball seated at a single-sign junction: at distance r from every face
+  // incident to u, inside the material for a convex corner and out in the open
+  // valley for a concave one — the "put a ball at the corner" of §3a, which
+  // rounds a convex vertex off and fills a concave one. nullopt when the
+  // incident faces cannot pin a centre (fewer than three independent normals).
+  std::optional<Vector3d> cornerBall(int u, bool concave) const
+  {
+    std::vector<Vector3d> normals;
+    for (size_t t = 0; t < m.tris.size(); ++t) {
+      bool has = false;
+      for (const int k : m.tris[t].v)
+        if (k == u) has = true;
+      if (!has) continue;
+      const Vector3d n = m.tris[t].normal;
+      bool dup = false;
+      for (const auto& e : normals)
+        if (e.dot(n) > 0.999) dup = true;
+      if (!dup) normals.push_back(n);
+    }
+    // Greedily pick three mutually independent normals.
+    std::vector<Vector3d> basis;
+    for (const auto& n : normals) {
+      if (basis.empty()) { basis.push_back(n); continue; }
+      if (basis.size() == 1) {
+        if (basis[0].cross(n).norm() > 0.1) basis.push_back(n);
+        continue;
+      }
+      if (std::abs(basis[0].cross(basis[1]).dot(n)) > 0.1) { basis.push_back(n); break; }
+    }
+    if (basis.size() < 3) return std::nullopt;
+    Matrix3d N;
+    Vector3d rhs;
+    const double sgn = concave ? size : -size;  // inside (convex) vs valley (concave)
+    for (int i = 0; i < 3; ++i) {
+      N.row(i) = basis[i].transpose();
+      rhs[i] = sgn;
+    }
+    if (std::abs(N.determinant()) < 1e-9) return std::nullopt;
+    return Vector3d(m.pos[u] + N.inverse() * rhs);
+  }
+
   void emitCorner(int u)
   {
     // A corner patch is needed only at a genuine junction: a vertex where the
@@ -442,6 +484,32 @@ struct Blender
         std::vector<Vector3d> cs = crossSectionAt(u, SA, SB);
         if (S != SA) std::reverse(cs.begin(), cs.end());  // start on this run's surface
         for (size_t j = 1; j + 1 < cs.size(); ++j) ring.push_back(out.add(cs[j]));
+      }
+    }
+
+    // Sign of this junction: single-signed if every selected edge here agrees.
+    bool anyConcave = false, anyConvex = false;
+    for (const auto& [key, ts] : adj)
+      if ((key.first == u || key.second == u) && selected.count(key))
+        (concaveOf.at(key) ? anyConcave : anyConvex) = true;
+    const bool mixed = anyConcave && anyConvex;
+
+    // Single-signed corner: seat the fan apex on the ball (§3a) so it rounds a
+    // convex vertex off / fills a concave one, instead of the crude centroid fan
+    // that sinks inside the sphere. The ring vertices are shared with the strips
+    // and must not move; only the new apex is placed, on the sphere above the
+    // ring. Chamfer corners are already flat and keep the plain fan. Mixed-sign
+    // vertices are the deferred saddle (step 5) and stay a crude fan for now.
+    if (!isChamfer && !mixed && ring.size() >= 3) {
+      if (auto C = cornerBall(u, anyConcave)) {
+        Vector3d centroid = Vector3d::Zero();
+        for (const int i : ring) centroid += out.V[i];
+        centroid /= static_cast<double>(ring.size());
+        const Vector3d dir = (centroid - *C).normalized();
+        const int apex = out.add(*C + size * dir);
+        const int n2 = static_cast<int>(ring.size());
+        for (int i = 0; i < n2; ++i) out.tri(apex, ring[i], ring[(i + 1) % n2]);
+        return;
       }
     }
     out.fan(ring);
