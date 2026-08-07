@@ -1,3 +1,8 @@
+> **HISTORICAL — do not implement from this.** Describes the *old* four-`*_tool` API of the
+> swept-tool implementation being replaced. Its **promises** are inherited into
+> `REQUIREMENTS.md` §5; its **API is superseded**. Current spec: [START-HERE.md](START-HERE.md) →
+> [REQUIREMENTS.md](REQUIREMENTS.md).
+
 # Fillet operator — design and acceptance criteria
 
 The gate the feature ships against. Everything not required here is a release note, not work.

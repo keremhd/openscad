@@ -1,3 +1,6 @@
+> **HISTORICAL — obsolete plan.** The *old* swept-tool implementation plan. Do not implement from
+> it. Current spec: [START-HERE.md](START-HERE.md) → [REQUIREMENTS.md](REQUIREMENTS.md).
+
 # OpenSCAD Fillet / Round / Chamfer Operator — Implementation Plan
 
 Target: new C++ nodes in OpenSCAD that generate **fillet tool solids** from an

@@ -1,3 +1,7 @@
+> **HISTORICAL — do not implement from this.** State of the *old* swept-tool implementation being
+> replaced. Context only. Current spec: [START-HERE.md](START-HERE.md) →
+> [REQUIREMENTS.md](REQUIREMENTS.md).
+
 # State of the fillet feature — 2026-08-04
 
 A description of where the work stands, not a plan. Written to be forked from: it says what is

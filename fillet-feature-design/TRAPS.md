@@ -1,3 +1,9 @@
+> **HISTORICAL — mostly archaeology.** From the *old* swept-tool effort. Durable and still useful:
+> ~6 environment facts (locale, ASan, the build watchdog, ccache, BSD sed, python tooling) and 3
+> measurement rules (state the weld tolerance; quote vertex counts beside verdicts; run a new
+> instrument on a known answer). Do not implement from the rest. Current spec:
+> [START-HERE.md](START-HERE.md) → [REQUIREMENTS.md](REQUIREMENTS.md).
+
 # Traps, broken instruments, and corrections to the record
 
 Extracted from the handoffs so it survives their archiving. Each item cost hours at least once.

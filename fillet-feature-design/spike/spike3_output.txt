@@ -1,0 +1,286 @@
+{
+  "REQ1_convex_coarse": {
+    "stations=2": {
+      "n_stations": 2,
+      "watertight": true,
+      "boundary_edges": 0,
+      "nonmanifold": 0,
+      "orient_mismatch": 0,
+      "euler": 2,
+      "dup_faces": 0,
+      "verts": 289,
+      "faces": 574,
+      "max_span_poke": 0.0
+    },
+    "stations=3": {
+      "n_stations": 3,
+      "watertight": true,
+      "boundary_edges": 0,
+      "nonmanifold": 0,
+      "orient_mismatch": 0,
+      "euler": 2,
+      "dup_faces": 0,
+      "verts": 290,
+      "faces": 576,
+      "max_span_poke": 0.0
+    },
+    "stations=5": {
+      "n_stations": 5,
+      "watertight": true,
+      "boundary_edges": 0,
+      "nonmanifold": 0,
+      "orient_mismatch": 0,
+      "euler": 2,
+      "dup_faces": 0,
+      "verts": 292,
+      "faces": 580,
+      "max_span_poke": 0.0
+    },
+    "stations=12": {
+      "n_stations": 11,
+      "watertight": true,
+      "boundary_edges": 0,
+      "nonmanifold": 0,
+      "orient_mismatch": 0,
+      "euler": 2,
+      "dup_faces": 0,
+      "verts": 298,
+      "faces": 592,
+      "max_span_poke": 0.0
+    }
+  },
+  "REQ2_dent_coarse_nobridge": {
+    "per_span": [
+      {
+        "span": [
+          0,
+          8
+        ],
+        "poke_mm": 0.0479,
+        "pokes": true
+      },
+      {
+        "span": [
+          8,
+          16
+        ],
+        "poke_mm": 0.0,
+        "pokes": false
+      },
+      {
+        "span": [
+          16,
+          24
+        ],
+        "poke_mm": 0.764,
+        "pokes": true
+      },
+      {
+        "span": [
+          24,
+          40
+        ],
+        "poke_mm": 0.0,
+        "pokes": false
+      }
+    ],
+    "open_spans": [
+      [
+        0,
+        8
+      ],
+      [
+        16,
+        24
+      ]
+    ],
+    "boundary_edges": 40,
+    "nonmanifold": 0,
+    "watertight": false,
+    "note": "non-poking spans are watertight even coarse; the hole is ONLY on the poking span => poke-caused, not tessellation mismatch"
+  },
+  "REQ3_local_bridge": {
+    "local_bridge": {
+      "n_stations": 14,
+      "corridor_seam_verts": 14,
+      "bridge_added_verts": 9,
+      "verts": 301,
+      "faces": 598,
+      "watertight": true,
+      "boundary_edges": 0,
+      "nonmanifold": 0,
+      "orient_mismatch": 0,
+      "euler": 2,
+      "dup_faces": 0
+    },
+    "full_res_revert": {
+      "n_stations": 41,
+      "corridor_seam_verts": 41,
+      "verts": 328,
+      "faces": 652,
+      "watertight": true
+    },
+    "note": "local bridge inserts fine seam nodes only over the concave sub-interval; shoulders stay coarse"
+  },
+  "REQ4_subdiv_limit": [
+    {
+      "subdiv_limit": 0,
+      "nobridge_stations": 5,
+      "nobridge_open_spans": 2,
+      "nobridge_boundary_edges": 40,
+      "nobridge_watertight": false,
+      "bridge_stations": 14,
+      "bridge_watertight": true,
+      "bridge_verts": 301
+    },
+    {
+      "subdiv_limit": 1,
+      "nobridge_stations": 5,
+      "nobridge_open_spans": 2,
+      "nobridge_boundary_edges": 40,
+      "nobridge_watertight": false,
+      "bridge_stations": 14,
+      "bridge_watertight": true,
+      "bridge_verts": 301
+    },
+    {
+      "subdiv_limit": 2,
+      "nobridge_stations": 5,
+      "nobridge_open_spans": 2,
+      "nobridge_boundary_edges": 40,
+      "nobridge_watertight": false,
+      "bridge_stations": 14,
+      "bridge_watertight": true,
+      "bridge_verts": 301
+    },
+    {
+      "subdiv_limit": 3,
+      "nobridge_stations": 5,
+      "nobridge_open_spans": 2,
+      "nobridge_boundary_edges": 40,
+      "nobridge_watertight": false,
+      "bridge_stations": 14,
+      "bridge_watertight": true,
+      "bridge_verts": 301
+    }
+  ],
+  "REQ5_determinism": {
+    "all_match": true,
+    "per_trial": [
+      true,
+      true,
+      true
+    ]
+  },
+  "REQ5_ray_midfacet": {
+    "n": 39,
+    "node_gap_max": 1.7763568394002505e-15,
+    "midfacet_gap_max": 0.1028354795474049,
+    "midfacet_gap_mean": 0.03726190811333904
+  },
+  "side_filter": {
+    "total_faces": 12,
+    "near_side_faces": 2,
+    "far_side_faces": 2
+  },
+  "BONUS_dome": {
+    "dome_faces": 624,
+    "contacts_found": 24,
+    "section_facets_walked": 82,
+    "contact_determinism_under_shuffle": true,
+    "doubly_curved_dent_pokeout_mm": 1.5009,
+    "note": "contact/clip/poke primitives ported to a doubly-curved icosphere; full bridged dome-seam mesh NOT built (scope limit)"
+  },
+  "REQ_locality_two_axis": {
+    "axis_a_refine_wall_away": [
+      {
+        "bg_nodes": 9,
+        "total_nodes": 15,
+        "bridge_added_verts": 3,
+        "corridor_seam_verts": 7,
+        "roundish3_wholespan_added": 9,
+        "watertight": true
+      },
+      {
+        "bg_nodes": 17,
+        "total_nodes": 19,
+        "bridge_added_verts": 3,
+        "corridor_seam_verts": 7,
+        "roundish3_wholespan_added": 11,
+        "watertight": true
+      },
+      {
+        "bg_nodes": 33,
+        "total_nodes": 29,
+        "bridge_added_verts": 3,
+        "corridor_seam_verts": 7,
+        "roundish3_wholespan_added": 15,
+        "watertight": true
+      },
+      {
+        "bg_nodes": 65,
+        "total_nodes": 47,
+        "bridge_added_verts": 3,
+        "corridor_seam_verts": 7,
+        "roundish3_wholespan_added": 19,
+        "watertight": true
+      },
+      {
+        "bg_nodes": 129,
+        "total_nodes": 85,
+        "bridge_added_verts": 3,
+        "corridor_seam_verts": 7,
+        "roundish3_wholespan_added": 31,
+        "watertight": true
+      },
+      {
+        "bg_nodes": 257,
+        "total_nodes": 159,
+        "bridge_added_verts": 3,
+        "corridor_seam_verts": 7,
+        "roundish3_wholespan_added": 55,
+        "watertight": true
+      }
+    ],
+    "axis_b_refine_dent": [
+      {
+        "dent_nodes": 5,
+        "total_nodes": 25,
+        "bridge_added_verts": 1,
+        "corridor_seam_verts": 5,
+        "watertight": true
+      },
+      {
+        "dent_nodes": 9,
+        "total_nodes": 29,
+        "bridge_added_verts": 3,
+        "corridor_seam_verts": 7,
+        "watertight": true
+      },
+      {
+        "dent_nodes": 17,
+        "total_nodes": 37,
+        "bridge_added_verts": 7,
+        "corridor_seam_verts": 11,
+        "watertight": true
+      },
+      {
+        "dent_nodes": 33,
+        "total_nodes": 53,
+        "bridge_added_verts": 13,
+        "corridor_seam_verts": 17,
+        "watertight": true
+      },
+      {
+        "dent_nodes": 65,
+        "total_nodes": 85,
+        "bridge_added_verts": 27,
+        "corridor_seam_verts": 31,
+        "watertight": true
+      }
+    ],
+    "axis_a_flat": true,
+    "axis_b_grows": true,
+    "verdict": "BOUNDED: bridge cost tracks the concave feature only"
+  }
+}
