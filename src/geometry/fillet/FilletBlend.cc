@@ -191,6 +191,7 @@ struct Blender
                     // point counts and every strip closes (set in buildBlend)
 
   std::set<EdgeKey> selected;                 // the edges this call acts on
+  std::set<EdgeKey> feature;                  // all crease edges (selected or not)
   std::map<EdgeKey, bool> concaveOf;          // sign per selected edge
   OutMesh out;
 
@@ -234,14 +235,17 @@ struct Blender
     return p;
   }
 
-  // The selected edges incident to vertex u that bound surface S (both incident
-  // triangles considered), as neighbour-vertex ids.
+  // The feature edges incident to vertex u that bound surface S (both incident
+  // triangles considered), as neighbour-vertex ids. Selected and kept-sharp
+  // edges alike: a kept edge is an offset line of zero setback, so the mitre
+  // slides the inset along it rather than off it — which is what keeps a partly
+  // selected surface (a brush, a one-sided sign filter) sewn to its sharp part.
   std::vector<int> boundaryEdgesOf(int u, int S) const
   {
     std::vector<int> nb;
     for (const auto& [key, ts] : adj) {
       if (key.first != u && key.second != u) continue;
-      if (!selected.count(key)) continue;
+      if (!feature.count(key)) continue;
       const int x = key.first == u ? key.second : key.first;
       for (const int t : ts)
         if (surfaceOf[t] == S) {
@@ -253,15 +257,17 @@ struct Blender
   }
 
   // Where vertex u lands on surface S once its selected boundary edges are set
-  // back: the mitre of the two offset lines (one offset line where only one
-  // boundary edge is selected, u itself where none is).
+  // back: the mitre of the two offset lines. A kept-sharp boundary edge offsets
+  // by zero, so its line passes through u and the mitre slides the inset along
+  // it; two kept edges leave u put.
   Vector3d insetPoint(int u, int S) const
   {
-    const std::vector<int> nb = boundaryEdgesOf(u, S);
+    std::vector<int> nb = boundaryEdgesOf(u, S);
     if (nb.empty()) return m.pos[u];
     auto offsetLine = [&](int x, Vector3d& base, Vector3d& dir) {
       const int t = triInSurface(u, x, S);
-      const double s = setback({std::min(u, x), std::max(u, x)});
+      const EdgeKey e{std::min(u, x), std::max(u, x)};
+      const double s = selected.count(e) ? setback(e) : 0.0;
       const Vector3d p = perpInto(u, x, t);
       base = m.pos[u] + s * p;
       dir = (m.pos[x] - m.pos[u]).normalized();
@@ -271,6 +277,15 @@ struct Blender
       offsetLine(nb[0], base, dir);
       return base;
     }
+    // With more than two feature edges bounding S at u (a non-disk patch corner),
+    // mitre the two carrying the largest setback — the ones that actually move u.
+    std::sort(nb.begin(), nb.end(), [&](int a, int c) {
+      const double sa = selected.count({std::min(u, a), std::max(u, a)})
+                          ? setback({std::min(u, a), std::max(u, a)}) : 0.0;
+      const double sc = selected.count({std::min(u, c), std::max(u, c)})
+                          ? setback({std::min(u, c), std::max(u, c)}) : 0.0;
+      return sa > sc;
+    });
     Vector3d b1, d1, b2, d2;
     offsetLine(nb[0], b1, d1);
     offsetLine(nb[1], b2, d2);
@@ -585,6 +600,7 @@ std::shared_ptr<const Geometry> buildBlend(
     const EdgeClass ec = classifyEdge(m, key, m.tris[ts[0]], m.tris[ts[1]]);
     if (!isFeatureAngle(ec.dihedralDeg, thresholdDeg)) continue;
     ++features;
+    b.feature.insert(key);
     const bool want = ec.concave ? node.concave : node.convex;
     if (!want) continue;
     b.selected.insert(key);
@@ -599,16 +615,19 @@ std::shared_ptr<const Geometry> buildBlend(
     return target;
   }
 
-  // Step-2 scope: the full topological bevel is implemented for the whole-model
-  // selection (no brush, both signs). A brush or a one-sided sign filter leaves
-  // some feature edges as kept-sharp surface boundaries — partial-selection
-  // topology (steps 4). Until then, refuse to build rather than emit a torn
-  // mesh, and return the model unchanged (a documented gap, not a silent drop).
+  // Partial selection — a brush, or a one-sided convex/concave filter on a model
+  // that has both signs — leaves some feature edges as kept-sharp surface
+  // boundaries. Closing that manifold needs per-vertex splitting where a kept
+  // edge borders a blended surface (a full topological bevel, step 4); the
+  // whole-model selection this file builds does not. Until step 4 lands, refuse
+  // to emit a torn mesh: return the model unchanged, loudly (promise 1 — a false
+  // refusal is the safe error). The feature/kept-edge groundwork above already
+  // slides the inset along kept edges, so full-selection stays exact.
   const bool partial = (brush && !brush->isEmpty()) || b.selected.size() != features;
   if (partial) {
     LOG(message_group::Warning, node.modinst->location(), "",
-        "%1$s: partial selection (brush or one-sided convex/concave) is not built yet; "
-        "the model is returned unchanged [%2$d of %3$d feature edges selected]",
+        "%1$s: partial selection (a brush, or one-sided convex/concave on a two-sign model) is "
+        "not built yet; the model is returned unchanged [%2$d of %3$d feature edges selected]",
         node.name(), static_cast<int>(b.selected.size()), static_cast<int>(features));
     return target;
   }
