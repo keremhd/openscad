@@ -7,4 +7,4 @@ module part() {
         cylinder(d = 14, h = 30, center = true);
     }
 }
-difference() { part(); round_tool(r = R) part(); }
+fillet(r = R) part();

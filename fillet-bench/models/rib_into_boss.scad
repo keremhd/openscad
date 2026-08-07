@@ -15,7 +15,4 @@ module part() {
 // A slab at plate level: it covers the base creases and cuts the vertical ones
 // off a half-millimetre up, which is what leaves them unfilleted.
 module brush() translate([-200, -200, 4]) cube([400, 400, 1.5]);
-union() {
-    part();
-    fillet_tool(r = R) { part(); brush(); }
-}
+fillet(r = R) { part(); brush(); }

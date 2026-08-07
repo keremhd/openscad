@@ -3,7 +3,4 @@
 FNSET = 0; $fn = FNSET;
 R = 2;
 module part() { cube([40, 20, 12], center = true); }
-union() {
-    part();
-    fillet_tool(r = R) { part(); translate([0, 10, 6]) cube([44, 8, 8], center = true); }
-}
+fillet(r = R) { part(); translate([0, 10, 6]) cube([44, 8, 8], center = true); }

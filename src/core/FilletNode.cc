@@ -33,19 +33,21 @@
 #include "core/module.h"
 #include "core/node.h"
 
-// Child 0 is the target whose edges are analysed; children 1+ are selection
-// brushes. Edge analysis and tool construction happen at geometry evaluation.
-static std::shared_ptr<AbstractNode> builtin_fillet_impl(const ModuleInstantiation *inst,
-                                                         Arguments arguments,
-                                                         const Children& children, FilletType type)
+// Both operators: child 0 is the model, children 1+ are selection brushes. Each
+// consumes its children and returns the finished blended solid, built at geometry
+// evaluation. `type` is FILLET (arc) or CHAMFER (flat cut); the per-edge sign is
+// read from the mesh and gated by convex=/concave=.
+static std::shared_ptr<AbstractNode> builtin_blend_impl(const ModuleInstantiation *inst,
+                                                        Arguments arguments,
+                                                        const Children& children, FilletType type)
 {
-  // FILLET/ROUND take a radius r, CHAMFER/BEVEL a setback t. Both spellings are
-  // accepted; the type's primary name binds to the first positional argument.
-  const bool isChamfer = (type == FilletType::CHAMFER || type == FilletType::BEVEL);
-  Parameters parameters =
-    Parameters::parse(std::move(arguments), inst->location(),
-                      isChamfer ? std::vector<std::string>{"t", "r", "min_angle", "debug"}
-                                : std::vector<std::string>{"r", "t", "min_angle", "debug"});
+  // fillet takes a radius r, chamfer a setback t. The primary name binds to the
+  // first positional argument; the other spelling is accepted for convenience.
+  const bool isChamfer = (type == FilletType::CHAMFER);
+  Parameters parameters = Parameters::parse(
+    std::move(arguments), inst->location(),
+    isChamfer ? std::vector<std::string>{"t", "r", "min_angle", "convex", "concave"}
+              : std::vector<std::string>{"r", "t", "min_angle", "convex", "concave"});
 
   auto node =
     std::make_shared<FilletNode>(inst, type, CurveDiscretizer(parameters, inst->location()));
@@ -61,149 +63,66 @@ static std::shared_ptr<AbstractNode> builtin_fillet_impl(const ModuleInstantiati
   if (parameters["min_angle"].type() == Value::Type::NUMBER) {
     node->min_angle = parameters["min_angle"].toDouble();
   }
-
-  if (parameters["debug"].type() == Value::Type::BOOL) {
-    node->debug = parameters["debug"].toBool();
-  }
+  if (parameters["convex"].type() == Value::Type::BOOL) node->convex = parameters["convex"].toBool();
+  if (parameters["concave"].type() == Value::Type::BOOL)
+    node->concave = parameters["concave"].toBool();
 
   return children.instantiate(node);
 }
 
-static std::shared_ptr<AbstractNode> builtin_fillet_tool(const ModuleInstantiation *inst,
-                                                        Arguments arguments, const Children& children)
-{
-  return builtin_fillet_impl(inst, std::move(arguments), children, FilletType::FILLET);
-}
-
-static std::shared_ptr<AbstractNode> builtin_round_tool(const ModuleInstantiation *inst,
-                                                       Arguments arguments, const Children& children)
-{
-  return builtin_fillet_impl(inst, std::move(arguments), children, FilletType::ROUND);
-}
-
-static std::shared_ptr<AbstractNode> builtin_chamfer_tool(const ModuleInstantiation *inst,
-                                                         Arguments arguments, const Children& children)
-{
-  return builtin_fillet_impl(inst, std::move(arguments), children, FilletType::CHAMFER);
-}
-
-static std::shared_ptr<AbstractNode> builtin_bevel_tool(const ModuleInstantiation *inst,
-                                                       Arguments arguments, const Children& children)
-{
-  return builtin_fillet_impl(inst, std::move(arguments), children, FilletType::BEVEL);
-}
-
-// Equivalent to: union the inner tool onto the child, then subtract the outer
-// tool from that union. The order matters — the round pass must be measured
-// against the solid the fillet pass left. A bead that runs out onto a face of
-// the model leaves its end cross-section standing in that face, and a round pass
-// that never saw the bead leaves that crescent as a sharp lip.
-//
-// Under $preview the node hands back its child untouched: the tools cost a mesh
-// analysis and two booleans per evaluation. disable_preview = false asks for them
-// anyway. The four *_tool nodes do not do this, since a tool is a solid the user
-// composes with by hand and one that vanished under preview would break every
-// composition built from it.
 static std::shared_ptr<AbstractNode> builtin_fillet(const ModuleInstantiation *inst,
                                                     Arguments arguments, const Children& children)
 {
-  Parameters parameters =
-    Parameters::parse(std::move(arguments), inst->location(),
-                      {"r", "inner", "outer", "min_angle", "disable_preview"});
+  return builtin_blend_impl(inst, std::move(arguments), children, FilletType::FILLET);
+}
 
-  const bool disable_preview = parameters["disable_preview"].type() == Value::Type::BOOL
-                                 ? parameters["disable_preview"].toBool()
-                                 : true;
-  const bool preview =
-    parameters["$preview"].type() == Value::Type::BOOL && parameters["$preview"].toBool();
-  if (preview && disable_preview) {
-    // Child 0 only: children 1+ are selection brushes, not geometry, and passing
-    // them through would put the brush in the model.
-    return children.instantiate(std::make_shared<GroupNode>(inst, "fillet"), {0});
-  }
-
-  auto node = std::make_shared<FilletNode>(inst, FilletType::APPLY,
-                                           CurveDiscretizer(parameters, inst->location()));
-  node->disable_preview = disable_preview;
-
-  if (parameters["r"].type() == Value::Type::NUMBER) node->size = parameters["r"].toDouble();
-  if (parameters["inner"].type() == Value::Type::BOOL) node->inner = parameters["inner"].toBool();
-  if (parameters["outer"].type() == Value::Type::BOOL) node->outer = parameters["outer"].toBool();
-  // Both halves share the threshold: it says which edges of the target are
-  // features, which cannot depend on which sign is being built.
-  if (parameters["min_angle"].type() == Value::Type::NUMBER) {
-    node->min_angle = parameters["min_angle"].toDouble();
-  }
-
-  return children.instantiate(node);
+static std::shared_ptr<AbstractNode> builtin_chamfer(const ModuleInstantiation *inst,
+                                                     Arguments arguments, const Children& children)
+{
+  return builtin_blend_impl(inst, std::move(arguments), children, FilletType::CHAMFER);
 }
 
 std::string FilletNode::name() const
 {
   switch (this->type) {
-  case FilletType::FILLET:  return "fillet_tool"; break;
-  case FilletType::ROUND:   return "round_tool"; break;
-  case FilletType::CHAMFER: return "chamfer_tool"; break;
+  case FilletType::CHAMFER: return "chamfer"; break;
   case FilletType::BEVEL:   return "bevel_tool"; break;
-  case FilletType::APPLY:   return "fillet"; break;
-  default:                  assert(false);
+  case FilletType::ROUND:   return "round_tool"; break;
+  case FilletType::FILLET:
+  case FilletType::APPLY:
+  default:                  return "fillet";
   }
-  return "internal_error";
 }
 
 std::string FilletNode::toString() const
 {
   std::ostringstream stream;
-  // The wrapper has no setback spelling and no debug overlay, and carries two
-  // switches the tools do not.
-  if (this->type == FilletType::APPLY) {
-    stream << this->name() << "(" << this->discretizer << ", r = " << this->size;
-    if (!this->inner) stream << ", inner = false";
-    if (!this->outer) stream << ", outer = false";
-    if (this->min_angle >= 0) stream << ", min_angle = " << this->min_angle;
-    if (!this->disable_preview) stream << ", disable_preview = false";
-    stream << ")";
-    return stream.str();
-  }
-
-  const bool isChamfer = (type == FilletType::CHAMFER || type == FilletType::BEVEL);
+  const bool isChamfer = (this->type == FilletType::CHAMFER);
   stream << this->name() << "(" << this->discretizer << ", " << (isChamfer ? "t = " : "r = ")
          << this->size;
   if (this->min_angle >= 0) stream << ", min_angle = " << this->min_angle;
-  if (this->debug) stream << ", debug = true";
+  if (!this->convex) stream << ", convex = false";
+  if (!this->concave) stream << ", concave = false";
   stream << ")";
   return stream.str();
 }
 
-// Without Manifold there is no tool builder, so the modules are left unregistered
+// Without Manifold there is no blend builder, so the modules are left unregistered
 // rather than registered and inert: an unregistered module raises an unknown-module
 // error naming the line, where a module evaluating to no geometry would silently
-// delete the model fillet() was applied to.
+// delete the model the operator was applied to.
 #ifdef ENABLE_MANIFOLD
 void register_builtin_fillet()
 {
-  Builtins::init("fillet_tool", new BuiltinModule(builtin_fillet_tool, &Feature::ExperimentalFillet),
-                 {
-                   "fillet_tool(r = number)",
-                 });
-  Builtins::init("round_tool", new BuiltinModule(builtin_round_tool, &Feature::ExperimentalFillet),
-                 {
-                   "round_tool(r = number)",
-                 });
-  Builtins::init("chamfer_tool",
-                 new BuiltinModule(builtin_chamfer_tool, &Feature::ExperimentalFillet),
-                 {
-                   "chamfer_tool(t = number)",
-                 });
-  Builtins::init("bevel_tool", new BuiltinModule(builtin_bevel_tool, &Feature::ExperimentalFillet),
-                 {
-                   "bevel_tool(t = number)",
-                 });
   Builtins::init("fillet", new BuiltinModule(builtin_fillet, &Feature::ExperimentalFillet),
                  {
                    "fillet(r = number)",
-                   "fillet(r = number, inner = bool, outer = bool, min_angle = number, "
-                   "disable_preview = bool)",
+                   "fillet(r = number, min_angle = number, convex = bool, concave = bool)",
+                 });
+  Builtins::init("chamfer", new BuiltinModule(builtin_chamfer, &Feature::ExperimentalFillet),
+                 {
+                   "chamfer(t = number)",
+                   "chamfer(t = number, min_angle = number, convex = bool, concave = bool)",
                  });
 }
 #else

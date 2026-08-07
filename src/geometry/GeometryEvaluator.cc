@@ -37,7 +37,7 @@
 #include "geometry/Polygon2d.h"
 #include "geometry/boolean_utils.h"
 #include "geometry/cgal/cgal.h"
-#include "geometry/fillet/FilletBuilder.h"
+#include "geometry/fillet/FilletBlend.h"
 #include "geometry/linalg.h"
 #include "geometry/linear_extrude.h"
 #include "geometry/roof_ss.h"
@@ -992,16 +992,15 @@ Response GeometryEvaluator::visit(State& state, const CgalAdvNode& node)
 }
 
 /*!
-   input: List of 3D objects (child 0 = target, children 1+ = brushes)
-   output: a tool solid, to be unioned (concave tools) or subtracted (convex);
-           or, for the fillet() wrapper, the composed result
+   input: List of 3D objects (child 0 = model, children 1+ = selection brushes)
+   output: the finished blended solid (fillet arc or chamfer cut), both signs in
+           one pass
    operation:
-    o Extract child 0's mesh, rebuild edge adjacency, classify its edges and walk
-      the selected ones into chains, then build the tool along them. Children 1+
-      are unioned into one selection brush; where it is present, only the
-      stretches of crease inside it are built.
-    o fillet() is the same work twice over, once per sign, composed with the
-      target rather than handed back for the caller to compose.
+    o Extract child 0's mesh, classify its edges, and edit the mesh directly along
+      the selected creases (§7a B1): concave edges gain a blend strip (material
+      added), convex edges are bevelled back (material removed). Children 1+ are
+      unioned into one selection brush; where it is present, only the stretches of
+      crease inside it are built.
  */
 Response GeometryEvaluator::visit(State& state, const FilletNode& node)
 {
@@ -1033,34 +1032,11 @@ Response GeometryEvaluator::visit(State& state, const FilletNode& node)
             manifold::Manifold::BatchBoolean(brushParts, manifold::OpType::Add));
         }
 
-        if (node.type == FilletType::APPLY) {
-          // difference(union(child, fillet_tool), round_tool), with the round
-          // tool measured against the solid the fillet pass left rather than
-          // against the original child. "Then" is load-bearing: where an inner
-          // bead runs out onto a face of the model it leaves its end
-          // cross-section standing in that face, and a round pass that never saw
-          // the bead leaves that crescent as a sharp lip over the outline it
-          // rounded beside it.
-          auto blended = target;
-          if (node.inner) {
-            if (auto tool = ManifoldUtils::createManifoldFromGeometry(
-                  buildFilletTool(node, FilletType::FILLET, target, brush));
-                tool && !tool->isEmpty()) {
-              blended = std::make_shared<ManifoldGeometry>(*blended + *tool);
-            }
-          }
-          ManifoldGeometry result = *blended;
-          if (node.outer) {
-            if (auto tool = ManifoldUtils::createManifoldFromGeometry(
-                  buildFilletTool(node, FilletType::ROUND, blended, brush));
-                tool && !tool->isEmpty()) {
-              result = result - *tool;
-            }
-          }
-          geom = std::make_shared<ManifoldGeometry>(std::move(result));
-        } else {
-          geom = buildFilletTool(node, node.type, target, brush);
-        }
+        // The operator consumes its children and returns the finished blended
+        // solid: a direct topological bevel of the target, adding material on
+        // concave edges and removing it on convex ones in one pass (§1, §7a). No
+        // boolean composition here — the sign is where the blend strip lands.
+        geom = buildBlend(node, target, brush);
       }
 #else
       LOG(message_group::Warning, node.modinst->location(), this->tree.getDocumentPath(),

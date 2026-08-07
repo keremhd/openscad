@@ -26,11 +26,14 @@
 #include "core/node.h"
 #include "geometry/linalg.h"
 
-// The four fillet/round/chamfer/bevel tool nodes, plus the fillet() wrapper.
-// Convexity sign is baked into the tool names: FILLET/CHAMFER are concave tools
-// the caller unions; ROUND/BEVEL are convex tools the caller subtracts. APPLY is
-// not a tool at all — it is the node that builds a concave and a convex tool
-// from one target and composes both with it.
+// The two blending operators. fillet() applies a circular-arc blend, chamfer() a
+// flat cut; each consumes its children (child 0 the model, children 1+ selection
+// brushes) and returns the finished blended solid, adding material on concave
+// edges and removing it on convex ones in one pass. The type is which of the two,
+// not a sign — sign is read per edge from the mesh and gated by convex/concave.
+//
+// (ROUND/BEVEL/APPLY are retained only so the swept-tool internals still compile
+// during the Path-B rewrite; the new operators never build those types.)
 enum class FilletType { FILLET, ROUND, CHAMFER, BEVEL, APPLY };
 
 class FilletNode : public AbstractNode
@@ -42,20 +45,20 @@ public:
   std::string toString() const override;
   std::string name() const override;
 
-  // radius (FILLET/ROUND) or setback (CHAMFER/BEVEL)
+  // radius (fillet) or setback (chamfer)
   double size{0.0};
   // override for the auto-derived dihedral threshold; <0 means "auto"
   double min_angle{-1.0};
-  // emit the edge/spine diagnostic overlay instead of the tool solid. Off by
-  // default: the overlay is a cloud of disjoint marker cubes rather than a
-  // solid, so it is for looking at, not for building with.
+  // The sign filter (§1): convex keeps ridge edges (rounded/removed), concave
+  // keeps valley edges (filled/added). Both default true; both false is a usage
+  // error that returns the model unchanged with a warning.
+  bool convex{true};
+  bool concave{true};
+
+  // --- retained for the swept-tool internals only; unused by the operators ---
   bool debug{false};
-  // APPLY only: which half to compose. Each switches off its own tool.
   bool inner{true};
   bool outer{true};
-  // APPLY only, and recorded rather than acted on: the passthrough this selects
-  // happens at instantiation, so a node that exists at all is one that builds.
-  // Kept so a dump says which way it was asked.
   bool disable_preview{true};
   FilletType type;
   CurveDiscretizer discretizer;

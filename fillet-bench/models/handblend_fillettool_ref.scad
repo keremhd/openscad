@@ -7,4 +7,4 @@ R = 1.0; D = 1.0; W = 8; F = 12; T = 4; L = 20;
 H = R + D;
 module sharp() linear_extrude(height = L)
     polygon([[-W,-T],[F,-T],[F,0],[0,0],[0,H],[-W,H]]);
-union() { sharp(); fillet_tool(r = R) sharp(); }
+fillet(r = R, convex = false) sharp();

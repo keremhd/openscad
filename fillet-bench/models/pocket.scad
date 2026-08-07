@@ -8,4 +8,4 @@ module part() {
         translate([0, 0, 4]) cube([24, 24, 12], center = true);
     }
 }
-difference() { part(); round_tool(r = R) part(); }
+fillet(r = R) part();

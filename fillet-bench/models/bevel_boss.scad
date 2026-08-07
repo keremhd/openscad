@@ -7,4 +7,4 @@ module part() {
         translate([0, 0, 3]) cylinder(d = 18, h = 12);
     }
 }
-difference() { part(); bevel_tool(t = R) part(); }
+chamfer(t = R) part();

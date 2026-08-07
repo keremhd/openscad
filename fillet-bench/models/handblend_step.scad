@@ -59,11 +59,12 @@ module part() linear_extrude(height = L) polygon(prof);
 // junctions at z=0 and z=L, which the gate exempts out to 2*RT anyway.
 module testbrush() translate([0, H, L/2]) cube([RT, RT, L/2], center = true);
 
-module tool() {
-    if (BRUSH) round_tool(r = RT, debug = DBG, min_angle = MINANG) { part(); testbrush(); }
-    else round_tool(r = RT, debug = DBG, min_angle = MINANG) part();
+// convex = the round-off half (old round_tool): rounds the convex test edge, and
+// leaves the hand-built concave blend alone.
+module rounded() {
+    if (BRUSH) fillet(r = RT, min_angle = MINANG, concave = false) { part(); testbrush(); }
+    else fillet(r = RT, min_angle = MINANG, concave = false) part();
 }
 
 if (MODE == "plain") part();
-else if (MODE == "tool") tool();
-else difference() { part(); tool(); }
+else rounded();

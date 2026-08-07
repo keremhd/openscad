@@ -14,5 +14,5 @@ module fin() union() {
     translate([-6,-6,-2]) cube([12,12,2]);
     translate([-GAP*R/2,-6,0]) cube([GAP*R,12,4]);
 }
-if (CASE == "pos") difference() { cubecorner(); round_tool(r=R) cubecorner(); }
-else difference() { fin(); round_tool(r=R) fin(); }
+if (CASE == "pos") fillet(r = R, concave = false) cubecorner();
+else fillet(r = R, concave = false) fin();
