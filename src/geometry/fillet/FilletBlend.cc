@@ -185,6 +185,9 @@ struct Blender
   bool isChamfer;
   double thresholdDeg;
   const CurveDiscretizer& disc;
+  int arcSegs = 4;  // arc segments per fillet cross-section, uniform across the
+                    // whole blend so adjacent cross-sections always have equal
+                    // point counts and every strip closes (set in buildBlend)
 
   std::set<EdgeKey> selected;                 // the edges this call acts on
   std::map<EdgeKey, bool> concaveOf;          // sign per selected edge
@@ -319,8 +322,7 @@ struct Blender
     rb /= lb;
     double ang = std::acos(std::clamp(ra.dot(rb), -1.0, 1.0));
     if (ang < 1e-6) return {Ta, Tb};
-    const int segs = std::max(1, disc.getCircularSegmentCount(r, ang * 180.0 / M_PI).value_or(
-                                    std::max(1, static_cast<int>(std::round(ang / 0.35)))));
+    const int segs = arcSegs;
     Vector3d axis = ra.cross(rb);
     if (axis.norm() < 1e-12) return {Ta, Tb};
     axis.normalize();
@@ -499,6 +501,16 @@ std::shared_ptr<const Geometry> buildBlend(
   // The selected edges and their signs.
   Blender b{m,     adj,          surfaceOf, node.size, isChamfer,
             thresholdDeg, node.discretizer};
+  // Uniform arc tessellation: a quarter-turn's worth of segments from the
+  // discretizer, applied to every cross-section regardless of its subtended
+  // angle. A fillet crease whose dihedral varies (an oblique elliptical seam)
+  // would otherwise give adjacent cross-sections unequal point counts and tear
+  // the strip. A constant count is $fn-driven (classification stays mesh-only,
+  // §4) yet keeps every strip closable.
+  if (!isChamfer) {
+    const int full = node.discretizer.getCircularSegmentCount(node.size, 360.0).value_or(16);
+    b.arcSegs = std::max(2, (full + 3) / 4);
+  }
   std::size_t nConcave = 0, nConvex = 0, features = 0;
   for (const auto& [key, ts] : adj) {
     if (ts.size() != 2) continue;
