@@ -997,8 +997,8 @@ Response GeometryEvaluator::visit(State& state, const CgalAdvNode& node)
            one pass
    operation:
     o Extract child 0's mesh, classify its edges, and edit the mesh directly along
-      the selected creases (§7a B1): concave edges gain a blend strip (material
-      added), convex edges are bevelled back (material removed). Children 1+ are
+      the selected creases: concave edges gain a blend strip (material added),
+      convex edges are bevelled back (material removed). Children 1+ are
       unioned into one selection brush; where it is present, only the stretches of
       crease inside it are built.
  */
@@ -1034,8 +1034,8 @@ Response GeometryEvaluator::visit(State& state, const FilletNode& node)
 
         // The operator consumes its children and returns the finished blended
         // solid: a direct topological bevel of the target, adding material on
-        // concave edges and removing it on convex ones in one pass (§1, §7a). No
-        // boolean composition here — the sign is where the blend strip lands.
+        // concave edges and removing it on convex ones in one pass. No boolean
+        // composition here — the sign is just where the blend strip lands.
         geom = buildBlend(node, target, brush);
       }
 #else

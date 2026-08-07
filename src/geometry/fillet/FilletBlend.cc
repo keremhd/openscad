@@ -51,14 +51,14 @@ namespace {
 // pass to make winding consistent, and a per-component volume-sign fix so the
 // emitted normals point outward. Winding is therefore never the caller's
 // concern — triangles are added in any order and the pass repairs them, exactly
-// as a mesh library's fix_normals would (spike step 0, meshutil.canonical).
+// as a mesh library's fix_normals would.
 // ---------------------------------------------------------------------------
 struct OutMesh
 {
   std::vector<Vector3d> V;
   std::vector<std::array<int, 3>> F;
   std::map<std::array<int64_t, 3>, int> weld;
-  double q = 1e6;  // weld quantum: 1e-6 mm (stated tolerance, TRAP #15)
+  double q = 1e6;  // weld quantum: 1e-6 mm (the stated weld tolerance)
 
   int add(const Vector3d& p)
   {
@@ -418,11 +418,11 @@ struct Blender
 
   // The corner patch at a vertex touched by selected edges: the ring of tangent
   // points and arc points around u, fan-filled. Single-signed corners come out
-  // as a crude fan for now (step 3 refines them to a ball cap); mixed-sign
-  // vertices are the deferred saddle (step 5) and are filled crudely too.
+  // as a crude fan for now (a later pass seats them on the corner ball);
+  // mixed-sign vertices are the deferred saddle and are filled crudely too.
   // The ball seated at a single-sign junction: at distance r from every face
   // incident to u, inside the material for a convex corner and out in the open
-  // valley for a concave one — the "put a ball at the corner" of §3a, which
+  // valley for a concave one — the "put a ball at the corner" idea, which
   // rounds a convex vertex off and fills a concave one. nullopt when the
   // incident faces cannot pin a centre (fewer than three independent normals).
   std::optional<Vector3d> cornerBall(int u, bool concave) const
@@ -509,12 +509,12 @@ struct Blender
         (concaveOf.at(key) ? anyConcave : anyConvex) = true;
     const bool mixed = anyConcave && anyConvex;
 
-    // Single-signed corner: seat the fan apex on the ball (§3a) so it rounds a
+    // Single-signed corner: seat the fan apex on the ball so it rounds a
     // convex vertex off / fills a concave one, instead of the crude centroid fan
     // that sinks inside the sphere. The ring vertices are shared with the strips
     // and must not move; only the new apex is placed, on the sphere above the
     // ring. Chamfer corners are already flat and keep the plain fan. Mixed-sign
-    // vertices are the deferred saddle (step 5) and stay a crude fan for now.
+    // vertices are the deferred saddle and stay a crude fan for now.
     if (!isChamfer && !mixed && ring.size() >= 3) {
       if (auto C = cornerBall(u, anyConcave)) {
         Vector3d centroid = Vector3d::Zero();
@@ -528,7 +528,7 @@ struct Blender
       }
     }
 
-    // Mixed-sign vertex (step 5): a convex and a concave edge meet, so no single
+    // Mixed-sign vertex: a convex and a concave edge meet, so no single
     // ball fits — the patch must be a saddle. Rather than fan from a central
     // apex (which pins a flat point in the middle and reads as a pinch),
     // triangulate the ring itself so the patch passes only through the tangent
@@ -664,8 +664,8 @@ std::shared_ptr<const Geometry> buildBlend(
   // discretizer, applied to every cross-section regardless of its subtended
   // angle. A fillet crease whose dihedral varies (an oblique elliptical seam)
   // would otherwise give adjacent cross-sections unequal point counts and tear
-  // the strip. A constant count is $fn-driven (classification stays mesh-only,
-  // §4) yet keeps every strip closable.
+  // the strip. A constant count is $fn-driven (classification itself stays
+  // mesh-only) yet keeps every strip closable.
   if (!isChamfer) {
     const int full = node.discretizer.getCircularSegmentCount(node.size, 360.0).value_or(16);
     b.arcSegs = std::max(2, (full + 3) / 4);
@@ -694,11 +694,11 @@ std::shared_ptr<const Geometry> buildBlend(
   // Partial selection — a brush, or a one-sided convex/concave filter on a model
   // that has both signs — leaves some feature edges as kept-sharp surface
   // boundaries. Closing that manifold needs per-vertex splitting where a kept
-  // edge borders a blended surface (a full topological bevel, step 4); the
-  // whole-model selection this file builds does not. Until step 4 lands, refuse
-  // to emit a torn mesh: return the model unchanged, loudly (promise 1 — a false
-  // refusal is the safe error). The feature/kept-edge groundwork above already
-  // slides the inset along kept edges, so full-selection stays exact.
+  // edge borders a blended surface (a full topological bevel); the whole-model
+  // selection this file builds does not do that yet. Until it does, refuse to
+  // emit a torn mesh: return the model unchanged, loudly — a false refusal is
+  // the safe error, a silent drop is not. The kept-edge groundwork above already
+  // slides the inset along kept edges, so full selection stays exact.
   const bool partial = (brush && !brush->isEmpty()) || b.selected.size() != features;
   if (partial) {
     LOG(message_group::Warning, node.modinst->location(), "",
@@ -714,7 +714,7 @@ std::shared_ptr<const Geometry> buildBlend(
   if (b.out.F.empty()) return target;
   if (boundary > 0) {
     // The surgery left a hole — invalid. Say so and hand back the model unchanged
-    // rather than a torn solid (promise 1: a false refusal is the safe error).
+    // rather than a torn solid: a false refusal is the safe error.
     LOG(message_group::Warning, node.modinst->location(), "",
         "%1$s: the blend left %2$d open edge(s) (unclosed junction); the model is returned "
         "unchanged",

@@ -25,7 +25,7 @@
 class Geometry;
 class ManifoldGeometry;
 
-// The B1 blending core (Path-B rewrite): a direct topological bevel of the target
+// The blending core: a direct topological bevel of the target
 // mesh. For each selected edge the incident faces are lifted, a blend strip is
 // inserted (a circular arc for fillet, a flat cut for chamfer), and the seam is
 // reconciled locally against the incident facets — no boolean kernel. Concave

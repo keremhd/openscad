@@ -32,8 +32,8 @@
 // edges and removing it on convex ones in one pass. The type is which of the two,
 // not a sign — sign is read per edge from the mesh and gated by convex/concave.
 //
-// (ROUND/BEVEL/APPLY are retained only so the swept-tool internals still compile
-// during the Path-B rewrite; the new operators never build those types.)
+// (ROUND/BEVEL/APPLY are retained only so the older swept-tool internals still
+// compile; the new operators never build those types.)
 enum class FilletType { FILLET, ROUND, CHAMFER, BEVEL, APPLY };
 
 class FilletNode : public AbstractNode
@@ -49,7 +49,7 @@ public:
   double size{0.0};
   // override for the auto-derived dihedral threshold; <0 means "auto"
   double min_angle{-1.0};
-  // The sign filter (§1): convex keeps ridge edges (rounded/removed), concave
+  // The sign filter: convex keeps ridge edges (rounded/removed), concave
   // keeps valley edges (filled/added). Both default true; both false is a usage
   // error that returns the model unchanged with a warning.
   bool convex{true};
