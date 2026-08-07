@@ -527,7 +527,83 @@ struct Blender
         return;
       }
     }
+
+    // Mixed-sign vertex (step 5): a convex and a concave edge meet, so no single
+    // ball fits — the patch must be a saddle. Rather than fan from a central
+    // apex (which pins a flat point in the middle and reads as a pinch),
+    // triangulate the ring itself so the patch passes only through the tangent
+    // and arc points, which already sit on the two opposite-curvature sides — a
+    // bilinear saddle for a simple ring. Falls back to the crude centroid fan if
+    // the ring is too tangled to triangulate cleanly.
+    if (!isChamfer && mixed && ring.size() >= 4 && ringSaddle(ring)) return;
     out.fan(ring);
+  }
+
+  // Triangulate a (non-planar) ring directly, no central vertex, by ear-clipping
+  // in its best-fit plane. Returns false — leaving the caller to fall back — if
+  // the projection is degenerate or no ear can be found.
+  bool ringSaddle(const std::vector<int>& ring)
+  {
+    const int n = static_cast<int>(ring.size());
+    Vector3d c = Vector3d::Zero();
+    for (const int i : ring) c += out.V[i];
+    c /= n;
+    // best-fit normal via Newell's method
+    Vector3d nrm = Vector3d::Zero();
+    for (int i = 0; i < n; ++i) {
+      const Vector3d& a = out.V[ring[i]];
+      const Vector3d& b = out.V[ring[(i + 1) % n]];
+      nrm += (a - c).cross(b - c);
+    }
+    if (nrm.norm() < 1e-12) return false;
+    nrm.normalize();
+    Vector3d ex = (std::abs(nrm.x()) < 0.9 ? Vector3d::UnitX() : Vector3d::UnitY());
+    ex = (ex - ex.dot(nrm) * nrm).normalized();
+    const Vector3d ey = nrm.cross(ex);
+    std::vector<Vector2d> p(n);
+    for (int i = 0; i < n; ++i) {
+      const Vector3d d = out.V[ring[i]] - c;
+      p[i] = {d.dot(ex), d.dot(ey)};
+    }
+    // signed area to fix winding
+    double area = 0;
+    for (int i = 0; i < n; ++i) area += p[i].x() * p[(i + 1) % n].y() - p[(i + 1) % n].x() * p[i].y();
+    std::vector<int> idx(n);
+    for (int i = 0; i < n; ++i) idx[i] = (area < 0) ? (n - 1 - i) : i;
+    auto cross2 = [](const Vector2d& a, const Vector2d& b, const Vector2d& cc) {
+      return (b.x() - a.x()) * (cc.y() - a.y()) - (b.y() - a.y()) * (cc.x() - a.x());
+    };
+    std::vector<int> poly = idx;
+    std::vector<std::array<int, 3>> tris;
+    int guard = 0;
+    while (poly.size() > 3 && guard++ < 4 * n) {
+      const int m2 = static_cast<int>(poly.size());
+      bool clipped = false;
+      for (int i = 0; i < m2; ++i) {
+        const int ia = poly[(i + m2 - 1) % m2], ib = poly[i], ic = poly[(i + 1) % m2];
+        const Vector2d &A = p[ia], &B = p[ib], &C2 = p[ic];
+        if (cross2(A, B, C2) <= 1e-12) continue;  // reflex or collinear
+        bool ear = true;
+        for (int j = 0; j < m2; ++j) {
+          const int k = poly[j];
+          if (k == ia || k == ib || k == ic) continue;
+          const Vector2d& P = p[k];
+          if (cross2(A, B, P) >= 0 && cross2(B, C2, P) >= 0 && cross2(C2, A, P) >= 0) {
+            ear = false;
+            break;
+          }
+        }
+        if (!ear) continue;
+        tris.push_back({ring[ia], ring[ib], ring[ic]});
+        poly.erase(poly.begin() + i);
+        clipped = true;
+        break;
+      }
+      if (!clipped) return false;
+    }
+    if (poly.size() == 3) tris.push_back({ring[poly[0]], ring[poly[1]], ring[poly[2]]});
+    for (const auto& t : tris) out.tri(t[0], t[1], t[2]);
+    return true;
   }
 
   // Re-emit every surface triangle with its boundary vertices set back to their
