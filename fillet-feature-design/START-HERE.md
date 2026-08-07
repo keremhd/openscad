@@ -5,6 +5,20 @@
 the rest describe the *old* implementation being replaced, and will send you down abandoned routes
 (this project has a documented history of exactly that).
 
+## Implementation progress (2026-08-08)
+
+The B1 rewrite is under way on branch `kerem-fillet` (`src/geometry/fillet/FilletBlend.cc`,
+entry `buildBlend`). Built order §10: **step 1** (operators + registration), **step 2** (per-edge
+topological bevel + local seam), **step 3** (single-sign corner ball), and the **planar half of
+step 5** (mixed-sign ear-clip saddle: lbracket/box_step/rib/pocket) are done and committed.
+Bench sweep — 18–20 models × {fn 0,16,32} × {r 0.5,1,2}, worst of 3 — is **162/162 built and
+VALID, 0 fallback, 0 invalid**. Still open: **step 4** (partial selection — the brush spine-clip,
+one-sided convex/concave, and the crowding/neighbour refusal), which needs per-vertex splitting
+where a kept-sharp edge borders a blended surface; until it lands, partial selection returns the
+model unchanged (loud, valid). The old swept-tool `FilletBuilder.cc` is compiled but unreferenced,
+kept only for its retained mesh internals and their tests; delete it once step 4 subsumes brush +
+refusal. See the `fillet-b1-implementation-state` memory for the working details.
+
 ## The one rule
 
 **`REQUIREMENTS.md` is the authoritative spec. Implement from it and nothing else.** It supersedes
