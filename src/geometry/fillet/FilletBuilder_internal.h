@@ -130,6 +130,17 @@ inline bool isFeatureAngle(double dihedralDeg, double thresholdDeg)
 // then too short for the size gate. 46 sits in the widest gap available.
 inline constexpr double kDefaultCreaseThresholdDeg = 46.0;
 
+// The dihedral below which two triangles are treated as one smooth surface — a
+// separate question from which edges are features (kDefaultCreaseThresholdDeg).
+// Grouping is near-tangency and independent of min_angle: a feature edge decides
+// what to fillet, this decides which triangles share a wall. Kept well below the
+// crease threshold so a sub-crease seam that is not near-tangent — the tangent
+// gap of a tee/cross, ~15.86 deg — is a surface boundary, not a merge, and the
+// two walls stay distinct. A coarse faceted prism therefore comes out as
+// separate flat surfaces, which is what it is. A named constant now; a candidate
+// to expose later.
+inline constexpr double kDefaultSurfaceThresholdDeg = 10.0;
+
 // Walk the adjacency, classify every two-face edge, and tally the counts. Edges
 // with a dihedral below thresholdDeg are treated as seams and skipped. Same-
 // source-id ("same-surface") edges are only tallied when useProvenance is set

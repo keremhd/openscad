@@ -7,17 +7,25 @@ the rest describe the *old* implementation being replaced, and will send you dow
 
 ## Implementation progress (2026-08-08)
 
-The B1 rewrite is under way on branch `kerem-fillet` (`src/geometry/fillet/FilletBlend.cc`,
-entry `buildBlend`). Built order §10: **step 1** (operators + registration), **step 2** (per-edge
-topological bevel + local seam), **step 3** (single-sign corner ball), and the **planar half of
-step 5** (mixed-sign ear-clip saddle: lbracket/box_step/rib/pocket) are done and committed.
-Bench sweep — 18–20 models × {fn 0,16,32} × {r 0.5,1,2}, worst of 3 — is **162/162 built and
-VALID, 0 fallback, 0 invalid**. Still open: **step 4** (partial selection — the brush spine-clip,
-one-sided convex/concave, and the crowding/neighbour refusal), which needs per-vertex splitting
-where a kept-sharp edge borders a blended surface; until it lands, partial selection returns the
-model unchanged (loud, valid). The old swept-tool `FilletBuilder.cc` is compiled but unreferenced,
-kept only for its retained mesh internals and their tests; delete it once step 4 subsumes brush +
-refusal. See the `fillet-b1-implementation-state` memory for the working details.
+The B1 rewrite is on branch `kerem-fillet` (`src/geometry/fillet/FilletBlend.cc`, entry
+`buildBlend`). Steps 1–3, the planar mixed-sign saddle, **step 4 (partial selection: one-sided
+sign filter + brush)**, and the **tangent-junction taper** (tee/cross) are all working as of
+2026-08-08. The whole `fillet-bench` (28 models × {fn def,16,32} × {r 0.5,1,2}) blends **VALID,
+0 refuse, 0 invalid**, deterministic; unit suite 2230/88 green. **Not committed yet** (working
+tree).
+
+The key redesign (owner-driven this session): the 46° threshold is **eligibility only**; surface
+grouping and crease-following use a separate low threshold (10°). **Selection follows the crease** —
+a connected chain of >10° edges is filleted iff some edge on it exceeds 46°, followed until it drops
+below 10° — so a tee's whole intersection loop blends (no gap → no taper) while tessellation seams
+stay sharp. A kept surface boundary is sewn as a **zero-radius fillet ribbon** (`emitKeptSeam`), and
+a brush is just a spine filter (`BrushVolume::contains`). See the `fillet-b1-implementation-state`
+and `fillet-surface-grouping-threshold` memories for details.
+
+The old swept-tool `FilletBuilder.cc` is still compiled but unreferenced (kept for its retained
+internals + tests); `chainSelection`/`buildChains` are now unused by the blend. Remaining polish:
+the crowding/neighbour refusal (§5a c), widening the along-sweep floor to the eligible set, and
+possibly deleting the old builder.
 
 ## The one rule
 

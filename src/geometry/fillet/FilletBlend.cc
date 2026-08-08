@@ -37,6 +37,7 @@
 #include "geometry/Geometry.h"
 #include "geometry/PolySet.h"
 #include "geometry/PolySetBuilder.h"
+#include "geometry/fillet/FilletBrush.h"
 #include "geometry/fillet/FilletBuilder_internal.h"
 #include "geometry/linalg.h"
 #include "geometry/manifold/ManifoldGeometry.h"
@@ -381,63 +382,130 @@ struct Blender
     return lineIntersect(b1, d1, b2, d2);
   }
 
-  // The ordered surface pair of a selected edge (smaller surface id first) and
-  // its sign, so both ends of a strip and both incident strips at a vertex agree
-  // on which tangent point is which.
-  std::pair<int, int> pairOf(const EdgeKey& e) const
+  // One local face-side of a crease at vertex u: the fan sector containing a
+  // given incident triangle — the run of triangles reachable from it around u
+  // without crossing a feature edge, bounded by the two feature edges at its
+  // ends. This is the side a fillet arc actually seats against, and it is LOCAL:
+  // it stays correct where a curved wall is split into per-facet surfaces (a
+  // coarse cylinder, or the two walls of a tangent junction), because it reads
+  // the feature edges rather than the surface id. `xb`/`xf` are the bounding
+  // feature edges' far vertices; `tb`/`tf` the sector triangles incident to them
+  // (for perpInto's orientation); `navg` the sector's averaged outward normal, so
+  // adjacent edges on one smooth crease seat identically and their strips weld.
+  struct Sector
   {
-    const auto& ts = adj.at(e);
-    return {std::min(surfaceOf[ts[0]], surfaceOf[ts[1]]),
-            std::max(surfaceOf[ts[0]], surfaceOf[ts[1]])};
+    int xb, xf, tb, tf;
+    Vector3d navg;
+  };
+  std::optional<Sector> sectorOf(int u, int t) const
+  {
+    const std::vector<std::pair<int, int>> fan = fanAround(u);
+    const int n = static_cast<int>(fan.size());
+    if (n == 0) return std::nullopt;
+    int i = -1;
+    for (int k = 0; k < n; ++k)
+      if (fan[k].first == t) { i = k; break; }
+    if (i < 0) return std::nullopt;
+    // A sector ends at a surface boundary — where the wall this arc seats against
+    // ends. That is a superset of the feature edges (every crease is a boundary),
+    // and it is what stops a sector at the sub-feature tangent gap of a junction,
+    // so the strip caps there instead of the sector running on into the far wall.
+    auto isBound = [&](int via) {
+      const EdgeKey e{std::min(u, via), std::max(u, via)};
+      auto it = adj.find(e);
+      if (it == adj.end() || it->second.size() != 2) return true;
+      return surfaceOf[it->second[0]] != surfaceOf[it->second[1]];
+    };
+    // fan[k].second is the edge (u, via) between triangle k and k+1.
+    int f = i, steps = 0;
+    while (!isBound(fan[f].second) && steps < n) { f = (f + 1) % n; ++steps; }
+    if (steps >= n) return std::nullopt;  // no surface boundary in this fan
+    int b = i;
+    steps = 0;
+    while (!isBound(fan[(b - 1 + n) % n].second) && steps < n) { b = (b - 1 + n) % n; ++steps; }
+    Sector s;
+    s.xf = fan[f].second;
+    s.tf = fan[f].first;
+    s.xb = fan[(b - 1 + n) % n].second;
+    s.tb = fan[b].first;
+    Vector3d nsum = Vector3d::Zero();
+    for (int k = b;; k = (k + 1) % n) {
+      nsum += m.tris[fan[k].first].normal;
+      if (k == f) break;
+    }
+    s.navg = nsum.norm() > 1e-12 ? Vector3d(nsum.normalized()) : m.tris[t].normal;
+    return s;
   }
 
-  // The cross-section of the blend at vertex u for one crease side-pair
-  // {SA, SB}: from the tangent point on SA to the tangent point on SB — a flat
-  // segment for a chamfer, a tessellated arc for a fillet. The wall normals are
-  // AVERAGED over the selected edges of this pair meeting at u, so two strips
-  // continuing a smooth crease (a rim) share this cross-section exactly and need
-  // no corner patch between them; only a genuine junction (a second pair) does.
-  std::vector<Vector3d> crossSectionAt(int u, int SA, int SB) const
+  // Where vertex u lands once the crease is set back, on the side triangle t sits
+  // on — the sector-local counterpart of insetPoint. Falls back to the
+  // surface-based inset where the fan is not a clean manifold sector, so the
+  // disk-patch majority (where sector and surface agree) is unchanged.
+  Vector3d insetForTri(int u, int t) const
   {
-    const Vector3d Ta = insetPoint(u, SA);
-    const Vector3d Tb = insetPoint(u, SB);
-    if (isChamfer) return {Ta, Tb};
-
-    Vector3d nA = Vector3d::Zero();
-    bool concave = false;
-    int cnt = 0;
-    for (const auto& [key, ts] : adj) {
-      if (key.first != u && key.second != u) continue;
-      if (!selected.count(key)) continue;
-      const int a = surfaceOf[ts[0]], c = surfaceOf[ts[1]];
-      if (std::min(a, c) != SA || std::max(a, c) != SB) continue;
-      nA += m.tris[a == SA ? ts[0] : ts[1]].normal;
-      concave = concaveOf.at(key);
-      ++cnt;
+    const auto s = sectorOf(u, t);
+    if (!s) return insetPoint(u, surfaceOf[t]);
+    auto offsetLine = [&](int x, int tside, Vector3d& base, Vector3d& dir) {
+      const EdgeKey e{std::min(u, x), std::max(u, x)};
+      const double sb = selected.count(e) ? setback(e) : 0.0;
+      base = m.pos[u] + sb * perpInto(u, x, tside);
+      dir = (m.pos[x] - m.pos[u]).normalized();
+    };
+    if (s->xb == s->xf) {
+      Vector3d base, dir;
+      offsetLine(s->xf, s->tf, base, dir);
+      return base;
     }
-    if (cnt == 0) return {Ta, Tb};
-    nA.normalize();
+    Vector3d b1, d1, b2, d2;
+    offsetLine(s->xb, s->tb, b1, d1);
+    offsetLine(s->xf, s->tf, b2, d2);
+    return lineIntersect(b1, d1, b2, d2);
+  }
+
+  // The blend cross-section at vertex u for one selected edge, its two sides given
+  // by the edge's incident triangles t0/t1 — LOCAL, so it builds a proper
+  // two-sided arc even where t0/t1's walls are split into per-facet surfaces. The
+  // seat normal comes from each triangle's sector (averaged), so adjacent edges on
+  // a smooth crease build the identical cross-section at u and their strips weld.
+  std::vector<Vector3d> crossSectionEdge(int u, int t0, int t1, bool concave) const
+  {
+    const Vector3d Ta = insetForTri(u, t0);
+    const Vector3d Tb = insetForTri(u, t1);
+    if (isChamfer) return {Ta, Tb};
+    const auto sa = sectorOf(u, t0);
+    const auto sb = sectorOf(u, t1);
+    if (!sa || !sb) return {Ta, Tb};
+    const Vector3d nA = sa->navg, nB = sb->navg;
 
     const double r = size;
-    const Vector3d C = concave ? Vector3d(Ta + r * nA) : Vector3d(Ta - r * nA);
+    // Fillet centre one radius off side A along its sector normal — the plain
+    // rolling-ball construction, so a planar crease builds the same arc a
+    // surface-based inset would. To stay independent of which incident triangle
+    // adj happened to list first (so two edges continuing one smooth crease
+    // weld), side A is chosen canonically as
+    // the sector with the numerically smaller averaged normal.
+    const bool aFirst = std::make_tuple(nA.x(), nA.y(), nA.z()) <=
+                        std::make_tuple(nB.x(), nB.y(), nB.z());
+    const Vector3d nCen = aFirst ? nA : nB;
+    const Vector3d Tcen = aFirst ? Ta : Tb;
+    const double sgn = concave ? r : -r;
+    const Vector3d C = Tcen + sgn * nCen;
     Vector3d ra = Ta - C, rb = Tb - C;
     const double la = ra.norm(), lb = rb.norm();
     if (la < 1e-9 || lb < 1e-9) return {Ta, Tb};
     ra /= la;
     rb /= lb;
-    double ang = std::acos(std::clamp(ra.dot(rb), -1.0, 1.0));
+    const double ang = std::acos(std::clamp(ra.dot(rb), -1.0, 1.0));
     if (ang < 1e-6) return {Ta, Tb};
-    const int segs = arcSegs;
     Vector3d axis = ra.cross(rb);
     if (axis.norm() < 1e-12) return {Ta, Tb};
     axis.normalize();
     std::vector<Vector3d> pts;
-    pts.reserve(segs + 1);
-    for (int j = 0; j <= segs; ++j) {
-      const double a = ang * j / segs;
-      // Rodrigues rotation of ra about axis by a, radius interpolated la->lb.
+    pts.reserve(arcSegs + 1);
+    for (int j = 0; j <= arcSegs; ++j) {
+      const double a = ang * j / arcSegs;
       const Vector3d rot = ra * std::cos(a) + axis.cross(ra) * std::sin(a);
-      const double rad = la + (lb - la) * j / segs;
+      const double rad = la + (lb - la) * j / arcSegs;
       pts.push_back(C + rad * rot);
     }
     return pts;
@@ -447,9 +515,10 @@ struct Blender
   // stitched into quads.
   void emitEdge(const EdgeKey& e)
   {
-    const auto [SA, SB] = pairOf(e);
-    const std::vector<Vector3d> cu = crossSectionAt(e.first, SA, SB);
-    const std::vector<Vector3d> cv = crossSectionAt(e.second, SA, SB);
+    const auto& ts = adj.at(e);
+    const bool concave = concaveOf.at(e);
+    const std::vector<Vector3d> cu = crossSectionEdge(e.first, ts[0], ts[1], concave);
+    const std::vector<Vector3d> cv = crossSectionEdge(e.second, ts[0], ts[1], concave);
     if (cu.size() != cv.size()) return;  // mismatched tessellation; skip (hole)
     std::vector<int> iu, iv;
     for (const auto& p : cu) iu.push_back(out.add(p));
@@ -550,61 +619,92 @@ struct Blender
     return Vector3d(m.pos[u] + N.inverse() * rhs);
   }
 
+  // The edge-local cross-section of selected edge (u,via) at u.
+  std::vector<Vector3d> edgeCrossSection(int u, int via) const
+  {
+    const EdgeKey e{std::min(u, via), std::max(u, via)};
+    const auto& ts = adj.at(e);
+    return crossSectionEdge(u, ts[0], ts[1], concaveOf.at(e));
+  }
+
+  // Whether two cross-section polylines coincide (same points, either order) to
+  // the weld tolerance — meaning the two strips ending on them are already sewn
+  // together and the vertex between them needs no patch.
+  static bool sectionsWeld(const std::vector<Vector3d>& a, const std::vector<Vector3d>& b)
+  {
+    if (a.size() != b.size() || a.empty()) return false;
+    const int n = static_cast<int>(a.size());
+    auto same = [](const Vector3d& p, const Vector3d& q) { return (p - q).norm() < 1e-6; };
+    bool fwd = true, rev = true;
+    for (int i = 0; i < n; ++i) {
+      if (!same(a[i], b[i])) fwd = false;
+      if (!same(a[i], b[n - 1 - i])) rev = false;
+    }
+    return fwd || rev;
+  }
+
   void emitCorner(int u)
   {
-    // A corner patch is needed only at a genuine junction: a vertex where the
-    // selected edges carry more than one crease side-pair. Where they all share
-    // one pair (a rim, or a smooth crease passing through) the adjacent strips
-    // already share the averaged cross-section at u and close without a patch.
-    std::set<std::pair<int, int>> pairs;
-    for (const auto& [key, ts] : adj) {
-      if ((key.first == u || key.second == u) && selected.count(key)) pairs.insert(pairOf(key));
-    }
-    if (pairs.size() < 2) return;
+    // The selected edges meeting at u, as neighbour vertices.
+    std::vector<int> selVia;
+    for (const auto& [key, ts] : adj)
+      if ((key.first == u || key.second == u) && selected.count(key))
+        selVia.push_back(key.first == u ? key.second : key.first);
+    if (selVia.empty()) return;
+
+    // A smooth crease passing through u: exactly two selected edges whose
+    // edge-local cross-sections coincide. emitEdge already welds their two strips
+    // along that shared cross-section (each shared segment carries one quad from
+    // either strip), so u is watertight and a patch would double-cover it. This is
+    // the rim/pass-through skip — geometric, so it holds whether or not the wall is
+    // split into per-facet surfaces (the surface-pair count no longer decides it).
+    if (selVia.size() == 2 &&
+        sectionsWeld(edgeCrossSection(u, selVia[0]), edgeCrossSection(u, selVia[1])))
+      return;
 
     const std::vector<std::pair<int, int>> fan = fanAround(u);
     if (fan.empty()) return;
-    // Build the ring around u: inset(u,S) for each surface run, plus each
-    // selected edge's arc interior points, in rotational order.
     const int n = static_cast<int>(fan.size());
     int start = -1;
     for (int i = 0; i < n; ++i)
-      if (isSelected(u, fan[i].second)) {
-        start = i;
-        break;
-      }
+      if (isSelected(u, fan[i].second)) { start = i; break; }
     if (start < 0) return;
 
+    // Walk the fan once, building the ring around u: the sector-local inset point
+    // wherever a run of triangles turns, and each selected edge's arc interior
+    // where the walk crosses it — edge-local throughout, so the ring shares its
+    // vertices with the strips exactly. One ring per vertex covers a genuine
+    // junction, a strip end against a kept-sharp boundary, and both at once.
     std::vector<int> ring;
     for (int off = 0; off < n; ++off) {
       const int i = (start + off) % n;
-      const int S = surfaceOf[fan[i].first];
+      const int tri = fan[i].first;
       const int via = fan[i].second;  // edge (u,via) leaving this triangle
-      const int ip = out.add(insetPoint(u, S));
+      const int ip = out.add(insetForTri(u, tri));
       if (ring.empty() || ring.back() != ip) ring.push_back(ip);
       if (isSelected(u, via)) {
         const EdgeKey e{std::min(u, via), std::max(u, via)};
-        const auto [SA, SB] = pairOf(e);
-        std::vector<Vector3d> cs = crossSectionAt(u, SA, SB);
-        if (S != SA) std::reverse(cs.begin(), cs.end());  // start on this run's surface
+        const auto& ts = adj.at(e);
+        std::vector<Vector3d> cs = crossSectionEdge(u, ts[0], ts[1], concaveOf.at(e));
+        if (ts[0] != tri) std::reverse(cs.begin(), cs.end());  // start on this run's side
         for (size_t j = 1; j + 1 < cs.size(); ++j) ring.push_back(out.add(cs[j]));
       }
     }
+    if (ring.size() >= 2 && ring.front() == ring.back()) ring.pop_back();
 
-    // Sign of this junction: single-signed if every selected edge here agrees.
+    // Sign of the selected edges here.
     bool anyConcave = false, anyConvex = false;
-    for (const auto& [key, ts] : adj)
-      if ((key.first == u || key.second == u) && selected.count(key))
-        (concaveOf.at(key) ? anyConcave : anyConvex) = true;
+    for (const int via : selVia) {
+      const EdgeKey e{std::min(u, via), std::max(u, via)};
+      (concaveOf.at(e) ? anyConcave : anyConvex) = true;
+    }
     const bool mixed = anyConcave && anyConvex;
+    const bool junction = selVia.size() >= 2;  // (the weld pass-through already returned)
 
-    // Single-signed corner: seat the fan apex on the ball so it rounds a
-    // convex vertex off / fills a concave one, instead of the crude centroid fan
-    // that sinks inside the sphere. The ring vertices are shared with the strips
-    // and must not move; only the new apex is placed, on the sphere above the
-    // ring. Chamfer corners are already flat and keep the plain fan. Mixed-sign
-    // vertices are the deferred saddle and stay a crude fan for now.
-    if (!isChamfer && !mixed && ring.size() >= 3) {
+    // Genuine single-signed junction: seat the fan apex on the corner ball so it
+    // rounds a convex vertex off / fills a concave one. Only for a real junction —
+    // a strip end gets a flat cap instead, not a rounded one.
+    if (!isChamfer && junction && !mixed && ring.size() >= 3) {
       if (auto C = cornerBall(u, anyConcave)) {
         Vector3d centroid = Vector3d::Zero();
         for (const int i : ring) centroid += out.V[i];
@@ -617,14 +717,12 @@ struct Blender
       }
     }
 
-    // Mixed-sign vertex: a convex and a concave edge meet, so no single
-    // ball fits — the patch must be a saddle. Rather than fan from a central
-    // apex (which pins a flat point in the middle and reads as a pinch),
-    // triangulate the ring itself so the patch passes only through the tangent
-    // and arc points, which already sit on the two opposite-curvature sides — a
-    // bilinear saddle for a simple ring. Falls back to the crude centroid fan if
-    // the ring is too tangled to triangulate cleanly.
-    if (!isChamfer && mixed && ring.size() >= 4 && ringSaddle(ring)) return;
+    // Strip end (a fillet ending against a kept-sharp boundary) and mixed-sign
+    // junction alike: close the ring flat by ear-clipping it in its best-fit
+    // plane — the perpendicular patch that seals the volume and leaves the kept
+    // edges sharp. Falls back to the crude centroid fan if the ring is too tangled
+    // to triangulate cleanly (orient() then refuses if that left a hole).
+    if (ring.size() >= 4 && ringSaddle(ring)) return;
     out.fan(ring);
   }
 
@@ -695,17 +793,40 @@ struct Blender
     return true;
   }
 
+  // A kept surface boundary (a feature edge we did not select — a tessellation
+  // seam, a gentle fold, or a crease left sharp by the sign filter) stays sharp,
+  // but a nearby selected fillet insets the faces on either side of it, and by
+  // different amounts where their sectors carry different setbacks. That splits
+  // the shared edge open. Sew it with a flat ribbon between the two faces' inset
+  // boundaries — a kept edge is a zero-radius fillet, so this is emitEdge's
+  // straight-line counterpart. Away from any fillet both sides inset to the same
+  // place and every triangle here degenerates, so the edge stays a plain seam.
+  void emitKeptSeam(const EdgeKey& e)
+  {
+    const auto& ts = adj.at(e);
+    const int v = e.first, w = e.second;
+    const Vector3d Va = insetForTri(v, ts[0]), Vb = insetForTri(v, ts[1]);
+    const Vector3d Wa = insetForTri(w, ts[0]), Wb = insetForTri(w, ts[1]);
+    out.tri(Va, Wa, Wb);
+    out.tri(Va, Wb, Vb);
+  }
+
   // Re-emit every surface triangle with its boundary vertices set back to their
-  // inset positions (interior vertices are unchanged), then the edge strips and
-  // the corner patches.
+  // inset positions (interior vertices are unchanged), then the edge strips, the
+  // kept-seam ribbons, and the corner patches.
   void run()
   {
     for (size_t t = 0; t < m.tris.size(); ++t) {
-      const int S = surfaceOf[t];
+      const int ti = static_cast<int>(t);
       const auto& v = m.tris[t].v;
-      out.tri(insetPoint(v[0], S), insetPoint(v[1], S), insetPoint(v[2], S));
+      // Inset each vertex on the side triangle t sits on — sector-local, so a
+      // facet of a split wall sets back along its own sector rather than mitring
+      // across a surface it is no longer grouped with.
+      out.tri(insetForTri(v[0], ti), insetForTri(v[1], ti), insetForTri(v[2], ti));
     }
     for (const auto& e : selected) emitEdge(e);
+    for (const auto& e : feature)
+      if (!selected.count(e)) emitKeptSeam(e);
     std::set<int> corners;
     for (const auto& e : selected) {
       corners.insert(e.first);
@@ -744,21 +865,31 @@ std::shared_ptr<const Geometry> buildBlend(
   const MergedMesh m0 = mergeMesh(target->getManifold().GetMeshGL64());
   const double thresholdDeg = node.min_angle >= 0 ? node.min_angle : kDefaultCreaseThresholdDeg;
 
+  // The selection brush (the union of the node's brush children), as the solid a
+  // crease edge is tested against: an edge is blended only where its spine lies
+  // inside the brush. Absent when the node has no brushes (the whole model).
+  std::optional<BrushVolume> brushVol;
+  if (brush && !brush->isEmpty()) brushVol.emplace(brush->getManifold().GetMeshGL64());
+
   // One blend attempt on a given mesh. The whole build is mesh-dependent, so it
   // is factored out to be runnable twice: once on the subdivided mesh, once on
   // the raw one if subdivision produced a non-manifold result (below).
-  enum class Status { Ok, Empty, NoSelection, Partial, Holed };
+  enum class Status { Ok, Empty, NoSelection, Holed };
   struct Attempt
   {
     Status status = Status::Empty;
     std::unique_ptr<PolySet> geom;
-    std::size_t selected = 0, nConcave = 0, nConvex = 0, features = 0;
+    std::size_t selected = 0, nConcave = 0, nConvex = 0;
     std::size_t verts = 0, tris = 0;
     int boundary = 0, nonman = 0;
   };
-  auto buildOn = [&](const MergedMesh& m) -> Attempt {
+  auto buildOn = [&](const MergedMesh& m, double surfaceThresholdDeg) -> Attempt {
     const std::map<EdgeKey, std::vector<int>> adj = buildEdgeAdjacency(m.tris);
-    const std::vector<int> surfaceOf = smoothSurfaces(m, adj, thresholdDeg);
+    // Group surfaces by near-tangency, not by the feature threshold: a sub-crease
+    // seam that is not near-tangent (a tee's tangent gap) must stay a surface
+    // boundary so the two walls keep distinct ids and the junction cross-section
+    // does not degenerate.
+    const std::vector<int> surfaceOf = smoothSurfaces(m, adj, surfaceThresholdDeg);
     Blender b{m,            adj,       surfaceOf, node.size, isChamfer,
               thresholdDeg, node.discretizer};
     // Uniform arc tessellation: a quarter-turn's worth of segments from the
@@ -772,37 +903,75 @@ std::shared_ptr<const Geometry> buildBlend(
       b.arcSegs = std::max(2, (full + 3) / 4);
     }
     Attempt a;
+    // Selection follows the crease. A crease is a connected chain of edges that
+    // each turn more than the surface threshold (so each is a surface boundary);
+    // the whole chain is eligible to be blended when — and only when — some edge
+    // on it turns past the feature threshold (min_angle). Following the chain
+    // continues along the most-collinear neighbour and stops where the crease
+    // drops below the surface threshold, so a tee's intersection loop is blended
+    // all the way round (its shallow tangent sides included, no gap) while a
+    // tessellation seam or a gentle fold — a chain that never reaches the feature
+    // threshold — is left sharp. This is the one place the two thresholds meet:
+    // min_angle decides eligibility, the surface threshold bounds the crease.
+    struct Crease { bool concave; double dih; };
+    std::map<EdgeKey, Crease> crease;
+    std::map<int, std::vector<int>> vinc;  // vertex -> crease-edge neighbour vertices
     for (const auto& [key, ts] : adj) {
       if (ts.size() != 2) continue;
       const EdgeClass ec = classifyEdge(m, key, m.tris[ts[0]], m.tris[ts[1]]);
-      if (!isFeatureAngle(ec.dihedralDeg, thresholdDeg)) continue;
-      ++a.features;
+      if (!isFeatureAngle(ec.dihedralDeg, surfaceThresholdDeg)) continue;
+      crease[key] = {ec.concave, ec.dihedralDeg};
       b.feature.insert(key);
-      const bool want = ec.concave ? node.concave : node.convex;
+      vinc[key.first].push_back(key.second);
+      vinc[key.second].push_back(key.first);
+    }
+    // A crease continues into the neighbour whose direction turns least; a turn
+    // past this bound is a different crease branching off (a facet seam meeting a
+    // rim, a crease dying into a corner), not the same one continuing.
+    constexpr double kCreaseFollowMaxTurnDeg = 60.0;
+    const double cosTurn = std::cos(kCreaseFollowMaxTurnDeg * M_PI / 180.0);
+    std::set<EdgeKey> eligible;
+    std::vector<std::pair<int, int>> walk;  // directed: arrived at .second via .first
+    for (const auto& [key, ce] : crease)
+      if (isFeatureAngle(ce.dih, thresholdDeg) && eligible.insert(key).second) {
+        walk.push_back({key.first, key.second});
+        walk.push_back({key.second, key.first});
+      }
+    while (!walk.empty()) {
+      const auto [u, v] = walk.back();
+      walk.pop_back();
+      const Vector3d din = (m.pos[v] - m.pos[u]).normalized();
+      for (const int w : vinc[v]) {
+        if (w == u) continue;
+        const EdgeKey nk{std::min(v, w), std::max(v, w)};
+        if (eligible.count(nk)) continue;
+        if (din.dot((m.pos[w] - m.pos[v]).normalized()) < cosTurn) continue;
+        eligible.insert(nk);
+        walk.push_back({v, w});
+      }
+    }
+    for (const auto& key : eligible) {
+      const Crease& ce = crease.at(key);
+      const bool want = ce.concave ? node.concave : node.convex;
       if (!want) continue;
+      // Brush clips the selection to a region by intersecting the spine, not the
+      // blend volume ($fn-invariant): an edge is blended where its midpoint lies
+      // inside the brush. Edges the brush excludes stay sharp and are sewn by the
+      // kept-seam ribbon and the strip-end cap, exactly like the sign filter's.
+      if (brushVol && !brushVol->contains(0.5 * (m.pos[key.first] + m.pos[key.second]))) continue;
       b.selected.insert(key);
-      b.concaveOf[key] = ec.concave;
-      if (ec.concave) ++a.nConcave; else ++a.nConvex;
+      b.concaveOf[key] = ce.concave;
+      if (ce.concave) ++a.nConcave; else ++a.nConvex;
     }
     a.selected = b.selected.size();
     if (b.selected.empty()) { a.status = Status::NoSelection; return a; }
-    // Partial selection — a brush, or a one-sided convex/concave filter on a
-    // model that has both signs — leaves some feature edges as kept-sharp surface
-    // boundaries. Closing that manifold needs per-vertex splitting where a kept
-    // edge borders a blended surface (a full topological bevel); the whole-model
-    // selection this file builds does not do that yet. Until it does, refuse to
-    // emit a torn mesh: return the model unchanged, loudly — a false refusal is
-    // the safe error, a silent drop is not. The kept-edge groundwork already
-    // slides the inset along kept edges, so full selection stays exact.
-    if ((brush && !brush->isEmpty()) || b.selected.size() != a.features) {
-      a.status = Status::Partial;
-      return a;
-    }
     b.run();
     a.boundary = b.out.orient();
     a.nonman = b.out.nonManifoldEdges();
     if (b.out.F.empty()) { a.status = Status::Empty; return a; }
-    if (a.boundary > 0) { a.status = Status::Holed; return a; }
+    // A hole or a self-overlap both make an invalid solid; refuse either rather
+    // than emit it (a false refusal is the safe error, promise 1).
+    if (a.boundary > 0 || a.nonman > 0) { a.status = Status::Holed; return a; }
     a.status = Status::Ok;
     a.verts = b.out.V.size();
     a.tris = b.out.F.size();
@@ -822,9 +991,8 @@ std::shared_ptr<const Geometry> buildBlend(
   subdivideLongCreaseEdges(mSub, thresholdDeg, node.convex, node.concave, kAlongSweep * node.size);
   const bool didSubdivide = mSub.tris.size() != m0.tris.size();
 
-  Attempt a = buildOn(mSub);
-  if (didSubdivide && (a.status == Status::Holed || (a.status == Status::Ok && a.nonman > 0)))
-    a = buildOn(m0);
+  Attempt a = buildOn(mSub, kDefaultSurfaceThresholdDeg);
+  if (didSubdivide && a.status == Status::Holed) a = buildOn(m0, kDefaultSurfaceThresholdDeg);
 
   switch (a.status) {
     case Status::Empty:
@@ -834,19 +1002,14 @@ std::shared_ptr<const Geometry> buildBlend(
           "%1$s: no selected edge turns more than %2$.1f deg; the model is returned unchanged",
           node.name(), thresholdDeg);
       return target;
-    case Status::Partial:
-      LOG(message_group::Warning, node.modinst->location(), "",
-          "%1$s: partial selection (a brush, or one-sided convex/concave on a two-sign model) is "
-          "not built yet; the model is returned unchanged [%2$d of %3$d feature edges selected]",
-          node.name(), static_cast<int>(a.selected), static_cast<int>(a.features));
-      return target;
     case Status::Holed:
-      // The surgery left a hole — invalid. Say so and hand back the model
-      // unchanged rather than a torn solid: a false refusal is the safe error.
+      // The surgery left a hole or a self-overlap — invalid. Say so and hand back
+      // the model unchanged rather than a torn solid: a false refusal is the safe
+      // error.
       LOG(message_group::Warning, node.modinst->location(), "",
-          "%1$s: the blend left %2$d open edge(s) (unclosed junction); the model is returned "
-          "unchanged",
-          node.name(), a.boundary);
+          "%1$s: the blend left %2$d open edge(s) and %3$d non-manifold edge(s); the model is "
+          "returned unchanged",
+          node.name(), a.boundary, a.nonman);
       return target;
     case Status::Ok:
       break;

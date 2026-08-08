@@ -1,10 +1,31 @@
-# Tangent-junction fillet — the merged-surface taper (next session)
+# Tangent-junction fillet — the merged-surface taper
 
-**Status: diagnosed and prototyped 2026-08-08, deferred to its own session.** The centerline
-taper on `tee`/`tee_oblique`/`cross` — two cylinders meeting — is fully understood and a fix
-direction is chosen. Completing it needs the kept-sharp-edge closure (step 4 / partial selection),
-so it is scoped as a milestone, not a patch. Read this before touching `smoothSurfaces` or the
-cross-section path in `FilletBlend.cc`.
+**Status: FIXED 2026-08-08 (branch `kerem-fillet`, not yet committed).** The tee/cross taper is
+gone; the whole intersection loop blends and closes, VALID and deterministic across the bench at
+$fn def/16/32. The fix was NOT the sector-prototype-plus-closure this note originally scoped — the
+owner redesigned selection instead (below). This note is kept as the diagnosis of record; the
+"milestone / step-4 blocker / 16-open-edges" framing further down is the *superseded* plan.
+
+## How it was actually fixed (2026-08-08)
+
+Two changes, both in `FilletBlend.cc` (+ one constant), no provenance, no sector prototype:
+
+1. **Split the threshold.** `smoothSurfaces` groups at a low `kDefaultSurfaceThresholdDeg = 10°`,
+   not 46°. So the two cylinder walls never merge across the sub-46° tangent gap — they are
+   distinct surfaces, and coarse facets are honestly separate surfaces (no impossibility to solve).
+2. **Selection follows the crease.** A crease is a connected chain of >10° edges; it is filleted
+   iff some edge on it exceeds 46° (min_angle), followed until it drops below 10°. The tee's
+   intersection loop is one such chain — so it blends **all the way round, the shallow 15.86°
+   tangent sides included**. There is no longer a selected/unselected boundary mid-loop, hence no
+   strip end at the tangent gap, hence no taper and no 16 open edges. Kept surface boundaries that
+   the fillet insets unevenly are sewn by a flat "zero-radius fillet" ribbon (`emitKeptSeam`); the
+   edge-local `sectorOf`/`crossSectionEdge` keeps `SA≠SB` and welds coarse-wall facets.
+
+The rest of this file is the original diagnosis, still accurate about the *cause*.
+
+---
+
+## (superseded plan below — kept for the diagnosis)
 
 ## The symptom
 
