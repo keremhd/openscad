@@ -199,6 +199,20 @@ struct OutMesh
   }
 };
 
+// Spherical linear interpolation between two unit vectors, t in [0,1]. Falls back
+// to the linear blend when they are nearly parallel or nearly antiparallel (where
+// the great-circle direction is ill-defined and the two are close enough that a
+// straight blend is indistinguishable from the arc).
+Vector3d slerpUnit(const Vector3d& a, const Vector3d& b, double t)
+{
+  const double d = std::clamp(a.dot(b), -1.0, 1.0);
+  const double ang = std::acos(d);
+  if (ang < 1e-6) return a;
+  const double s = std::sin(ang);
+  if (s < 1e-9) return ((1.0 - t) * a + t * b).normalized();
+  return (std::sin((1.0 - t) * ang) / s) * a + (std::sin(t * ang) / s) * b;
+}
+
 // Intersection of two coplanar lines P1+λd1 and P2+λd2 (d1,d2 unit). Falls back
 // to P1 when they are near-parallel (a straight boundary through the vertex).
 Vector3d lineIntersect(const Vector3d& P1, const Vector3d& d1, const Vector3d& P2,
@@ -740,6 +754,49 @@ struct Blender
     return Vector3d(m.pos[u] + N.inverse() * rhs);
   }
 
+  // Tessellate the spherical corner cap bounded by `ring` onto the sphere of
+  // radius r centred at C — the rounded corner surface itself, not a fan to one
+  // apex. `poleUnit` is the unit direction from C to the cap's pole (the point on
+  // the sphere the three arcs climb to): (u - C) for a convex vertex the ball
+  // rounds off, and the same for a concave one, where it is the deepest point of
+  // the filled valley. The boundary ring keeps its exact vertices (so the arc
+  // strips stay welded); interior layers are slerped onto the sphere and the last
+  // collapses to the pole. Winding is left to orient(). arcSegs layers match the
+  // arc resolution the strips were built at.
+  void emitCap(const std::vector<int>& ring, const Vector3d& C, double r,
+               const Vector3d& poleUnit)
+  {
+    const int n = static_cast<int>(ring.size());
+    if (n < 3) return;
+    const int L = std::max(1, arcSegs);
+    std::vector<Vector3d> u(n);
+    for (int i = 0; i < n; ++i) {
+      const Vector3d d = out.V[ring[i]] - C;
+      const double len = d.norm();
+      u[i] = len > 1e-12 ? Vector3d(d / len) : poleUnit;
+    }
+    std::vector<std::vector<int>> layer(L + 1);
+    layer[0] = ring;
+    for (int k = 1; k < L; ++k) {
+      layer[k].resize(n);
+      const double t = static_cast<double>(k) / L;
+      for (int i = 0; i < n; ++i)
+        layer[k][i] = out.add(C + r * slerpUnit(u[i], poleUnit, t));
+    }
+    const int pole = out.add(C + r * poleUnit);
+    for (int k = 0; k < L; ++k)
+      for (int i = 0; i < n; ++i) {
+        const int a = layer[k][i], b = layer[k][(i + 1) % n];
+        if (k + 1 < L) {
+          const int c = layer[k + 1][i], d = layer[k + 1][(i + 1) % n];
+          out.tri(a, b, d);
+          out.tri(a, d, c);
+        } else {
+          out.tri(a, b, pole);
+        }
+      }
+  }
+
   // The edge-local cross-section of selected edge (u,via) at u.
   std::vector<Vector3d> edgeCrossSection(int u, int via) const
   {
@@ -822,18 +879,21 @@ struct Blender
     const bool mixed = anyConcave && anyConvex;
     const bool junction = selVia.size() >= 2;  // (the weld pass-through already returned)
 
-    // Genuine single-signed junction: seat the fan apex on the corner ball so it
-    // rounds a convex vertex off / fills a concave one. Only for a real junction —
-    // a strip end gets a flat cap instead, not a rounded one.
+    // Genuine single-signed junction: tessellate the corner-ball sphere as a
+    // rounded cap so it rounds a convex vertex off / fills a concave one — the
+    // pole is the sphere point toward the original sharp vertex (its outermost
+    // point for a convex corner, the deepest valley point for a concave one).
+    // Only for a real junction — a strip end gets a flat cap instead.
     if (!isChamfer && junction && !mixed && ring.size() >= 3) {
       if (auto C = cornerBall(u, anyConcave)) {
-        Vector3d centroid = Vector3d::Zero();
-        for (const int i : ring) centroid += out.V[i];
-        centroid /= static_cast<double>(ring.size());
-        const Vector3d dir = (centroid - *C).normalized();
-        const int apex = out.add(*C + size * dir);
-        const int n2 = static_cast<int>(ring.size());
-        for (int i = 0; i < n2; ++i) out.tri(apex, ring[i], ring[(i + 1) % n2]);
+        Vector3d poleUnit = (m.pos[u] - *C).normalized();
+        if (poleUnit.squaredNorm() < 0.5) {  // u sits on the centre: fall back to the ring
+          Vector3d centroid = Vector3d::Zero();
+          for (const int i : ring) centroid += out.V[i];
+          centroid /= static_cast<double>(ring.size());
+          poleUnit = (centroid - *C).normalized();
+        }
+        emitCap(ring, *C, size, poleUnit);
         return;
       }
     }
