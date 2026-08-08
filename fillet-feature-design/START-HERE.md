@@ -40,6 +40,10 @@ beads). Per-edge concavity is handled automatically; mix-and-match is by nesting
 - **`along-sweep-stations.md`** — the second density floor (`$fn`-like cap on station spacing along
   the crease), which §9a names but never pinned down for B1. Fixes the straight-crease taper by
   splitting long selected feature edges before the blend. Default `k = 4` in `L = k·r`.
+- **`tangent-junction-fillet.md`** — the curved tangent-junction taper (tee/cross): `smoothSurfaces`
+  merges the two walls across the sub-46° tangent gap, degenerating the fillet on the good edges.
+  Fix chosen (stop the surface at the crease), but it lands on step 4's kept-sharp closure — a
+  next-session milestone. Sector prototype saved as `tangent-junction-sector-prototype.patch`.
 - **`spike/`** — the validated step-0 prototype (seam + poke-aware bridge) with its build report
   and the independent verification. Throwaway Python (uses `trimesh`), **not** production code, but
   it is the reference for the seam-reconciliation algorithm and its manifold/determinism checks.
