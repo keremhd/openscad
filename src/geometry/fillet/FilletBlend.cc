@@ -285,6 +285,19 @@ struct Blender
   std::map<EdgeKey, bool> concaveOf;          // sign per selected edge
   OutMesh out;
 
+  // Shared per-vertex cross-section, populated by prepareShared() for the
+  // pass-through vertices of a smooth crease (see there). Where two consecutive
+  // strips continue one crease across an interior tessellation seam, both must
+  // seat on ONE inset point and ONE seat normal per side, or their tangent
+  // points miss the 1e-6 weld and leave a facet dent. These override maps carry
+  // that single answer, keyed by (vertex u, incident triangle t): every facet on
+  // one side of the crease at u maps to the same value, so the surface pass, the
+  // two strips, the corner skip and the kept-seam ribbon all agree. Junction and
+  // corner vertices are deliberately left out (empty here), so their emitCorner
+  // ring keeps the surface-bounded seating that closes it.
+  std::map<std::pair<int, int>, Vector3d> insetOverride;
+  std::map<std::pair<int, int>, Vector3d> normalOverride;
+
   bool isSelected(int a, int b) const
   {
     return selected.count({std::min(a, b), std::max(a, b)}) > 0;
@@ -443,6 +456,8 @@ struct Blender
   // disk-patch majority (where sector and surface agree) is unchanged.
   Vector3d insetForTri(int u, int t) const
   {
+    const auto ov = insetOverride.find({u, t});
+    if (ov != insetOverride.end()) return ov->second;
     const auto s = sectorOf(u, t);
     if (!s) return insetPoint(u, surfaceOf[t]);
     auto offsetLine = [&](int x, int tside, Vector3d& base, Vector3d& dir) {
@@ -475,7 +490,11 @@ struct Blender
     const auto sa = sectorOf(u, t0);
     const auto sb = sectorOf(u, t1);
     if (!sa || !sb) return {Ta, Tb};
-    const Vector3d nA = sa->navg, nB = sb->navg;
+    Vector3d nA = sa->navg, nB = sb->navg;
+    // Same override as the inset: on a shared pass-through the two strips must use
+    // one seat normal per side, so their arc points coincide and weld.
+    if (const auto it = normalOverride.find({u, t0}); it != normalOverride.end()) nA = it->second;
+    if (const auto it = normalOverride.find({u, t1}); it != normalOverride.end()) nB = it->second;
 
     const double r = size;
     // Fillet centre one radius off side A along its sector normal — the plain
@@ -811,11 +830,101 @@ struct Blender
     out.tri(Va, Wb, Vb);
   }
 
+  // Build the shared per-vertex cross-section for the pass-through vertices of a
+  // smooth crease — the coordinated fix for the junction facet dent. A vertex u
+  // qualifies when exactly two selected edges of the same sign meet there and
+  // continue nearly straight through it (a crease passing on, not a corner
+  // turning or a junction branching). At such a u the fan splits into two runs,
+  // one per side of the crease, each bounded by the two crease edges; the run may
+  // cross interior tessellation seams (the facets of a curved wall), which is
+  // exactly where the per-edge sectors diverge and dent. For each run we compute
+  // ONE inset point (mitre of the two bounding crease edges) and ONE averaged
+  // seat normal, and stamp them onto every triangle in the run. insetForTri and
+  // crossSectionEdge then hand both strips — and the surface pass and any kept
+  // seam meeting u — the identical answer, so the strips weld.
+  //
+  // Corner, junction and mixed-sign vertices are intentionally skipped: they keep
+  // the surface-bounded sector seating, whose per-side stop at a sub-feature gap
+  // is what closes a genuine junction (spanning it there reopens closure at
+  // higher $fn). The near-straight test is what separates the two: a crease
+  // continuing straight is safe to span; a corner or a junction branch is not.
+  void prepareShared()
+  {
+    // A crease continues through u when its two edges leave nearly opposite —
+    // the same 40 deg the selection walk uses to follow a crease. A sharper turn
+    // is a corner (needs a cap, must not be forced to weld); a wider fan is a
+    // junction (three-plus selected edges, filtered by the count below).
+    constexpr double kPassThroughMaxTurnDeg = 40.0;
+    const double cosOpp = -std::cos(kPassThroughMaxTurnDeg * M_PI / 180.0);
+
+    std::set<int> verts;
+    for (const auto& e : selected) { verts.insert(e.first); verts.insert(e.second); }
+    for (const int u : verts) {
+      // The selected edges meeting at u.
+      std::vector<int> sv;
+      for (const auto& [key, ts] : adj)
+        if ((key.first == u || key.second == u) && selected.count(key))
+          sv.push_back(key.first == u ? key.second : key.first);
+      if (sv.size() != 2) continue;  // strip end, junction — leave to emitCorner
+      const EdgeKey e0{std::min(u, sv[0]), std::max(u, sv[0])};
+      const EdgeKey e1{std::min(u, sv[1]), std::max(u, sv[1])};
+      if (concaveOf.at(e0) != concaveOf.at(e1)) continue;  // mixed-sign — leave alone
+      const Vector3d d0 = (m.pos[sv[0]] - m.pos[u]).normalized();
+      const Vector3d d1 = (m.pos[sv[1]] - m.pos[u]).normalized();
+      if (d0.dot(d1) > cosOpp) continue;  // a corner turning, not a crease passing
+
+      const std::vector<std::pair<int, int>> fan = fanAround(u);
+      const int n = static_cast<int>(fan.size());
+      if (n == 0) continue;  // not a clean manifold fan
+      // Fan positions of the two crease edges. fan[i].second is the edge between
+      // triangle fan[i] and fan[i+1]; a crease edge at position p thus separates
+      // the two runs, with fan[p+1] on one side and fan[p] on the other.
+      int pa = -1, pb = -1;
+      for (int i = 0; i < n; ++i) {
+        if (fan[i].second == sv[0]) pa = i;
+        else if (fan[i].second == sv[1]) pb = i;
+      }
+      if (pa < 0 || pb < 0) continue;
+
+      // Stamp one run of triangles (fan[from..to], cyclic inclusive) with the
+      // mitre of its two bounding crease edges and the run's averaged normal.
+      auto stampRun = [&](int from, int to, int viaStart, int triStart, int viaEnd, int triEnd) {
+        std::vector<int> tris;
+        Vector3d nsum = Vector3d::Zero();
+        for (int i = from;; i = (i + 1) % n) {
+          tris.push_back(fan[i].first);
+          nsum += m.tris[fan[i].first].normal;
+          if (i == to) break;
+        }
+        const Vector3d nSide =
+          nsum.norm() > 1e-12 ? Vector3d(nsum.normalized()) : m.tris[fan[from].first].normal;
+        auto offsetLine = [&](int x, int tside, Vector3d& base, Vector3d& dir) {
+          const EdgeKey e{std::min(u, x), std::max(u, x)};
+          base = m.pos[u] + setback(e) * perpInto(u, x, tside);
+          dir = (m.pos[x] - m.pos[u]).normalized();
+        };
+        Vector3d b1, dd1, b2, dd2;
+        offsetLine(viaStart, triStart, b1, dd1);
+        offsetLine(viaEnd, triEnd, b2, dd2);
+        const Vector3d T = lineIntersect(b1, dd1, b2, dd2);
+        for (const int t : tris) {
+          insetOverride[{u, t}] = T;
+          normalOverride[{u, t}] = nSide;
+        }
+      };
+      // Run from just past sv[0] to sv[1], bounded by sv[0]@fan[pa+1] and
+      // sv[1]@fan[pb]; then the complementary run the other way.
+      stampRun((pa + 1) % n, pb, sv[0], fan[(pa + 1) % n].first, sv[1], fan[pb].first);
+      stampRun((pb + 1) % n, pa, sv[1], fan[(pb + 1) % n].first, sv[0], fan[pa].first);
+    }
+  }
+
   // Re-emit every surface triangle with its boundary vertices set back to their
   // inset positions (interior vertices are unchanged), then the edge strips, the
   // kept-seam ribbons, and the corner patches.
   void run()
   {
+    prepareShared();
     for (size_t t = 0; t < m.tris.size(); ++t) {
       const int ti = static_cast<int>(t);
       const auto& v = m.tris[t].v;
