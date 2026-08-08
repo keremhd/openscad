@@ -148,6 +148,21 @@ struct OutMesh
     return boundary;
   }
 
+  // Edges shared by more than two triangles — a non-manifold "fin", which
+  // orient()'s boundary count cannot see. Used to reject a blend that overlaps
+  // itself (e.g. two fillets colliding along an exact tangency line).
+  int nonManifoldEdges() const
+  {
+    std::map<std::pair<int, int>, int> use;
+    auto ekey = [](int a, int b) { return std::pair<int, int>{std::min(a, b), std::max(a, b)}; };
+    for (const auto& f : F)
+      for (int i = 0; i < 3; ++i) ++use[ekey(f[i], f[(i + 1) % 3])];
+    int n = 0;
+    for (const auto& [k, c] : use)
+      if (c > 2) ++n;
+    return n;
+  }
+
   std::unique_ptr<PolySet> build() const
   {
     PolySetBuilder b(0, 0, 3, /*convex=*/false);
@@ -173,6 +188,80 @@ Vector3d lineIntersect(const Vector3d& P1, const Vector3d& d1, const Vector3d& P
   const Vector3d r = P2 - P1;
   const double lambda = r.cross(d2).dot(cx) / den;
   return P1 + lambda * d1;
+}
+
+// Split the mesh edge (a,b) into `parts` equal collinear pieces, re-fanning each
+// of its incident triangles from their apex. Geometry-exact — the new vertices
+// lie on the segment and every sub-triangle is coplanar with the parent it came
+// from, so the solid, its dihedrals and its surface grouping are unchanged — and
+// manifold-preserving, because the two incident triangles are split in step with
+// the edge (no T-junction) and share the same interior vertices. The parent's
+// outward normal and source id ride onto every sub-triangle.
+void splitEdge(MergedMesh& m, int a, int b, int parts)
+{
+  if (parts < 2) return;
+  const Vector3d A = m.pos[a], B = m.pos[b];
+  std::vector<int> interior;  // new vertex ids, ordered from a toward b
+  interior.reserve(parts - 1);
+  for (int j = 1; j < parts; ++j) {
+    interior.push_back(static_cast<int>(m.pos.size()));
+    m.pos.push_back(A + (B - A) * (static_cast<double>(j) / parts));
+  }
+  std::vector<Tri> next;
+  next.reserve(m.tris.size() + 2 * parts);
+  for (const Tri& T : m.tris) {
+    int ia = -1, ib = -1;
+    for (int i = 0; i < 3; ++i) {
+      if (T.v[i] == a) ia = i;
+      if (T.v[i] == b) ib = i;
+    }
+    if (ia < 0 || ib < 0) { next.push_back(T); continue; }
+    const int w = T.v[3 - ia - ib];          // the third slot (0+1+2 = 3)
+    const bool aToB = (ia + 1) % 3 == ib;    // does this triangle wind a -> b ?
+    // The chain of stations across the split edge, in the triangle's own winding.
+    std::vector<int> chain;
+    chain.reserve(parts + 1);
+    chain.push_back(aToB ? a : b);
+    if (aToB)
+      for (int k = 0; k < static_cast<int>(interior.size()); ++k) chain.push_back(interior[k]);
+    else
+      for (int k = static_cast<int>(interior.size()) - 1; k >= 0; --k) chain.push_back(interior[k]);
+    chain.push_back(aToB ? b : a);
+    // Fan from w, preserving the (edge-direction, w) orientation and normal/id.
+    for (int k = 0; k + 1 < static_cast<int>(chain.size()); ++k)
+      next.push_back(Tri{{chain[k], chain[k + 1], w}, T.normal, T.originalID});
+  }
+  m.tris = std::move(next);
+}
+
+// The second density floor (`along-sweep-stations.md`): before the blend runs,
+// give every long selected crease enough stations that a straight fillet holds a
+// constant cross-section instead of tapering between its two corner-distorted
+// ends. Split each selected feature edge longer than `cap` into ceil(len/cap)
+// equal pieces. Splitting only ever shortens; it never turns a seam into a
+// feature, so one pass taken from the original mesh is complete.
+void subdivideLongCreaseEdges(MergedMesh& m, double thresholdDeg, bool wantConvex,
+                              bool wantConcave, double cap)
+{
+  if (!(cap > 0)) return;
+  const std::map<EdgeKey, std::vector<int>> adj = buildEdgeAdjacency(m.tris);
+  struct Split { int a, b, parts; };
+  std::vector<Split> todo;
+  for (const auto& [key, ts] : adj) {
+    if (ts.size() != 2) continue;
+    const EdgeClass ec = classifyEdge(m, key, m.tris[ts[0]], m.tris[ts[1]]);
+    if (!isFeatureAngle(ec.dihedralDeg, thresholdDeg)) continue;
+    if (!(ec.concave ? wantConcave : wantConvex)) continue;
+    const double len = (m.pos[key.second] - m.pos[key.first]).norm();
+    if (len <= cap) continue;
+    int parts = static_cast<int>(std::ceil(len / cap));
+    parts = std::min(parts, 256);  // backstop against a pathological count
+    todo.push_back({key.first, key.second, parts});
+  }
+  // Vertex ids are only ever appended, so the endpoints collected above stay
+  // valid; splitEdge rescans the current triangle list, so shared triangles
+  // split by an earlier edge are handled correctly.
+  for (const Split& s : todo) splitEdge(m, s.a, s.b, s.parts);
 }
 
 // The dominant blend construction. Fields captured once so the per-edge and
@@ -652,80 +741,121 @@ std::shared_ptr<const Geometry> buildBlend(
     return target;
   }
 
-  const MergedMesh m = mergeMesh(target->getManifold().GetMeshGL64());
-  const std::map<EdgeKey, std::vector<int>> adj = buildEdgeAdjacency(m.tris);
+  const MergedMesh m0 = mergeMesh(target->getManifold().GetMeshGL64());
   const double thresholdDeg = node.min_angle >= 0 ? node.min_angle : kDefaultCreaseThresholdDeg;
-  const std::vector<int> surfaceOf = smoothSurfaces(m, adj, thresholdDeg);
 
-  // The selected edges and their signs.
-  Blender b{m,     adj,          surfaceOf, node.size, isChamfer,
-            thresholdDeg, node.discretizer};
-  // Uniform arc tessellation: a quarter-turn's worth of segments from the
-  // discretizer, applied to every cross-section regardless of its subtended
-  // angle. A fillet crease whose dihedral varies (an oblique elliptical seam)
-  // would otherwise give adjacent cross-sections unequal point counts and tear
-  // the strip. A constant count is $fn-driven (classification itself stays
-  // mesh-only) yet keeps every strip closable.
-  if (!isChamfer) {
-    const int full = node.discretizer.getCircularSegmentCount(node.size, 360.0).value_or(16);
-    b.arcSegs = std::max(2, (full + 3) / 4);
-  }
-  std::size_t nConcave = 0, nConvex = 0, features = 0;
-  for (const auto& [key, ts] : adj) {
-    if (ts.size() != 2) continue;
-    const EdgeClass ec = classifyEdge(m, key, m.tris[ts[0]], m.tris[ts[1]]);
-    if (!isFeatureAngle(ec.dihedralDeg, thresholdDeg)) continue;
-    ++features;
-    b.feature.insert(key);
-    const bool want = ec.concave ? node.concave : node.convex;
-    if (!want) continue;
-    b.selected.insert(key);
-    b.concaveOf[key] = ec.concave;
-    if (ec.concave) ++nConcave; else ++nConvex;
-  }
+  // One blend attempt on a given mesh. The whole build is mesh-dependent, so it
+  // is factored out to be runnable twice: once on the subdivided mesh, once on
+  // the raw one if subdivision produced a non-manifold result (below).
+  enum class Status { Ok, Empty, NoSelection, Partial, Holed };
+  struct Attempt
+  {
+    Status status = Status::Empty;
+    std::unique_ptr<PolySet> geom;
+    std::size_t selected = 0, nConcave = 0, nConvex = 0, features = 0;
+    std::size_t verts = 0, tris = 0;
+    int boundary = 0, nonman = 0;
+  };
+  auto buildOn = [&](const MergedMesh& m) -> Attempt {
+    const std::map<EdgeKey, std::vector<int>> adj = buildEdgeAdjacency(m.tris);
+    const std::vector<int> surfaceOf = smoothSurfaces(m, adj, thresholdDeg);
+    Blender b{m,            adj,       surfaceOf, node.size, isChamfer,
+              thresholdDeg, node.discretizer};
+    // Uniform arc tessellation: a quarter-turn's worth of segments from the
+    // discretizer, applied to every cross-section regardless of its subtended
+    // angle. A fillet crease whose dihedral varies (an oblique elliptical seam)
+    // would otherwise give adjacent cross-sections unequal point counts and tear
+    // the strip. A constant count is $fn-driven (classification itself stays
+    // mesh-only) yet keeps every strip closable.
+    if (!isChamfer) {
+      const int full = node.discretizer.getCircularSegmentCount(node.size, 360.0).value_or(16);
+      b.arcSegs = std::max(2, (full + 3) / 4);
+    }
+    Attempt a;
+    for (const auto& [key, ts] : adj) {
+      if (ts.size() != 2) continue;
+      const EdgeClass ec = classifyEdge(m, key, m.tris[ts[0]], m.tris[ts[1]]);
+      if (!isFeatureAngle(ec.dihedralDeg, thresholdDeg)) continue;
+      ++a.features;
+      b.feature.insert(key);
+      const bool want = ec.concave ? node.concave : node.convex;
+      if (!want) continue;
+      b.selected.insert(key);
+      b.concaveOf[key] = ec.concave;
+      if (ec.concave) ++a.nConcave; else ++a.nConvex;
+    }
+    a.selected = b.selected.size();
+    if (b.selected.empty()) { a.status = Status::NoSelection; return a; }
+    // Partial selection — a brush, or a one-sided convex/concave filter on a
+    // model that has both signs — leaves some feature edges as kept-sharp surface
+    // boundaries. Closing that manifold needs per-vertex splitting where a kept
+    // edge borders a blended surface (a full topological bevel); the whole-model
+    // selection this file builds does not do that yet. Until it does, refuse to
+    // emit a torn mesh: return the model unchanged, loudly — a false refusal is
+    // the safe error, a silent drop is not. The kept-edge groundwork already
+    // slides the inset along kept edges, so full selection stays exact.
+    if ((brush && !brush->isEmpty()) || b.selected.size() != a.features) {
+      a.status = Status::Partial;
+      return a;
+    }
+    b.run();
+    a.boundary = b.out.orient();
+    a.nonman = b.out.nonManifoldEdges();
+    if (b.out.F.empty()) { a.status = Status::Empty; return a; }
+    if (a.boundary > 0) { a.status = Status::Holed; return a; }
+    a.status = Status::Ok;
+    a.verts = b.out.V.size();
+    a.tris = b.out.F.size();
+    a.geom = b.out.build();
+    return a;
+  };
 
-  if (b.selected.empty()) {
-    LOG(message_group::Warning, node.modinst->location(), "",
-        "%1$s: no selected edge turns more than %2$.1f deg; the model is returned unchanged",
-        node.name(), thresholdDeg);
-    return target;
-  }
+  // Along-sweep station floor: split long selected creases so a straight fillet
+  // holds a constant profile instead of tapering (see along-sweep-stations.md).
+  // cap = k*size, k = 4 — a constant for now, an along-sweep counterpart to the
+  // arc discretizer to be exposed later. Where subdivision densifies a
+  // degenerate region (two fillets colliding along an exact tangency line) it can
+  // turn a marginally-valid over-size case non-manifold; there, fall back to the
+  // un-subdivided build, which is never worse than before this floor existed.
+  constexpr double kAlongSweep = 4.0;
+  MergedMesh mSub = m0;
+  subdivideLongCreaseEdges(mSub, thresholdDeg, node.convex, node.concave, kAlongSweep * node.size);
+  const bool didSubdivide = mSub.tris.size() != m0.tris.size();
 
-  // Partial selection — a brush, or a one-sided convex/concave filter on a model
-  // that has both signs — leaves some feature edges as kept-sharp surface
-  // boundaries. Closing that manifold needs per-vertex splitting where a kept
-  // edge borders a blended surface (a full topological bevel); the whole-model
-  // selection this file builds does not do that yet. Until it does, refuse to
-  // emit a torn mesh: return the model unchanged, loudly — a false refusal is
-  // the safe error, a silent drop is not. The kept-edge groundwork above already
-  // slides the inset along kept edges, so full selection stays exact.
-  const bool partial = (brush && !brush->isEmpty()) || b.selected.size() != features;
-  if (partial) {
-    LOG(message_group::Warning, node.modinst->location(), "",
-        "%1$s: partial selection (a brush, or one-sided convex/concave on a two-sign model) is "
-        "not built yet; the model is returned unchanged [%2$d of %3$d feature edges selected]",
-        node.name(), static_cast<int>(b.selected.size()), static_cast<int>(features));
-    return target;
-  }
+  Attempt a = buildOn(mSub);
+  if (didSubdivide && (a.status == Status::Holed || (a.status == Status::Ok && a.nonman > 0)))
+    a = buildOn(m0);
 
-  b.run();
-  const int boundary = b.out.orient();
-
-  if (b.out.F.empty()) return target;
-  if (boundary > 0) {
-    // The surgery left a hole — invalid. Say so and hand back the model unchanged
-    // rather than a torn solid: a false refusal is the safe error.
-    LOG(message_group::Warning, node.modinst->location(), "",
-        "%1$s: the blend left %2$d open edge(s) (unclosed junction); the model is returned "
-        "unchanged",
-        node.name(), boundary);
-    return target;
+  switch (a.status) {
+    case Status::Empty:
+      return target;
+    case Status::NoSelection:
+      LOG(message_group::Warning, node.modinst->location(), "",
+          "%1$s: no selected edge turns more than %2$.1f deg; the model is returned unchanged",
+          node.name(), thresholdDeg);
+      return target;
+    case Status::Partial:
+      LOG(message_group::Warning, node.modinst->location(), "",
+          "%1$s: partial selection (a brush, or one-sided convex/concave on a two-sign model) is "
+          "not built yet; the model is returned unchanged [%2$d of %3$d feature edges selected]",
+          node.name(), static_cast<int>(a.selected), static_cast<int>(a.features));
+      return target;
+    case Status::Holed:
+      // The surgery left a hole — invalid. Say so and hand back the model
+      // unchanged rather than a torn solid: a false refusal is the safe error.
+      LOG(message_group::Warning, node.modinst->location(), "",
+          "%1$s: the blend left %2$d open edge(s) (unclosed junction); the model is returned "
+          "unchanged",
+          node.name(), a.boundary);
+      return target;
+    case Status::Ok:
+      break;
   }
 
   LOG(message_group::Echo, node.modinst->location(), "",
       "%1$s: %2$s %3$g blended %4$d edge(s) (%5$d concave, %6$d convex); %7$d verts, %8$d tris",
-      node.name(), sizeName, node.size, static_cast<int>(b.selected.size()),
-      static_cast<int>(nConcave), static_cast<int>(nConvex), static_cast<int>(b.out.V.size()),
-      static_cast<int>(b.out.F.size()));
-  return b.out.build();
+      node.name(), sizeName, node.size, static_cast<int>(a.selected),
+      static_cast<int>(a.nConcave), static_cast<int>(a.nConvex), static_cast<int>(a.verts),
+      static_cast<int>(a.tris));
+  return std::move(a.geom);
 }

@@ -37,6 +37,9 @@ beads). Per-edge concavity is handled automatically; mix-and-match is by nesting
 
 **CURRENT — read and implement from these:**
 - **`REQUIREMENTS.md`** — the spec. Start here.
+- **`along-sweep-stations.md`** — the second density floor (`$fn`-like cap on station spacing along
+  the crease), which §9a names but never pinned down for B1. Fixes the straight-crease taper by
+  splitting long selected feature edges before the blend. Default `k = 4` in `L = k·r`.
 - **`spike/`** — the validated step-0 prototype (seam + poke-aware bridge) with its build report
   and the independent verification. Throwaway Python (uses `trimesh`), **not** production code, but
   it is the reference for the seam-reconciliation algorithm and its manifold/determinism checks.
