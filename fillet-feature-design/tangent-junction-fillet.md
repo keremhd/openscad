@@ -69,6 +69,30 @@ the sharp boundary. The tangent-gap edges are precisely "feature-but-not-selecte
 we stop the surface there. So this fix **lands on top of step 4**, and its boundary is a branching
 graph a crude centroid-fan does not converge on (tried: 16→8→12, never 0).
 
+### It IS step-4's core capability, and it is not built in B1 yet
+
+The fragment end here and the **end of a brush selection** are the *same* case: a fillet strip
+terminating against a kept-sharp edge. So it is **one** piece of machinery, not two, and it closes
+both. Do not expect to reuse an existing brush-end path — there isn't one in B1:
+
+- `buildBlend` **refuses any brush / partial selection wholesale** — `brush_one_edge` today prints
+  "partial selection … is not built yet; the model is returned unchanged" and hands back the input.
+  So a brush produces no blend to borrow from.
+- `emitCorner` returns early for any vertex with fewer than two selected pairs (the `pairs.size() <
+  2` guard) — which is exactly what a strip *end* is. So there is no strip-end cap anywhere.
+- The **old swept-tool** had this (seam covers / canal / wedge / runout); the B1 rewrite deleted it
+  and has not reimplemented it. That reimplementation *is* step 4.
+
+Concretely, the one capability to build is **"sew a fillet strip's end to a kept-sharp boundary"**
+(per-vertex split at the kept edge, cap the strip's end cross-section onto the inset surface). Once
+it exists it serves: brush ends, one-sided convex/concave filters on two-sign models, *and* this
+tangent junction. The kept-edge **inset** groundwork already present (`insetPoint` offsets a kept
+edge by zero setback) is only half of it — it moves the surface, but nothing yet caps the strip end.
+
+The prototype leaves 16 open ends precisely because that end-closure does not exist to call: it does
+not even route the tangent-gap edges through the kept-edge path, since that path dead-ends at the
+refusal above.
+
 ## Build order for the next session
 
 1. Land or advance **step 4 (partial selection / kept-sharp-edge closure)** first — it is the
