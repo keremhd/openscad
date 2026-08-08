@@ -1163,7 +1163,7 @@ set(CGAL_SOURCES
 
 set(MANIFOLD_SOURCES
   src/geometry/fillet/FilletBrush.cc
-  src/geometry/fillet/FilletBuilder.cc
+  src/geometry/fillet/FilletMesh.cc
   src/geometry/fillet/FilletBlend.cc
   src/geometry/manifold/ManifoldGeometry.cc
   src/geometry/manifold/manifoldutils.cc
@@ -1590,7 +1590,6 @@ file(GLOB_RECURSE GUI_TEST_SOURCES
 if(ENABLE_MANIFOLD)
   list(APPEND TEST_SOURCES
     "${CMAKE_CURRENT_SOURCE_DIR}/src/geometry/fillet/FilletBuilder_test.cc"
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/geometry/fillet/FilletCompare_test.cc"
   )
 endif()
 list(FILTER Sources EXCLUDE REGEX ".*_test[.]cc")

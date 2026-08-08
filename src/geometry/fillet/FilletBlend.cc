@@ -48,6 +48,27 @@ using namespace fillet::detail;
 namespace {
 
 // ---------------------------------------------------------------------------
+// Tunable angle thresholds for the blend's crease walk. Two companions live
+// with the classification core in the internal header: the feature/crease
+// threshold (min_angle, defaulting to kDefaultCreaseThresholdDeg) and the
+// smooth-surface grouping threshold (kDefaultSurfaceThresholdDeg 10 deg). The
+// two below are specific to this file and are named here, in one place, rather
+// than left as a literal buried in each function — the "same 40 deg" the
+// selection walk and the pass-through seating both rely on is then tuned once.
+// ---------------------------------------------------------------------------
+
+// A crease continues into the neighbour whose direction turns least; a turn past
+// this bound is a different crease branching off (a facet seam meeting a rim at
+// a right angle, a crease dying into a corner), not the same one continuing.
+inline constexpr double kCreaseFollowMaxTurnDeg = 40.0;
+
+// A crease passes THROUGH a vertex — rather than turning a corner or branching a
+// junction — when its two edges leave nearly opposite, within this bound. It is
+// the same angle the follow walk uses, and the shared cross-section that welds
+// the two strips at such a vertex depends on the two staying in step.
+inline constexpr double kPassThroughMaxTurnDeg = 40.0;
+
+// ---------------------------------------------------------------------------
 // Output mesh: a triangle soup with position-welded vertices, an orientation
 // pass to make winding consistent, and a per-component volume-sign fix so the
 // emitted normals point outward. Winding is therefore never the caller's
@@ -235,24 +256,105 @@ void splitEdge(MergedMesh& m, int a, int b, int parts)
   m.tris = std::move(next);
 }
 
-// The second density floor (`along-sweep-stations.md`): before the blend runs,
-// give every long selected crease enough stations that a straight fillet holds a
-// constant cross-section instead of tapering between its two corner-distorted
-// ends. Split each selected feature edge longer than `cap` into ceil(len/cap)
-// equal pieces. Splitting only ever shortens; it never turns a seam into a
-// feature, so one pass taken from the original mesh is complete.
-void subdivideLongCreaseEdges(MergedMesh& m, double thresholdDeg, bool wantConvex,
-                              bool wantConcave, double cap)
+// The crease edges of a mesh, and which of them the blend will act on. Shared by
+// the along-sweep station floor (which splits the long ones) and the main build
+// (which seats a bead on them), so both agree on exactly which edges are blended.
+//
+// `crease` is every edge that clears the surface threshold — a surface boundary,
+// carrying its sign and dihedral. `eligible` is the subset to blend: start from
+// every edge that ALSO clears the feature threshold, then follow the crease into
+// the neighbour that turns least (within kCreaseFollowMaxTurnDeg) and does not run
+// straight through the shared vertex, so a shallow tangent stretch continuing a
+// genuine feature — a tee's intersection loop, its tangent sides included — is
+// taken in full, while a tessellation seam or a gentle fold that never reaches the
+// feature threshold is left sharp. This is the one place the two thresholds meet:
+// the feature threshold decides eligibility, the surface threshold bounds the
+// crease. Tool-sign and brush filters are the caller's.
+struct CreaseSelection
 {
-  if (!(cap > 0)) return;
-  const std::map<EdgeKey, std::vector<int>> adj = buildEdgeAdjacency(m.tris);
-  struct Split { int a, b, parts; };
-  std::vector<Split> todo;
+  std::map<EdgeKey, EdgeClass> crease;
+  std::set<EdgeKey> eligible;
+};
+
+CreaseSelection selectCreaseEdges(const MergedMesh& m,
+                                  const std::map<EdgeKey, std::vector<int>>& adj,
+                                  double thresholdDeg, double surfaceThresholdDeg)
+{
+  CreaseSelection sel;
+  std::map<int, std::vector<int>> vinc;  // vertex -> crease-edge neighbour vertices
   for (const auto& [key, ts] : adj) {
     if (ts.size() != 2) continue;
     const EdgeClass ec = classifyEdge(m, key, m.tris[ts[0]], m.tris[ts[1]]);
-    if (!isFeatureAngle(ec.dihedralDeg, thresholdDeg)) continue;
-    if (!(ec.concave ? wantConcave : wantConvex)) continue;
+    if (!isFeatureAngle(ec.dihedralDeg, surfaceThresholdDeg)) continue;
+    sel.crease[key] = ec;
+    vinc[key.first].push_back(key.second);
+    vinc[key.second].push_back(key.first);
+  }
+  const double cosTurn = std::cos(kCreaseFollowMaxTurnDeg * M_PI / 180.0);
+  // ...but a tessellation seam that grazes the crease at a shallow angle passes
+  // the turn test. It is told apart by passing STRAIGHT THROUGH the vertex: it has
+  // another edge here nearly opposite to it, so it is the middle of a line rather
+  // than a crease turning. (A real crease turns at such a vertex, so its
+  // continuation has no opposite partner other than the edge we arrived on.) This
+  // is what stops the follow from running down a cylinder's vertical seam where
+  // the intersection curve dives steeply past it at a tangent junction.
+  constexpr double kCreaseStraightDeg = 20.0;
+  const double cosStraight = std::cos(kCreaseStraightDeg * M_PI / 180.0);
+  auto straightThrough = [&](int u, int v, int w) {
+    const Vector3d dw = (m.pos[w] - m.pos[v]).normalized();
+    // A collinear partner at v (other than the edge we arrived on) means the
+    // candidate is the middle of a straight line through v — a seam, not a turn.
+    for (const int z : vinc[v]) {
+      if (z == u || z == w) continue;
+      if ((m.pos[z] - m.pos[v]).normalized().dot(dw) <= -cosStraight) return true;
+    }
+    // A seam radiating from the junction has no partner at its start vertex, but
+    // it runs straight on past its far end w — where a collinear continuation
+    // (other than back to v) marks it a seam too.
+    for (const int z : vinc[w]) {
+      if (z == v) continue;
+      if ((m.pos[z] - m.pos[w]).normalized().dot(dw) >= cosStraight) return true;
+    }
+    return false;
+  };
+  std::vector<std::pair<int, int>> walk;  // directed: arrived at .second via .first
+  for (const auto& [key, ec] : sel.crease)
+    if (isFeatureAngle(ec.dihedralDeg, thresholdDeg) && sel.eligible.insert(key).second) {
+      walk.push_back({key.first, key.second});
+      walk.push_back({key.second, key.first});
+    }
+  while (!walk.empty()) {
+    const auto [u, v] = walk.back();
+    walk.pop_back();
+    const Vector3d din = (m.pos[v] - m.pos[u]).normalized();
+    for (const int w : vinc[v]) {
+      if (w == u) continue;
+      const EdgeKey nk{std::min(v, w), std::max(v, w)};
+      if (sel.eligible.count(nk)) continue;
+      if (din.dot((m.pos[w] - m.pos[v]).normalized()) < cosTurn) continue;
+      if (straightThrough(u, v, w)) continue;
+      sel.eligible.insert(nk);
+      walk.push_back({v, w});
+    }
+  }
+  return sel;
+}
+
+// The second density floor (`along-sweep-stations.md`): before the blend runs,
+// give every long selected crease enough stations that a straight fillet holds a
+// constant cross-section instead of tapering between its two corner-distorted
+// ends. Split each edge in `edges` longer than `cap` into ceil(len/cap) equal
+// pieces. `edges` is the eligible set (selectCreaseEdges), tool-sign filtered by
+// the caller — the exact edges the build will blend, so a shallow tangent stretch
+// carried into the selection by crease-following is densified too, not only the
+// edges that independently clear the feature threshold. Splitting only ever
+// shortens; it never turns a seam into a feature, so one pass is complete.
+void subdivideLongCreaseEdges(MergedMesh& m, const std::set<EdgeKey>& edges, double cap)
+{
+  if (!(cap > 0) || edges.empty()) return;
+  struct Split { int a, b, parts; };
+  std::vector<Split> todo;
+  for (const EdgeKey& key : edges) {
     const double len = (m.pos[key.second] - m.pos[key.first]).norm();
     if (len <= cap) continue;
     int parts = static_cast<int>(std::ceil(len / cap));
@@ -851,10 +953,10 @@ struct Blender
   void prepareShared()
   {
     // A crease continues through u when its two edges leave nearly opposite —
-    // the same 40 deg the selection walk uses to follow a crease. A sharper turn
-    // is a corner (needs a cap, must not be forced to weld); a wider fan is a
-    // junction (three-plus selected edges, filtered by the count below).
-    constexpr double kPassThroughMaxTurnDeg = 40.0;
+    // the same angle the selection walk uses to follow a crease
+    // (kPassThroughMaxTurnDeg, kept in step with kCreaseFollowMaxTurnDeg). A
+    // sharper turn is a corner (needs a cap, must not be forced to weld); a wider
+    // fan is a junction (three-plus selected edges, filtered by the count below).
     const double cosOpp = -std::cos(kPassThroughMaxTurnDeg * M_PI / 180.0);
 
     std::set<int> verts;
@@ -1022,73 +1124,10 @@ std::shared_ptr<const Geometry> buildBlend(
     // tessellation seam or a gentle fold — a chain that never reaches the feature
     // threshold — is left sharp. This is the one place the two thresholds meet:
     // min_angle decides eligibility, the surface threshold bounds the crease.
-    struct Crease { bool concave; double dih; };
-    std::map<EdgeKey, Crease> crease;
-    std::map<int, std::vector<int>> vinc;  // vertex -> crease-edge neighbour vertices
-    for (const auto& [key, ts] : adj) {
-      if (ts.size() != 2) continue;
-      const EdgeClass ec = classifyEdge(m, key, m.tris[ts[0]], m.tris[ts[1]]);
-      if (!isFeatureAngle(ec.dihedralDeg, surfaceThresholdDeg)) continue;
-      crease[key] = {ec.concave, ec.dihedralDeg};
-      b.feature.insert(key);
-      vinc[key.first].push_back(key.second);
-      vinc[key.second].push_back(key.first);
-    }
-    // A crease continues into the neighbour whose direction turns least; a turn
-    // past this bound is a different crease branching off (a facet seam meeting a
-    // rim at a right angle, a crease dying into a corner), not the same one
-    // continuing.
-    constexpr double kCreaseFollowMaxTurnDeg = 40.0;
-    const double cosTurn = std::cos(kCreaseFollowMaxTurnDeg * M_PI / 180.0);
-    // ...but a tessellation seam that grazes the crease at a shallow angle passes
-    // the turn test. It is told apart by passing STRAIGHT THROUGH the vertex: it
-    // has another edge here nearly opposite to it, so it is the middle of a line
-    // rather than a crease turning. (A real crease turns at such a vertex, so its
-    // continuation has no opposite partner other than the edge we arrived on.)
-    // This is what stops the follow from running down a cylinder's vertical seam
-    // where the intersection curve dives steeply past it at a tangent junction.
-    constexpr double kCreaseStraightDeg = 20.0;
-    const double cosStraight = std::cos(kCreaseStraightDeg * M_PI / 180.0);
-    auto straightThrough = [&](int u, int v, int w) {
-      const Vector3d dw = (m.pos[w] - m.pos[v]).normalized();
-      // A collinear partner at v (other than the edge we arrived on) means the
-      // candidate is the middle of a straight line through v — a seam, not a turn.
-      for (const int z : vinc[v]) {
-        if (z == u || z == w) continue;
-        if ((m.pos[z] - m.pos[v]).normalized().dot(dw) <= -cosStraight) return true;
-      }
-      // A seam radiating from the junction has no partner at its start vertex, but
-      // it runs straight on past its far end w — where a collinear continuation
-      // (other than back to v) marks it a seam too.
-      for (const int z : vinc[w]) {
-        if (z == v) continue;
-        if ((m.pos[z] - m.pos[w]).normalized().dot(dw) >= cosStraight) return true;
-      }
-      return false;
-    };
-    std::set<EdgeKey> eligible;
-    std::vector<std::pair<int, int>> walk;  // directed: arrived at .second via .first
-    for (const auto& [key, ce] : crease)
-      if (isFeatureAngle(ce.dih, thresholdDeg) && eligible.insert(key).second) {
-        walk.push_back({key.first, key.second});
-        walk.push_back({key.second, key.first});
-      }
-    while (!walk.empty()) {
-      const auto [u, v] = walk.back();
-      walk.pop_back();
-      const Vector3d din = (m.pos[v] - m.pos[u]).normalized();
-      for (const int w : vinc[v]) {
-        if (w == u) continue;
-        const EdgeKey nk{std::min(v, w), std::max(v, w)};
-        if (eligible.count(nk)) continue;
-        if (din.dot((m.pos[w] - m.pos[v]).normalized()) < cosTurn) continue;
-        if (straightThrough(u, v, w)) continue;
-        eligible.insert(nk);
-        walk.push_back({v, w});
-      }
-    }
-    for (const auto& key : eligible) {
-      const Crease& ce = crease.at(key);
+    const CreaseSelection sel = selectCreaseEdges(m, adj, thresholdDeg, surfaceThresholdDeg);
+    for (const auto& [key, ec] : sel.crease) b.feature.insert(key);
+    for (const auto& key : sel.eligible) {
+      const EdgeClass& ce = sel.crease.at(key);
       const bool want = ce.concave ? node.concave : node.convex;
       if (!want) continue;
       // Brush clips the selection to a region by intersecting the spine, not the
@@ -1125,7 +1164,21 @@ std::shared_ptr<const Geometry> buildBlend(
   // un-subdivided build, which is never worse than before this floor existed.
   constexpr double kAlongSweep = 4.0;
   MergedMesh mSub = m0;
-  subdivideLongCreaseEdges(mSub, thresholdDeg, node.convex, node.concave, kAlongSweep * node.size);
+  // The edges to densify are exactly the ones buildOn will blend: the eligible
+  // set computed on the raw mesh at the same two thresholds, tool-sign filtered.
+  // Taking it from selectCreaseEdges (rather than the feature key alone) means a
+  // shallow tangent stretch carried into the selection by crease-following — a
+  // tee's tangent sides — is given stations too, so a straight fillet there holds
+  // its profile instead of tapering to the corner-distorted ends.
+  {
+    const std::map<EdgeKey, std::vector<int>> adj0 = buildEdgeAdjacency(m0.tris);
+    const CreaseSelection sel0 =
+      selectCreaseEdges(m0, adj0, thresholdDeg, kDefaultSurfaceThresholdDeg);
+    std::set<EdgeKey> toSplit;
+    for (const auto& key : sel0.eligible)
+      if (sel0.crease.at(key).concave ? node.concave : node.convex) toSplit.insert(key);
+    subdivideLongCreaseEdges(mSub, toSplit, kAlongSweep * node.size);
+  }
   const bool didSubdivide = mSub.tris.size() != m0.tris.size();
 
   Attempt a = buildOn(mSub, kDefaultSurfaceThresholdDeg);
