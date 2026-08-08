@@ -643,6 +643,23 @@ struct Blender
       const double rad = la + (lb - la) * j / arcSegs;
       pts.push_back(C + rad * rot);
     }
+    // A convex roundover must stay inside the wedge of its own two faces: it
+    // rounds the sharp edge off, so its surface never pokes past either face. At a
+    // mixed corner the two face-insets are mitred to very different depths (a
+    // convex edge sharing the vertex with a taller concave crease), which tilts
+    // the arc plane so the bulge dips through a face and shows as a spike. Clamp
+    // the interior arc points back onto the solid side of each face plane; the
+    // tangent endpoints stay put (they are the insets the strips weld to), and a
+    // concave arc is left alone — it bulges into the open valley by design.
+    if (!concave) {
+      const Vector3d nA0 = m.tris[t0].normal, nB0 = m.tris[t1].normal;
+      for (size_t j = 1; j + 1 < pts.size(); ++j) {
+        const double dA = nA0.dot(pts[j] - Ta);
+        if (dA > 0) pts[j] -= dA * nA0;
+        const double dB = nB0.dot(pts[j] - Tb);
+        if (dB > 0) pts[j] -= dB * nB0;
+      }
+    }
     return pts;
   }
 
@@ -797,6 +814,139 @@ struct Blender
       }
   }
 
+  // Ear-clip a ring in its best-fit plane, returning the triangles as LOCAL
+  // indices (0..n-1) into the ring array rather than emitting them. The projection
+  // is a simple polygon wherever the flat ear-clip already worked, so this base
+  // triangulation is free of self-intersection — which is what makes it a safe
+  // starting point for the faired saddle below. Returns false if the projection is
+  // degenerate or no ear can be found.
+  bool earClipRing(const std::vector<int>& ring, std::vector<std::array<int, 3>>& tris) const
+  {
+    const int n = static_cast<int>(ring.size());
+    if (n < 3) return false;
+    Vector3d c = Vector3d::Zero();
+    for (const int i : ring) c += out.V[i];
+    c /= n;
+    Vector3d nrm = Vector3d::Zero();  // best-fit normal via Newell's method
+    for (int i = 0; i < n; ++i)
+      nrm += (out.V[ring[i]] - c).cross(out.V[ring[(i + 1) % n]] - c);
+    if (nrm.norm() < 1e-12) return false;
+    nrm.normalize();
+    Vector3d ex = (std::abs(nrm.x()) < 0.9 ? Vector3d::UnitX() : Vector3d::UnitY());
+    ex = (ex - ex.dot(nrm) * nrm).normalized();
+    const Vector3d ey = nrm.cross(ex);
+    std::vector<Vector2d> p(n);
+    for (int i = 0; i < n; ++i) {
+      const Vector3d d = out.V[ring[i]] - c;
+      p[i] = {d.dot(ex), d.dot(ey)};
+    }
+    double area = 0;  // signed area to fix winding
+    for (int i = 0; i < n; ++i) area += p[i].x() * p[(i + 1) % n].y() - p[(i + 1) % n].x() * p[i].y();
+    std::vector<int> idx(n);
+    for (int i = 0; i < n; ++i) idx[i] = (area < 0) ? (n - 1 - i) : i;
+    auto cross2 = [](const Vector2d& a, const Vector2d& b, const Vector2d& cc) {
+      return (b.x() - a.x()) * (cc.y() - a.y()) - (b.y() - a.y()) * (cc.x() - a.x());
+    };
+    std::vector<int> poly = idx;
+    tris.clear();
+    int guard = 0;
+    while (poly.size() > 3 && guard++ < 4 * n) {
+      const int m2 = static_cast<int>(poly.size());
+      bool clipped = false;
+      for (int i = 0; i < m2; ++i) {
+        const int ia = poly[(i + m2 - 1) % m2], ib = poly[i], ic = poly[(i + 1) % m2];
+        const Vector2d &A = p[ia], &B = p[ib], &C2 = p[ic];
+        if (cross2(A, B, C2) <= 1e-12) continue;  // reflex or collinear
+        bool ear = true;
+        for (int j = 0; j < m2; ++j) {
+          const int k = poly[j];
+          if (k == ia || k == ib || k == ic) continue;
+          const Vector2d& P = p[k];
+          if (cross2(A, B, P) >= 0 && cross2(B, C2, P) >= 0 && cross2(C2, A, P) >= 0) {
+            ear = false;
+            break;
+          }
+        }
+        if (!ear) continue;
+        tris.push_back({ia, ib, ic});
+        poly.erase(poly.begin() + i);
+        clipped = true;
+        break;
+      }
+      if (!clipped) return false;
+    }
+    if (poly.size() == 3) tris.push_back({poly[0], poly[1], poly[2]});
+    return true;
+  }
+
+  // Fill a mixed-sign vertex ring with a curved saddle rather than a flat
+  // ear-clip. A convex edge and a concave edge sharing u cannot be capped by one
+  // sphere (a ball is single-signed), so the patch is a genuine saddle: it must
+  // curve outward where it continues the convex roundovers and inward where it
+  // continues the concave valley. The boundary ring already encodes both — its arc
+  // points sit high on the convex sides and low in the concave ones — so a faired
+  // membrane spanning it inherits the saddle shape.
+  //
+  // Build it from the flat ear-clip triangulation (a valid, non-self-intersecting
+  // start), refine it a few times by 1->3 centroid splits (which add interior
+  // vertices without ever splitting a shared edge, so the patch stays conforming
+  // and the boundary stays welded to the arc strips), then relax the interior
+  // vertices with boundary-fixed Laplacian smoothing. Because the start is valid
+  // and smoothing only nudges interior points toward their neighbours' average,
+  // the result curves into the saddle without the folding a star-shaped concentric
+  // fan would suffer on a reflex ring. Falls back to the flat ear-clip on failure.
+  bool emitSaddle(const std::vector<int>& ring)
+  {
+    const int n = static_cast<int>(ring.size());
+    if (n < 4) return false;
+    std::vector<std::array<int, 3>> base;
+    if (!earClipRing(ring, base)) return false;
+
+    // Local working mesh: vertices 0..n-1 are the ring (boundary, pinned), the
+    // rest are interior. Positions carried in V, triangles in F.
+    std::vector<Vector3d> V;
+    V.reserve(ring.size());
+    for (const int i : ring) V.push_back(out.V[i]);
+    const int nBoundary = n;
+    std::vector<std::array<int, 3>> F = base;
+
+    constexpr int kSplitRounds = 2;
+    for (int r = 0; r < kSplitRounds; ++r) {
+      std::vector<std::array<int, 3>> nextF;
+      nextF.reserve(F.size() * 3);
+      for (const auto& t : F) {
+        const int g = static_cast<int>(V.size());
+        V.push_back((V[t[0]] + V[t[1]] + V[t[2]]) / 3.0);
+        nextF.push_back({t[0], t[1], g});
+        nextF.push_back({t[1], t[2], g});
+        nextF.push_back({t[2], t[0], g});
+      }
+      F = std::move(nextF);
+    }
+
+    // Vertex adjacency (undirected) for the smoothing pass.
+    std::vector<std::set<int>> nbr(V.size());
+    for (const auto& t : F)
+      for (int e = 0; e < 3; ++e) {
+        nbr[t[e]].insert(t[(e + 1) % 3]);
+        nbr[t[e]].insert(t[(e + 2) % 3]);
+      }
+    constexpr int kIters = 30;
+    for (int it = 0; it < kIters; ++it) {
+      std::vector<Vector3d> next = V;
+      for (int v = nBoundary; v < static_cast<int>(V.size()); ++v) {
+        if (nbr[v].empty()) continue;
+        Vector3d s = Vector3d::Zero();
+        for (const int w : nbr[v]) s += V[w];
+        next[v] = s / static_cast<double>(nbr[v].size());
+      }
+      V = std::move(next);
+    }
+
+    for (const auto& t : F) out.tri(out.add(V[t[0]]), out.add(V[t[1]]), out.add(V[t[2]]));
+    return true;
+  }
+
   // The edge-local cross-section of selected edge (u,via) at u.
   std::vector<Vector3d> edgeCrossSection(int u, int via) const
   {
@@ -898,79 +1048,29 @@ struct Blender
       }
     }
 
-    // Strip end (a fillet ending against a kept-sharp boundary) and mixed-sign
-    // junction alike: close the ring flat by ear-clipping it in its best-fit
-    // plane — the perpendicular patch that seals the volume and leaves the kept
-    // edges sharp. Falls back to the crude centroid fan if the ring is too tangled
-    // to triangulate cleanly (orient() then refuses if that left a hole).
+    // Mixed-sign junction: a convex edge and a concave edge share u, so no single
+    // ball caps it — fill the ring with a curved saddle membrane instead of a flat
+    // patch, removing the creased V-notch the ear-clip left where a concave crease
+    // died into a face.
+    if (!isChamfer && junction && mixed && ring.size() >= 4 && emitSaddle(ring)) return;
+
+    // Strip end (a fillet ending against a kept-sharp boundary): close the ring
+    // flat by ear-clipping it in its best-fit plane — the perpendicular patch that
+    // seals the volume and leaves the kept edges sharp. Falls back to the crude
+    // centroid fan if the ring is too tangled to triangulate cleanly (orient()
+    // then refuses if that left a hole).
     if (ring.size() >= 4 && ringSaddle(ring)) return;
     out.fan(ring);
   }
 
   // Triangulate a (non-planar) ring directly, no central vertex, by ear-clipping
-  // in its best-fit plane. Returns false — leaving the caller to fall back — if
-  // the projection is degenerate or no ear can be found.
+  // in its best-fit plane — the flat perpendicular cap for a strip end. Returns
+  // false, leaving the caller to fall back, if no valid ear-clip exists.
   bool ringSaddle(const std::vector<int>& ring)
   {
-    const int n = static_cast<int>(ring.size());
-    Vector3d c = Vector3d::Zero();
-    for (const int i : ring) c += out.V[i];
-    c /= n;
-    // best-fit normal via Newell's method
-    Vector3d nrm = Vector3d::Zero();
-    for (int i = 0; i < n; ++i) {
-      const Vector3d& a = out.V[ring[i]];
-      const Vector3d& b = out.V[ring[(i + 1) % n]];
-      nrm += (a - c).cross(b - c);
-    }
-    if (nrm.norm() < 1e-12) return false;
-    nrm.normalize();
-    Vector3d ex = (std::abs(nrm.x()) < 0.9 ? Vector3d::UnitX() : Vector3d::UnitY());
-    ex = (ex - ex.dot(nrm) * nrm).normalized();
-    const Vector3d ey = nrm.cross(ex);
-    std::vector<Vector2d> p(n);
-    for (int i = 0; i < n; ++i) {
-      const Vector3d d = out.V[ring[i]] - c;
-      p[i] = {d.dot(ex), d.dot(ey)};
-    }
-    // signed area to fix winding
-    double area = 0;
-    for (int i = 0; i < n; ++i) area += p[i].x() * p[(i + 1) % n].y() - p[(i + 1) % n].x() * p[i].y();
-    std::vector<int> idx(n);
-    for (int i = 0; i < n; ++i) idx[i] = (area < 0) ? (n - 1 - i) : i;
-    auto cross2 = [](const Vector2d& a, const Vector2d& b, const Vector2d& cc) {
-      return (b.x() - a.x()) * (cc.y() - a.y()) - (b.y() - a.y()) * (cc.x() - a.x());
-    };
-    std::vector<int> poly = idx;
     std::vector<std::array<int, 3>> tris;
-    int guard = 0;
-    while (poly.size() > 3 && guard++ < 4 * n) {
-      const int m2 = static_cast<int>(poly.size());
-      bool clipped = false;
-      for (int i = 0; i < m2; ++i) {
-        const int ia = poly[(i + m2 - 1) % m2], ib = poly[i], ic = poly[(i + 1) % m2];
-        const Vector2d &A = p[ia], &B = p[ib], &C2 = p[ic];
-        if (cross2(A, B, C2) <= 1e-12) continue;  // reflex or collinear
-        bool ear = true;
-        for (int j = 0; j < m2; ++j) {
-          const int k = poly[j];
-          if (k == ia || k == ib || k == ic) continue;
-          const Vector2d& P = p[k];
-          if (cross2(A, B, P) >= 0 && cross2(B, C2, P) >= 0 && cross2(C2, A, P) >= 0) {
-            ear = false;
-            break;
-          }
-        }
-        if (!ear) continue;
-        tris.push_back({ring[ia], ring[ib], ring[ic]});
-        poly.erase(poly.begin() + i);
-        clipped = true;
-        break;
-      }
-      if (!clipped) return false;
-    }
-    if (poly.size() == 3) tris.push_back({ring[poly[0]], ring[poly[1]], ring[poly[2]]});
-    for (const auto& t : tris) out.tri(t[0], t[1], t[2]);
+    if (!earClipRing(ring, tris)) return false;
+    for (const auto& t : tris) out.tri(ring[t[0]], ring[t[1]], ring[t[2]]);
     return true;
   }
 
