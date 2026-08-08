@@ -927,9 +927,36 @@ std::shared_ptr<const Geometry> buildBlend(
     }
     // A crease continues into the neighbour whose direction turns least; a turn
     // past this bound is a different crease branching off (a facet seam meeting a
-    // rim, a crease dying into a corner), not the same one continuing.
-    constexpr double kCreaseFollowMaxTurnDeg = 60.0;
+    // rim at a right angle, a crease dying into a corner), not the same one
+    // continuing.
+    constexpr double kCreaseFollowMaxTurnDeg = 40.0;
     const double cosTurn = std::cos(kCreaseFollowMaxTurnDeg * M_PI / 180.0);
+    // ...but a tessellation seam that grazes the crease at a shallow angle passes
+    // the turn test. It is told apart by passing STRAIGHT THROUGH the vertex: it
+    // has another edge here nearly opposite to it, so it is the middle of a line
+    // rather than a crease turning. (A real crease turns at such a vertex, so its
+    // continuation has no opposite partner other than the edge we arrived on.)
+    // This is what stops the follow from running down a cylinder's vertical seam
+    // where the intersection curve dives steeply past it at a tangent junction.
+    constexpr double kCreaseStraightDeg = 20.0;
+    const double cosStraight = std::cos(kCreaseStraightDeg * M_PI / 180.0);
+    auto straightThrough = [&](int u, int v, int w) {
+      const Vector3d dw = (m.pos[w] - m.pos[v]).normalized();
+      // A collinear partner at v (other than the edge we arrived on) means the
+      // candidate is the middle of a straight line through v — a seam, not a turn.
+      for (const int z : vinc[v]) {
+        if (z == u || z == w) continue;
+        if ((m.pos[z] - m.pos[v]).normalized().dot(dw) <= -cosStraight) return true;
+      }
+      // A seam radiating from the junction has no partner at its start vertex, but
+      // it runs straight on past its far end w — where a collinear continuation
+      // (other than back to v) marks it a seam too.
+      for (const int z : vinc[w]) {
+        if (z == v) continue;
+        if ((m.pos[z] - m.pos[w]).normalized().dot(dw) >= cosStraight) return true;
+      }
+      return false;
+    };
     std::set<EdgeKey> eligible;
     std::vector<std::pair<int, int>> walk;  // directed: arrived at .second via .first
     for (const auto& [key, ce] : crease)
@@ -946,6 +973,7 @@ std::shared_ptr<const Geometry> buildBlend(
         const EdgeKey nk{std::min(v, w), std::max(v, w)};
         if (eligible.count(nk)) continue;
         if (din.dot((m.pos[w] - m.pos[v]).normalized()) < cosTurn) continue;
+        if (straightThrough(u, v, w)) continue;
         eligible.insert(nk);
         walk.push_back({v, w});
       }
