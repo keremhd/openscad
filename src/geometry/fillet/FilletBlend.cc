@@ -1225,7 +1225,34 @@ struct Blender
       }
     for (int i = 0; i < n; ++i) F.push_back({(k - 1) * n + i, (k - 1) * n + (i + 1) % n, cc});
 
-    for (const auto& t : F) out.tri(out.add(V[t[0]]), out.add(V[t[1]]), out.add(V[t[2]]));
+    // Sliver guard. Where the ring turns sharply — a mixed corner's concave arc
+    // meeting a convex one — the centroid fan leaves a near-zero-area needle
+    // triangle (taxonomy defect ⑤). Weld saddle vertices that fall within a small
+    // fraction of the radius of each other, but never move a boundary (layer-0,
+    // index < n) vertex: those are the exact ring points the strips weld to, so the
+    // patch perimeter is untouched and only interior columns collapse. Collapsed
+    // triangles become degenerate and out.tri drops them. (Standalone harness on an
+    // L-bracket elbow ring: worst triangle aspect ~75 -> ~5, patch boundary
+    // unchanged.) This does not remove the centroid-pole pinch itself — that is the
+    // larger pole-free re-tessellation tracked in mixed-corner-saddle.md.
+    const double weldTol = 0.06 * size;
+    std::vector<int> rep(V.size());
+    for (int i = 0; i < static_cast<int>(V.size()); ++i) rep[i] = i;
+    auto find = [&](int x) { while (rep[x] != x) x = rep[x]; return x; };
+    for (int i = 0; i < static_cast<int>(V.size()); ++i) {
+      if (find(i) != i) continue;
+      for (int j = i + 1; j < static_cast<int>(V.size()); ++j) {
+        if (find(j) != j) continue;
+        if ((V[i] - V[j]).norm() >= weldTol) continue;
+        const bool ib = i < n, jb = j < n;
+        if (ib && jb) continue;         // never weld two boundary verts (keep the strip weld)
+        if (jb) rep[find(i)] = j;       // keep the boundary vertex as the representative
+        else rep[j] = find(i);
+      }
+    }
+
+    for (const auto& t : F)
+      out.tri(out.add(V[find(t[0])]), out.add(V[find(t[1])]), out.add(V[find(t[2])]));
     return true;
   }
 
