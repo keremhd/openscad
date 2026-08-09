@@ -31,10 +31,7 @@
 // brushes) and returns the finished blended solid, adding material on concave
 // edges and removing it on convex ones in one pass. The type is which of the two,
 // not a sign — sign is read per edge from the mesh and gated by convex/concave.
-//
-// (ROUND/BEVEL/APPLY are retained only so the older swept-tool internals still
-// compile; the new operators never build those types.)
-enum class FilletType { FILLET, ROUND, CHAMFER, BEVEL, APPLY };
+enum class FilletType { FILLET, CHAMFER };
 
 class FilletNode : public AbstractNode
 {
@@ -55,11 +52,6 @@ public:
   bool convex{true};
   bool concave{true};
 
-  // --- retained for the swept-tool internals only; unused by the operators ---
-  bool debug{false};
-  bool inner{true};
-  bool outer{true};
-  bool disable_preview{true};
   FilletType type;
   CurveDiscretizer discretizer;
 };

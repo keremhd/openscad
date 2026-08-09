@@ -1589,7 +1589,7 @@ file(GLOB_RECURSE GUI_TEST_SOURCES
 # Manifold, so they follow it.
 if(ENABLE_MANIFOLD)
   list(APPEND TEST_SOURCES
-    "${CMAKE_CURRENT_SOURCE_DIR}/src/geometry/fillet/FilletBuilder_test.cc"
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/geometry/fillet/FilletMesh_test.cc"
   )
 endif()
 list(FILTER Sources EXCLUDE REGEX ".*_test[.]cc")

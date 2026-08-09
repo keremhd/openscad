@@ -9,7 +9,7 @@
 
 #ifdef ENABLE_MANIFOLD
 
-#include "geometry/fillet/FilletBuilder_internal.h"
+#include "geometry/fillet/FilletMesh_internal.h"
 
 #include <algorithm>
 #include <cmath>

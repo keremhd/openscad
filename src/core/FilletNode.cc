@@ -84,14 +84,7 @@ static std::shared_ptr<AbstractNode> builtin_chamfer(const ModuleInstantiation *
 
 std::string FilletNode::name() const
 {
-  switch (this->type) {
-  case FilletType::CHAMFER: return "chamfer"; break;
-  case FilletType::BEVEL:   return "bevel_tool"; break;
-  case FilletType::ROUND:   return "round_tool"; break;
-  case FilletType::FILLET:
-  case FilletType::APPLY:
-  default:                  return "fillet";
-  }
+  return this->type == FilletType::CHAMFER ? "chamfer" : "fillet";
 }
 
 std::string FilletNode::toString() const

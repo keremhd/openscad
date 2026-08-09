@@ -35,7 +35,7 @@
 
 #include <manifold/manifold.h>
 
-#include "geometry/fillet/FilletBuilder_internal.h"
+#include "geometry/fillet/FilletMesh_internal.h"
 #include "geometry/linalg.h"
 
 namespace fillet::detail {

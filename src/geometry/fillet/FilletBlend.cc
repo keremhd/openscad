@@ -38,7 +38,7 @@
 #include "geometry/PolySet.h"
 #include "geometry/PolySetBuilder.h"
 #include "geometry/fillet/FilletBrush.h"
-#include "geometry/fillet/FilletBuilder_internal.h"
+#include "geometry/fillet/FilletMesh_internal.h"
 #include "geometry/linalg.h"
 #include "geometry/manifold/ManifoldGeometry.h"
 #include "utils/printutils.h"
@@ -48,13 +48,14 @@ using namespace fillet::detail;
 namespace {
 
 // ---------------------------------------------------------------------------
-// Tunable angle thresholds for the blend's crease walk. Two companions live
-// with the classification core in the internal header: the feature/crease
-// threshold (min_angle, defaulting to kDefaultCreaseThresholdDeg) and the
-// smooth-surface grouping threshold (kDefaultSurfaceThresholdDeg 10 deg). The
-// two below are specific to this file and are named here, in one place, rather
-// than left as a literal buried in each function — the "same 40 deg" the
-// selection walk and the pass-through seating both rely on is then tuned once.
+// Tunable knobs for the blend's crease walk, named here in one place rather than
+// left as literals buried in each function. Two companions live with the
+// classification core in the internal header: the feature/crease threshold
+// (min_angle, defaulting to kDefaultCreaseThresholdDeg) and the smooth-surface
+// grouping threshold (kDefaultSurfaceThresholdDeg 10 deg). The three below are
+// specific to this file — the "same 40 deg" the selection walk and the pass-
+// through seating both rely on is then tuned once, and the along-sweep station
+// spacing sits beside them.
 // ---------------------------------------------------------------------------
 
 // A crease continues into the neighbour whose direction turns least; a turn past
@@ -67,6 +68,13 @@ inline constexpr double kCreaseFollowMaxTurnDeg = 40.0;
 // the same angle the follow walk uses, and the shared cross-section that welds
 // the two strips at such a vertex depends on the two staying in step.
 inline constexpr double kPassThroughMaxTurnDeg = 40.0;
+
+// Along-sweep station floor: a long selected crease is split so a straight fillet
+// holds a constant profile instead of tapering to its corner-distorted ends. The
+// cap on the spacing is kAlongSweep * size — an along-sweep counterpart to the
+// arc discretizer's along-arc segment count, named here beside the angle caps
+// rather than buried at the one call site.
+inline constexpr double kAlongSweep = 4.0;
 
 // ---------------------------------------------------------------------------
 // Output mesh: a triangle soup with position-welded vertices, an orientation
@@ -1548,14 +1556,12 @@ std::shared_ptr<const Geometry> buildBlend(
     return a;
   };
 
-  // Along-sweep station floor: split long selected creases so a straight fillet
-  // holds a constant profile instead of tapering (see along-sweep-stations.md).
-  // cap = k*size, k = 4 — a constant for now, an along-sweep counterpart to the
-  // arc discretizer to be exposed later. Where subdivision densifies a
+  // Along-sweep station floor (cap kAlongSweep * size, named at file scope with
+  // the angle caps): split long selected creases so a straight fillet holds a
+  // constant profile instead of tapering. Where subdivision densifies a
   // degenerate region (two fillets colliding along an exact tangency line) it can
   // turn a marginally-valid over-size case non-manifold; there, fall back to the
   // un-subdivided build, which is never worse than before this floor existed.
-  constexpr double kAlongSweep = 4.0;
   MergedMesh mSub = m0;
   // The edges to densify are exactly the ones buildOn will blend: the eligible
   // set computed on the raw mesh at the same two thresholds, tool-sign filtered.
