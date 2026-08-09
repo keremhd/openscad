@@ -1085,43 +1085,47 @@ struct Blender
     const int n = static_cast<int>(ring.size());
     if (n < 4) return false;
 
-    // Local working mesh: vertices 0..n-1 are the ring (boundary, pinned), the
-    // rest are interior. Positions carried in V, triangles in F.
-    std::vector<Vector3d> V;
-    V.reserve(ring.size() + 1);
-    for (const int i : ring) V.push_back(out.V[i]);
-    const int nBoundary = n;
+    // Concentric-ring mesh: k layers from the boundary in to the centre, each layer
+    // a scaled copy of the ring, connected by uniform quad bands. This replaces a
+    // centroid fan, whose long boundary-to-centre triangles read as coarse facets no
+    // amount of central subdivision refines; concentric bands tessellate the whole
+    // patch evenly. k scales with the arc resolution so the corner keeps pace with
+    // smooth high-$fn strips. Layer l occupies V indices [l*n, l*n+n); the centre is
+    // the last vertex. Layer 0 (the ring) is pinned; the rest are relaxed.
+    std::vector<Vector3d> B(n);
+    for (int i = 0; i < n; ++i) B[i] = out.V[ring[i]];
     Vector3d centroid = Vector3d::Zero();
-    for (const auto& p : V) centroid += p;
+    for (const auto& p : B) centroid += p;
     centroid /= static_cast<double>(n);
-    const int ci = static_cast<int>(V.size());
-    V.push_back(centroid);
-    std::vector<std::array<int, 3>> F;
-    F.reserve(n);
-    for (int i = 0; i < n; ++i) F.push_back({i, (i + 1) % n, ci});
+    const int k = std::clamp(arcSegs / 2, 2, 8);  // concentric layers, $fn-scaled
 
-    constexpr int kSplitRounds = 2;
-    for (int r = 0; r < kSplitRounds; ++r) {
-      std::vector<std::array<int, 3>> nextF;
-      nextF.reserve(F.size() * 3);
-      for (const auto& t : F) {
-        const int g = static_cast<int>(V.size());
-        V.push_back((V[t[0]] + V[t[1]] + V[t[2]]) / 3.0);
-        nextF.push_back({t[0], t[1], g});
-        nextF.push_back({t[1], t[2], g});
-        nextF.push_back({t[2], t[0], g});
-      }
-      F = std::move(nextF);
+    std::vector<Vector3d> V;
+    V.reserve(k * n + 1);
+    for (int l = 0; l < k; ++l) {
+      const double t = static_cast<double>(l) / k;
+      for (int i = 0; i < n; ++i) V.push_back(B[i] + t * (centroid - B[i]));
     }
+    const int cc = static_cast<int>(V.size());
+    V.push_back(centroid);
+    const int nBoundary = n;  // only layer 0 is pinned
 
-    // Vertex adjacency (undirected) for the smoothing pass.
+    std::vector<std::array<int, 3>> F;
+    for (int l = 0; l + 1 < k; ++l)
+      for (int i = 0; i < n; ++i) {
+        const int a = l * n + i, b = l * n + (i + 1) % n;
+        const int c = (l + 1) * n + (i + 1) % n, d = (l + 1) * n + i;
+        F.push_back({a, b, c});
+        F.push_back({a, c, d});
+      }
+    for (int i = 0; i < n; ++i) F.push_back({(k - 1) * n + i, (k - 1) * n + (i + 1) % n, cc});
+
     std::vector<std::set<int>> nbr(V.size());
     for (const auto& t : F)
       for (int e = 0; e < 3; ++e) {
         nbr[t[e]].insert(t[(e + 1) % 3]);
         nbr[t[e]].insert(t[(e + 2) % 3]);
       }
-    constexpr int kIters = 40;
+    const int kIters = 20 * k;
     for (int it = 0; it < kIters; ++it) {
       std::vector<Vector3d> next = V;
       for (int v = nBoundary; v < static_cast<int>(V.size()); ++v) {
