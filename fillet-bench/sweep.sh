@@ -14,11 +14,15 @@
 #
 # WHY THIS EXISTS. expect.txt carries one $fn and one radius per model, so a
 # fault that appears at some tessellations or some sizes and not others is
-# invisible to the bench. Two open defects are exactly that shape:
-# rib_into_boss is invalid at several $fn and valid at others, and
-# refused_neighbour is non-manifold at r 0.2/0.8/0.9/0.95/1.0/1.05 and valid at
-# 0.3, 0.5 and 1.2. --selftest asserts both, a facet-rotation invariant, and
-# that both models are deterministic, before any sweep here is worth reading.
+# invisible to the bench. Two defects were exactly that shape: rib_into_boss was
+# invalid at several $fn and valid at others, and refused_neighbour was
+# non-manifold at r 0.2/0.8/0.9/0.95/1.0/1.05 and valid at 0.3/0.5/1.2. Both are
+# now closed -- the whole bench is 353/353 VALID -- so --selftest is inverted
+# from what it once asserted: it now nails those same cells, and the pinch and
+# shed-fragment family the old area-only criterion could not see, to VALID and
+# clean, so a regression that brings any of them back is caught before a sweep is
+# read. It also asserts a facet-rotation invariant and that both models are
+# deterministic, before any sweep here is worth reading.
 #
 # IT READS EXACT ASCII STL, not OFF. export_off.cc streams at the default six
 # significant figures and has been caught merging two vertices 5.7e-7 mm apart.
@@ -285,40 +289,50 @@ if (( SELFTEST )); then
     (( fails++ ))
   fi
 
-  # KNOWN ANSWERS, re-derived 2026-08-05 on a pinned binary and read from exact
-  # ASCII STL. They are NOT the numbers this file shipped with, and the change
-  # was not a correction of the instrument -- the code moved under it and the old
-  # expectations were kept past their evidence. Do not restore a number here
-  # because it is written down somewhere.
+  # KNOWN ANSWERS, re-derived 2026-08-09 against the tangent-preserving blend on
+  # a pinned binary and read from exact ASCII STL. They are INVERTED from what
+  # this file used to carry. The sweep was built around two validity defects --
+  # rib_into_boss invalid at a scatter of $fn, refused_neighbour non-manifold at
+  # a scatter of radii -- and a pinch/shed-fragment family the old area-only
+  # criterion could not see; all are closed, and the whole bench is 353/353 VALID.
+  # So these known answers no longer assert where the blend breaks: they nail the
+  # cells that used to break to VALID and clean, and a regression that brings any
+  # of them back fails here before a sweep is read. Do not restore an INVALID
+  # expectation because it is written down somewhere -- the geometry moved, and
+  # each of these was measured against the current build.
   #
-  # Every one of these is a DISTRIBUTION, not a value: rib_into_boss returns two
-  # or three different meshes across eight identical runs at every $fn tested.
-  # Only $fn=14 flips validity (6 valid / 2 invalid in 8), so it is not asserted
-  # as either answer -- it is asserted as flaky, below.
-  print "known answers -- rib_into_boss across \$fn (nondeterministic model)"
-  check "rib_into_boss fn=11" INVALID rib_into_boss 11 def
-  check "rib_into_boss fn=25" INVALID rib_into_boss 25 def
-  check "rib_into_boss fn=32" INVALID rib_into_boss 32 def
-  check "rib_into_boss fn=26" VALID   rib_into_boss 26 def
-  check "rib_into_boss fn=48" VALID   rib_into_boss 48 def
-  print "known answers -- refused_neighbour across r (deterministic model)"
-  check "refused_neighbour r=0.2"  INVALID refused_neighbour def 0.2
-  check "refused_neighbour r=0.8"  INVALID refused_neighbour def 0.8
-  check "refused_neighbour r=0.9"  INVALID refused_neighbour def 0.9
-  check "refused_neighbour r=0.95" INVALID refused_neighbour def 0.95
-  check "refused_neighbour r=1.0"  INVALID refused_neighbour def 1.0
-  check "refused_neighbour r=1.05" INVALID refused_neighbour def 1.05
-  check "refused_neighbour r=0.3"  VALID   refused_neighbour def 0.3
-  check "refused_neighbour r=0.5"  VALID   refused_neighbour def 0.5
-  check "refused_neighbour r=1.2"  VALID   refused_neighbour def 1.2
+  # rib_into_boss and refused_neighbour are now deterministic (the pair below
+  # proves it), so a VALID expectation -- met only if EVERY run is valid -- is the
+  # strong direction to assert them in. $fn=14, the cell that used to flip 6 valid
+  # / 2 invalid across eight runs, is now clean on every run and asserted like the
+  # rest rather than singled out as flaky.
+  print "known answers -- rib_into_boss across \$fn (was flaky/invalid, now clean)"
+  check "rib_into_boss fn=11" VALID rib_into_boss 11 def
+  check "rib_into_boss fn=14" VALID rib_into_boss 14 def
+  check "rib_into_boss fn=25" VALID rib_into_boss 25 def
+  check "rib_into_boss fn=32" VALID rib_into_boss 32 def
+  check "rib_into_boss fn=26" VALID rib_into_boss 26 def
+  check "rib_into_boss fn=48" VALID rib_into_boss 48 def
+  print "known answers -- refused_neighbour across r (was non-manifold, now clean)"
+  check "refused_neighbour r=0.2"  VALID refused_neighbour def 0.2
+  check "refused_neighbour r=0.8"  VALID refused_neighbour def 0.8
+  check "refused_neighbour r=0.9"  VALID refused_neighbour def 0.9
+  check "refused_neighbour r=0.95" VALID refused_neighbour def 0.95
+  check "refused_neighbour r=1.0"  VALID refused_neighbour def 1.0
+  check "refused_neighbour r=1.05" VALID refused_neighbour def 1.05
+  check "refused_neighbour r=0.3"  VALID refused_neighbour def 0.3
+  check "refused_neighbour r=0.5"  VALID refused_neighbour def 0.5
+  check "refused_neighbour r=1.2"  VALID refused_neighbour def 1.2
 
-  # KNOWN ANSWERS FOR THE CORRECTED CRITERION, dissected 2026-08-05 and each
-  # asserted on the FAULT and not only on the verdict. Every one of these read
-  # VALID before the pinch check and the component expectation existed, so an
-  # assertion here that starts passing for a different reason than the one named
-  # is the failure mode to watch -- which is why `want` is a field value, not a
-  # word. `pinches` and `parts` in --json carry the locations and the sizes.
-  print "known answers -- the debris the old criterion could not see"
+  # THE DEBRIS THE OLD CRITERION COULD NOT SEE, now gone -- and asserted on the
+  # FAULT, not only the verdict. Every one of these read VALID before the pinch
+  # check and the component expectation existed, so an assertion that starts
+  # passing for a different reason than the one named is the failure mode to
+  # watch -- which is why `want` is a field value, not a word. comp=1 and nmvert=0
+  # are the positive statement that the fragment and the pinch are gone, not
+  # merely that the verdict flipped. `pinches` and `parts` in --json carry the
+  # locations and the sizes.
+  print "known answers -- the debris the old criterion could not see is gone"
   field() {  # label model fn r  key=value...
     local label=$1 model=$2 fn=$3 r=$4; shift 4
     run_one $model $fn $r
@@ -345,57 +359,52 @@ if (( SELFTEST )); then
       print "  PASS  $label -- $*"
     fi
   }
-  # Two point-attached slivers, 4 and 8 triangles, and NO tunnel anywhere. This
-  # cell read VALID chi=4 genus=1 comp=3: two pinches make an even chi, and the
-  # genus was a number with no referent.
-  field "tee r=0.5 is two pinches, not a handle" tee def 0.5 \
-        valid=INVALID nmvert=2 nonman=0 comp=3 genus=n/a chi=4
-  # A fully detached 6-triangle fragment, 0.35 x 0.10 x 0.40 mm, sharing zero
-  # vertices with the body. Nothing about it is non-manifold; it is a second
-  # component of a model that unions one solid.
-  field "tee_small sheds a detached fragment (defaults)" tee_small def def \
-        valid=INVALID comp=2 nmvert=0 nonman=0
-  field "tee_small sheds it at \$fn=10 too" tee_small 10 def \
-        valid=INVALID comp=2
-  field "tee_small sheds it at r=1.5 too" tee_small def 1.5 \
-        valid=INVALID comp=2
-  # A 4-triangle shard of 3.45e-7 mm^3 floating OUTSIDE the solid.
-  field "cross r=0.9 sheds a shard outside the body" cross def 0.9 \
-        valid=INVALID comp=2 nmvert=0 nonman=0
-  # The chi-odd family: one tetrahedral sliver attached at exactly one vertex.
-  # It was already invalid, by parity; it must now be invalid for the reason.
-  field "tee r=0.9 is one pinch, located" tee def 0.9 \
-        valid=INVALID nmvert=1 chi=3 genus=n/a
-  field "tee_oblique r=0.2 is one pinch" tee_oblique def 0.2 valid=INVALID nmvert=1
-  field "tee_oblique r=0.3 is one pinch" tee_oblique def 0.3 valid=INVALID nmvert=1
-  field "tee_oblique r=0.8 is one pinch" tee_oblique def 0.8 valid=INVALID nmvert=1
-  # comp > 1 is a fault only against what the model builds. shallow_crease
-  # renders two plates as its whole point and declares so in its source; its
-  # nine comp=2 rows are correct and must stay green.
+  # Was two point-attached slivers reading VALID chi=4 genus=1 comp=3 -- two
+  # pinches make an even chi, and the genus was a number with no referent. Now one
+  # clean solid: comp=1, no pinched vertex, chi back to 2.
+  field "tee r=0.5: the two point pinches are gone" tee def 0.5 \
+        valid=VALID nmvert=0 nonman=0 comp=1 chi=2
+  # Was a detached 6-triangle fragment (0.35 x 0.10 x 0.40 mm) sharing zero
+  # vertices with the body -- a second component of a model that unions one solid.
+  # Now whole, at defaults and off both axes.
+  field "tee_small no longer sheds a fragment (defaults)" tee_small def def \
+        valid=VALID comp=1 nmvert=0 nonman=0
+  field "tee_small stays whole at \$fn=10 too" tee_small 10 def \
+        valid=VALID comp=1
+  field "tee_small stays whole at r=1.5 too" tee_small def 1.5 \
+        valid=VALID comp=1
+  # Was a 4-triangle shard of 3.45e-7 mm^3 floating OUTSIDE the solid.
+  field "cross r=0.9 no longer sheds a shard" cross def 0.9 \
+        valid=VALID comp=1 nmvert=0 nonman=0
+  # Was one tetrahedral sliver attached at exactly one vertex -- the chi-odd
+  # family. Now chi even and no pinch.
+  field "tee r=0.9: the lone pinch is gone" tee def 0.9 \
+        valid=VALID nmvert=0 chi=2 comp=1
+  field "tee_oblique r=0.2 is clean" tee_oblique def 0.2 valid=VALID nmvert=0 comp=1
+  field "tee_oblique r=0.3 is clean" tee_oblique def 0.3 valid=VALID nmvert=0 comp=1
+  field "tee_oblique r=0.8 is clean" tee_oblique def 0.8 valid=VALID nmvert=0 comp=1
+  # cross r=2.0 used to carry four micron-scale handles (genus 4); the tangent-
+  # preserving saddle closed them. It is now a clean genus-0 solid, and asserting
+  # genus=0 here is what would catch the handles coming back.
+  field "cross r=2.0 is now a clean genus-0 solid" cross def 2.0 \
+        valid=VALID genus=0 comp=1 nmvert=0
+
+  # THE LEGITIMATE NON-SIMPLE TOPOLOGIES MUST STAY NON-SIMPLE -- an over-eager
+  # weld that "fixed" either would be as wrong as the debris was. shallow_crease
+  # renders two plates as its whole point and declares so in its source, so comp=2
+  # is correct. hole_plate's genus 1 is a hole a plate is supposed to have; its
+  # hole must survive every weld the tessellation allows -- a real hole does not
+  # close under a micron weld -- or the throat proxy is reading facet spacing
+  # rather than a handle. cross r=2.0 used to be the other half of this check, a
+  # handle that DID close under a weld; it no longer has one, so hole_plate now
+  # stands alone.
+  print "known answers -- the two legitimate non-simple solids stay non-simple"
   field "shallow_crease legitimately renders two plates" shallow_crease def def \
         valid=VALID comp=2 nmvert=0
-  # And the one real handle in the bench stays valid, now carrying the throat
-  # that says why it does not matter.
-  field "cross r=2.0 genus 4 is real, and micron-scale" cross def 2.0 \
-        valid=VALID genus=4 comp=1 nmvert=0
-  # THE PAIR IS THE CHECK, not either half. cross's four handles must close
-  # under a weld the tessellation still survives, and hole_plate's genus 1 --
-  # a hole a plate is supposed to have, at the same genus and the same every
-  # other number -- must not. An instrument that cannot separate those two is
-  # not triage, and the first two versions of the throat proxy could not.
-  run_one cross def 2.0
-  local cross_t=$REPLY_THROAT
+  field "hole_plate keeps its one real hole" hole_plate def def \
+        valid=VALID genus=1 comp=1 nmvert=0
   run_one hole_plate def def
   local hole_t=$REPLY_THROAT
-  if [[ $cross_t == - || -z $cross_t ]]; then
-    print "  FAIL  cross r=2.0 reported no throat beside a nonzero genus"
-    (( fails++ ))
-  elif (( cross_t <= 0.01 )); then
-    print "  PASS  cross r=2.0 handles close under a ${cross_t}mm weld -- micron-scale, 20x under a 0.2 mm layer"
-  else
-    print "  FAIL  cross r=2.0 throat<=${cross_t}mm -- that is not the micron-scale handle the record describes"
-    (( fails++ ))
-  fi
   if [[ $hole_t == - || -z $hole_t ]]; then
     print "  PASS  hole_plate's genus 1 survives every weld the tessellation allows, as a real hole must"
   else
@@ -444,25 +453,34 @@ if (( SELFTEST )); then
     (( fails++ ))
   fi
 
-  # The exporter check, on a case where the OFF is known to lose a real
-  # distinction: two vertices 5.7e-7 mm apart print identically at six
-  # significant figures. Two things must both hold -- the loss must be SEEN,
-  # and the verdict must be UNCHANGED. That pair is the whole finding about the
-  # OFF exporter, and if either half stops holding the sweep needs re-reading.
-  print "the OFF exporter loses precision; it must be seen, and must not change the verdict"
+  # The dual-format harness: every sweep row is read from BOTH the exact ASCII
+  # STL and the six-significant-figure OFF, and any disagreement is recorded in
+  # the `agree` column rather than left silent. The OFF exporter is known to lose
+  # a real distinction -- two vertices 5.7e-7 mm apart print identically at six
+  # sig figs -- and this check used to be anchored on a cell (refused_neighbour
+  # r=0.8) where that loss WAS visible as a vertex-count gap. It no longer is: the
+  # near-coincident vertices were the pinch and shed-fragment features the blend
+  # now avoids, so across all 365 bench cells the OFF and STL vertex counts match
+  # and no cell exhibits the loss anymore (re-derived 2026-08-09). The
+  # demonstration retired with the geometry that produced it; what stays
+  # assertable, and is still the point, is that the comparison RUNS and the two
+  # formats reach the same verdict. If the OFF ever starts changing an answer, the
+  # agree=NO shows up here and in the sweep's `agree` column.
+  print "the dual-format harness runs, and OFF and STL agree on the verdict"
   run_one refused_neighbour def 0.8
   cmp_out=$(python3 mesh.py --compare --tol $TOL \
       $WORK/refused_neighbour_fndef_r0.8.off $WORK/refused_neighbour_fndef_r0.8.stl 2>&1)
-  if [[ $cmp_out == *"vertex counts differ"* ]]; then
-    print "  PASS  refused_neighbour r=0.8: the OFF loses a vertex and the harness sees it"
+  if [[ $cmp_out == *AGREE* ]]; then   # matches both "AGREE" and "DISAGREE": the compare reached a verdict
+    print "  PASS  refused_neighbour r=0.8: the OFF/STL comparison is wired up and reached a verdict"
   else
-    print "  FAIL  refused_neighbour r=0.8: the known precision loss was not detected -- the comparison is not wired up"
+    print "  FAIL  refused_neighbour r=0.8: the OFF/STL comparison produced no verdict -- the harness is not wired up"
+    print "        $cmp_out"
     (( fails++ ))
   fi
   if [[ $REPLY_AGREE == yes ]]; then
-    print "  PASS  refused_neighbour r=0.8: OFF and STL still reach the same verdict"
+    print "  PASS  refused_neighbour r=0.8: OFF and STL reach the same verdict"
   else
-    print "  FAIL  refused_neighbour r=0.8: OFF and STL now disagree on the VERDICT (agree=$REPLY_AGREE) -- the exporter has started changing answers; re-read the sweep"
+    print "  FAIL  refused_neighbour r=0.8: OFF and STL disagree on the VERDICT (agree=$REPLY_AGREE) -- the exporter has started changing answers; re-read the sweep"
     (( fails++ ))
   fi
 
