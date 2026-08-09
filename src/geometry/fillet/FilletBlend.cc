@@ -414,6 +414,42 @@ struct Blender
   std::map<std::pair<int, int>, Vector3d> insetOverride;
   std::map<std::pair<int, int>, Vector3d> normalOverride;
 
+  // Vertices where selected edges of BOTH signs meet — the mixed corners whose
+  // strips otherwise blade. Populated by computeMixedVerts() before any emit.
+  // Everything keyed off this set (the pulled-in cross-section, the surface
+  // re-triangulation, the ring's arc endpoints) is inert at every other vertex,
+  // so single-sign caps and pass-through welds are untouched.
+  std::set<int> mixedVerts;
+
+  // Whether to seat mixed corners with the pulled-in cross-section (the blade fix)
+  // or the baseline mitre. The driver runs the pulled build first and, only if it
+  // leaves the mesh open, re-runs with this false — so an oblique or crowded corner
+  // the pull-in cannot weld falls back to exactly the baseline blend, never worse.
+  bool pullIn = true;
+
+  void computeMixedVerts()
+  {
+    if (!pullIn) return;  // baseline seating: no vertex is treated as a pull-in corner
+    std::map<int, std::pair<bool, bool>> sign;  // vertex -> (anyConcave, anyConvex)
+    for (const auto& [e, concave] : concaveOf) {
+      auto& sa = sign[e.first];
+      auto& sb = sign[e.second];
+      (concave ? sa.first : sa.second) = true;
+      (concave ? sb.first : sb.second) = true;
+    }
+    // A vertex where a feature edge is kept sharp (refused by the size gate, the
+    // sign filter or a brush) is left to the baseline seating: the pull-in coordinates
+    // the selected strips against each other, but a kept edge is sewn by the flat
+    // kept-seam ribbon, which seats on the un-pulled mitre — pulling the neighbouring
+    // strips off it would open the seam. Those corners keep the blade; the clean
+    // fully-selected corners (a box step, an L reflex, a rib end) get the fix.
+    std::set<int> partial;
+    for (const auto& e : feature)
+      if (!selected.count(e)) { partial.insert(e.first); partial.insert(e.second); }
+    for (const auto& [v, s] : sign)
+      if (s.first && s.second && !partial.count(v)) mixedVerts.insert(v);
+  }
+
   bool isSelected(int a, int b) const
   {
     return selected.count({std::min(a, b), std::max(a, b)}) > 0;
@@ -593,15 +629,58 @@ struct Blender
     return lineIntersect(b1, d1, b2, d2);
   }
 
+  // The far endpoint of the selected edge whose two incident triangles are t0/t1
+  // (the vertex both share other than u); -1 if they do not share one.
+  int farOf(int u, int t0, int t1) const
+  {
+    for (const int a : m.tris[t0].v)
+      if (a != u)
+        for (const int b : m.tris[t1].v)
+          if (a == b) return a;
+    return -1;
+  }
+
+  // At a mixed corner, edge (u,x)'s cross-section is seated one common distance
+  // along the edge from u — the "pull-in station" — rather than at u itself. Each
+  // face's own inset mitres the corner a different distance along the edge; seating
+  // the section's two feet at those two distinct distances is exactly what twists
+  // the first strip quad into the blade. The furthest mitre is the station: pulling
+  // to it seats both feet on one clean perpendicular section (no twist) and starts
+  // the strip at or beyond every face's mitre, so the corner patch only ever
+  // shrinks — it never has to reach back over already-inset material. Clamped to
+  // keep a straight middle on a short corner-to-corner edge.
+  double pullStation(int u, int x) const
+  {
+    const auto& ts = adj.at(EdgeKey{std::min(u, x), std::max(u, x)});
+    const Vector3d eh = (m.pos[x] - m.pos[u]).normalized();
+    double s = 0.0;
+    for (const int t : ts) s = std::max(s, (insetForTri(u, t) - m.pos[u]).dot(eh));
+    return std::min(s, 0.45 * (m.pos[x] - m.pos[u]).norm());
+  }
+
+  // Where edge (u,x)'s cross-section touches face t at u — the perpendicular foot
+  // of the pulled-in section. Away from a mixed corner the caller uses insetForTri
+  // instead; this is only the pulled seat that un-twists a mixed corner.
+  Vector3d stripFoot(int u, int x, int t) const
+  {
+    const EdgeKey e{std::min(u, x), std::max(u, x)};
+    const double sb = selected.count(e) ? setback(e) : 0.0;
+    const Vector3d eh = (m.pos[x] - m.pos[u]).normalized();
+    return m.pos[u] + pullStation(u, x) * eh + sb * perpInto(u, x, t);
+  }
+
   // The blend cross-section at vertex u for one selected edge, its two sides given
   // by the edge's incident triangles t0/t1 — LOCAL, so it builds a proper
   // two-sided arc even where t0/t1's walls are split into per-facet surfaces. The
   // seat normal comes from each triangle's sector (averaged), so adjacent edges on
   // a smooth crease build the identical cross-section at u and their strips weld.
+  // At a mixed corner the two feet are seated at one pulled-in station (stripFoot)
+  // so the section is a clean perpendicular slice instead of a twisted blade.
   std::vector<Vector3d> crossSectionEdge(int u, int t0, int t1, bool concave) const
   {
-    const Vector3d Ta = insetForTri(u, t0);
-    const Vector3d Tb = insetForTri(u, t1);
+    const int x = mixedVerts.count(u) ? farOf(u, t0, t1) : -1;
+    const Vector3d Ta = x >= 0 ? stripFoot(u, x, t0) : insetForTri(u, t0);
+    const Vector3d Tb = x >= 0 ? stripFoot(u, x, t1) : insetForTri(u, t1);
     if (isChamfer) return {Ta, Tb};
     const auto sa = sectorOf(u, t0);
     const auto sb = sectorOf(u, t1);
@@ -879,6 +958,108 @@ struct Blender
     return true;
   }
 
+  // Ear-clip a planar polygon given by position (not by out.V index) and emit its
+  // triangles. Used by the surface pass to re-triangulate a face corner cut back
+  // at a mixed vertex: the polygon is the inset triangle with the corner replaced
+  // by its perpendicular feet and mitre, all coplanar with the face, so a plain
+  // in-plane ear-clip triangulates it. Returns false (caller falls back to a plain
+  // inset triangle) if the projection is degenerate or no ear is found.
+  bool fillPlanarPolygon(const std::vector<Vector3d>& poly)
+  {
+    const int n = static_cast<int>(poly.size());
+    if (n < 3) return false;
+    Vector3d c = Vector3d::Zero();
+    for (const auto& v : poly) c += v;
+    c /= n;
+    Vector3d nrm = Vector3d::Zero();
+    for (int i = 0; i < n; ++i) nrm += (poly[i] - c).cross(poly[(i + 1) % n] - c);
+    if (nrm.norm() < 1e-15) return false;
+    nrm.normalize();
+    Vector3d ex = (std::abs(nrm.x()) < 0.9 ? Vector3d::UnitX() : Vector3d::UnitY());
+    ex = (ex - ex.dot(nrm) * nrm).normalized();
+    const Vector3d ey = nrm.cross(ex);
+    std::vector<Vector2d> p(n);
+    for (int i = 0; i < n; ++i) p[i] = {(poly[i] - c).dot(ex), (poly[i] - c).dot(ey)};
+    double area = 0;
+    for (int i = 0; i < n; ++i)
+      area += p[i].x() * p[(i + 1) % n].y() - p[(i + 1) % n].x() * p[i].y();
+    std::vector<int> idx(n);
+    for (int i = 0; i < n; ++i) idx[i] = (area < 0) ? (n - 1 - i) : i;
+    auto cross2 = [](const Vector2d& a, const Vector2d& b, const Vector2d& cc) {
+      return (b.x() - a.x()) * (cc.y() - a.y()) - (b.y() - a.y()) * (cc.x() - a.x());
+    };
+    std::vector<int> ring = idx;
+    std::vector<std::array<int, 3>> tris;
+    int guard = 0;
+    while (ring.size() > 3 && guard++ < 4 * n) {
+      const int m2 = static_cast<int>(ring.size());
+      bool clipped = false;
+      for (int i = 0; i < m2; ++i) {
+        const int ia = ring[(i + m2 - 1) % m2], ib = ring[i], ic = ring[(i + 1) % m2];
+        if (cross2(p[ia], p[ib], p[ic]) <= 1e-12) continue;
+        bool ear = true;
+        for (int j = 0; j < m2; ++j) {
+          const int k = ring[j];
+          if (k == ia || k == ib || k == ic) continue;
+          if (cross2(p[ia], p[ib], p[k]) >= 0 && cross2(p[ib], p[ic], p[k]) >= 0 &&
+              cross2(p[ic], p[ia], p[k]) >= 0) {
+            ear = false;
+            break;
+          }
+        }
+        if (!ear) continue;
+        tris.push_back({ia, ib, ic});
+        ring.erase(ring.begin() + i);
+        clipped = true;
+        break;
+      }
+      if (!clipped) return false;
+    }
+    if (ring.size() == 3) tris.push_back({ring[0], ring[1], ring[2]});
+    for (const auto& t : tris) out.tri(poly[t[0]], poly[t[1]], poly[t[2]]);
+    return true;
+  }
+
+  // One surface triangle, re-triangulated where it meets a mixed corner. Away from
+  // a mixed corner it is just the three inset vertices (unchanged). At a mixed
+  // corner u the strip along a selected edge (u,x) is pulled in to a common station
+  // (stripFoot), which lands past that face's mitre on the shorter-mitre face; the
+  // face must carry the strip's foot as a boundary vertex there, or the strip's
+  // tangent point T-junctions the mitre and opens a hole. Insert each such foot on
+  // the inset edge between the corner's mitre and x's inset, in order from the
+  // corner outward, then ear-clip the resulting planar polygon. Feet that coincide
+  // with the mitre (the furthest-mitre face) add nothing.
+  void emitSurfaceTri(int ti)
+  {
+    const auto& v = m.tris[ti].v;
+    const Vector3d P0 = insetForTri(v[0], ti), P1 = insetForTri(v[1], ti),
+                   P2 = insetForTri(v[2], ti);
+    const std::array<Vector3d, 3> P{P0, P1, P2};
+    bool anyCorner = false;
+    for (const int k : v)
+      if (mixedVerts.count(k)) anyCorner = true;
+    if (!anyCorner) {
+      out.tri(P0, P1, P2);
+      return;
+    }
+    // Walk the three directed edges, emitting each tail vertex's inset then any
+    // strip feet that fall on that edge — near-tail first, near-head second.
+    std::vector<Vector3d> poly;
+    auto footOn = [&](int a, int b) -> std::optional<Vector3d> {
+      if (!mixedVerts.count(a) || !isSelected(a, b)) return std::nullopt;
+      const Vector3d f = stripFoot(a, b, ti);
+      if ((f - insetForTri(a, ti)).norm() < 1e-9) return std::nullopt;  // at the mitre
+      return f;
+    };
+    for (int i = 0; i < 3; ++i) {
+      const int a = v[i], b = v[(i + 1) % 3];
+      poly.push_back(P[i]);
+      if (auto fa = footOn(a, b)) poly.push_back(*fa);        // near tail a
+      if (auto fb = footOn(b, a)) poly.push_back(*fb);        // near head b
+    }
+    if (!fillPlanarPolygon(poly)) out.tri(P0, P1, P2);
+  }
+
   // Fill a mixed-sign vertex ring with a curved saddle rather than a flat
   // ear-clip. A convex edge and a concave edge sharing u cannot be capped by one
   // sphere (a ball is single-signed), so the patch is a genuine saddle: it must
@@ -887,28 +1068,37 @@ struct Blender
   // points sit high on the convex sides and low in the concave ones — so a faired
   // membrane spanning it inherits the saddle shape.
   //
-  // Build it from the flat ear-clip triangulation (a valid, non-self-intersecting
-  // start), refine it a few times by 1->3 centroid splits (which add interior
-  // vertices without ever splitting a shared edge, so the patch stays conforming
-  // and the boundary stays welded to the arc strips), then relax the interior
-  // vertices with boundary-fixed Laplacian smoothing. Because the start is valid
-  // and smoothing only nudges interior points toward their neighbours' average,
-  // the result curves into the saddle without the folding a star-shaped concentric
-  // fan would suffer on a reflex ring. Falls back to the flat ear-clip on failure.
+  // Build it from a centroid fan (one interior vertex joined to every ring point),
+  // refine a few times by 1->3 centroid splits (which add interior vertices without
+  // ever splitting a shared edge, so the patch stays conforming and the boundary
+  // stays welded to the arc strips), then relax the interior vertices with
+  // boundary-fixed Laplacian smoothing. The fan base is chosen over an ear-clip for
+  // SYMMETRY: a greedy ear-clip triangulates a mirror-symmetric ring asymmetrically,
+  // and since the fairing converges to the harmonic solution of whatever graph it is
+  // given, that asymmetry survives — one convex side rounds while the other stays a
+  // flat triangle. A centroid star respects every symmetry of the ring, so the faired
+  // membrane inherits it. Smoothing pulls the fan's single apex out into the saddle;
+  // the modest corner rings here stay star-shaped about their centroid, so it does
+  // not fold. Falls back (returns false) only on a degenerate ring.
   bool emitSaddle(const std::vector<int>& ring)
   {
     const int n = static_cast<int>(ring.size());
     if (n < 4) return false;
-    std::vector<std::array<int, 3>> base;
-    if (!earClipRing(ring, base)) return false;
 
     // Local working mesh: vertices 0..n-1 are the ring (boundary, pinned), the
     // rest are interior. Positions carried in V, triangles in F.
     std::vector<Vector3d> V;
-    V.reserve(ring.size());
+    V.reserve(ring.size() + 1);
     for (const int i : ring) V.push_back(out.V[i]);
     const int nBoundary = n;
-    std::vector<std::array<int, 3>> F = base;
+    Vector3d centroid = Vector3d::Zero();
+    for (const auto& p : V) centroid += p;
+    centroid /= static_cast<double>(n);
+    const int ci = static_cast<int>(V.size());
+    V.push_back(centroid);
+    std::vector<std::array<int, 3>> F;
+    F.reserve(n);
+    for (int i = 0; i < n; ++i) F.push_back({i, (i + 1) % n, ci});
 
     constexpr int kSplitRounds = 2;
     for (int r = 0; r < kSplitRounds; ++r) {
@@ -931,7 +1121,7 @@ struct Blender
         nbr[t[e]].insert(t[(e + 1) % 3]);
         nbr[t[e]].insert(t[(e + 2) % 3]);
       }
-    constexpr int kIters = 30;
+    constexpr int kIters = 40;
     for (int it = 0; it < kIters; ++it) {
       std::vector<Vector3d> next = V;
       for (int v = nBoundary; v < static_cast<int>(V.size()); ++v) {
@@ -1015,7 +1205,17 @@ struct Blender
         const auto& ts = adj.at(e);
         std::vector<Vector3d> cs = crossSectionEdge(u, ts[0], ts[1], concaveOf.at(e));
         if (ts[0] != tri) std::reverse(cs.begin(), cs.end());  // start on this run's side
-        for (size_t j = 1; j + 1 < cs.size(); ++j) ring.push_back(out.add(cs[j]));
+        // Interior arc points always; at a mixed corner the two endpoints too — the
+        // pulled feet no longer coincide with the sector mitre, so the ring must
+        // reach them (the mitre-to-foot connector then welds the surface split and
+        // the strip). Elsewhere the endpoints are the mitre already pushed, so they
+        // stay excluded and the single-sign cap sees the ring it expects.
+        const size_t lo = mixedVerts.count(u) ? 0 : 1;
+        const size_t hi = mixedVerts.count(u) ? cs.size() : cs.size() - 1;
+        for (size_t j = lo; j < hi; ++j) {
+          const int ai = out.add(cs[j]);
+          if (ring.empty() || ring.back() != ai) ring.push_back(ai);
+        }
       }
     }
     if (ring.size() >= 2 && ring.front() == ring.back()) ring.pop_back();
@@ -1186,14 +1386,14 @@ struct Blender
   // kept-seam ribbons, and the corner patches.
   void run()
   {
+    computeMixedVerts();
     prepareShared();
     for (size_t t = 0; t < m.tris.size(); ++t) {
-      const int ti = static_cast<int>(t);
-      const auto& v = m.tris[t].v;
       // Inset each vertex on the side triangle t sits on — sector-local, so a
       // facet of a split wall sets back along its own sector rather than mitring
-      // across a surface it is no longer grouped with.
-      out.tri(insetForTri(v[0], ti), insetForTri(v[1], ti), insetForTri(v[2], ti));
+      // across a surface it is no longer grouped with. Where the triangle meets a
+      // mixed corner it is re-triangulated to carry the pulled-in strip feet.
+      emitSurfaceTri(static_cast<int>(t));
     }
     for (const auto& e : selected) emitEdge(e);
     for (const auto& e : feature)
@@ -1254,7 +1454,7 @@ std::shared_ptr<const Geometry> buildBlend(
     std::size_t verts = 0, tris = 0;
     int boundary = 0, nonman = 0;
   };
-  auto buildOn = [&](const MergedMesh& m, double surfaceThresholdDeg) -> Attempt {
+  auto buildOn = [&](const MergedMesh& m, double surfaceThresholdDeg, bool pullIn) -> Attempt {
     const std::map<EdgeKey, std::vector<int>> adj = buildEdgeAdjacency(m.tris);
     // Group surfaces by near-tangency, not by the feature threshold: a sub-crease
     // seam that is not near-tangent (a tee's tangent gap) must stay a surface
@@ -1263,6 +1463,7 @@ std::shared_ptr<const Geometry> buildBlend(
     const std::vector<int> surfaceOf = smoothSurfaces(m, adj, surfaceThresholdDeg);
     Blender b{m,            adj,       surfaceOf, node.size, isChamfer,
               thresholdDeg, node.discretizer};
+    b.pullIn = pullIn;
     // Uniform arc tessellation: a quarter-turn's worth of segments from the
     // discretizer, applied to every cross-section regardless of its subtended
     // angle. A fillet crease whose dihedral varies (an oblique elliptical seam)
@@ -1341,8 +1542,14 @@ std::shared_ptr<const Geometry> buildBlend(
   }
   const bool didSubdivide = mSub.tris.size() != m0.tris.size();
 
-  Attempt a = buildOn(mSub, kDefaultSurfaceThresholdDeg);
-  if (didSubdivide && a.status == Status::Holed) a = buildOn(m0, kDefaultSurfaceThresholdDeg);
+  // Prefer the pulled-in seating (the mixed-corner blade fix); if it leaves the
+  // mesh open on an oblique or crowded corner it cannot weld, fall back to the
+  // baseline mitre seating — first on the subdivided mesh, then on the raw one if
+  // subdivision itself went non-manifold. Each tier is never worse than the next,
+  // so a model that cannot take the pull-in gets exactly the baseline blend.
+  Attempt a = buildOn(mSub, kDefaultSurfaceThresholdDeg, /*pullIn=*/true);
+  if (a.status == Status::Holed) a = buildOn(mSub, kDefaultSurfaceThresholdDeg, false);
+  if (didSubdivide && a.status == Status::Holed) a = buildOn(m0, kDefaultSurfaceThresholdDeg, false);
 
   switch (a.status) {
     case Status::Empty:
