@@ -1,5 +1,19 @@
 # Mixed-corner saddle — state and next steps
 
+> **DONE 2026-08-09 — the tangent-preserving patch is implemented.** `emitSaddle`
+> now fills the ring with a G1 tangent-continuous blend, not a Laplacian membrane:
+> each ring point carries the fillet surface's own normal (`filletCenter` → `p−C`;
+> connectors → face normal), built into a `ringNrm` parallel to `ring` in
+> `emitCorner`. Each radial line from a boundary point to the ring centroid is a
+> quadratic Bézier through a control point pushed one chord-length out along the
+> boundary tangent, so the patch leaves every point tangent to the incident fillet
+> and holds the radius out instead of caving. Same concentric-ring topology (so
+> vertex/face counts are unchanged), sampled analytically (no solve) → resolution-
+> independent. Result on the lbracket reflex corner: through-crease apex ρ 2.475 →
+> **2.119** (ideal 2.0); full sweep 353/353 valid, **0 topology diff, 0 v/e/f count
+> diff** vs baseline; unit 121/121. The rest of this doc is the original handoff,
+> kept for the rationale and the rejected-approaches list.
+
 Handoff for the next agent working on the B1 fillet's **mixed-sign corner** patch
 (a concave crease + convex edges meeting at one vertex: an L reflex, a box step, a
 rib end). All code is in `src/geometry/fillet/FilletBlend.cc`.

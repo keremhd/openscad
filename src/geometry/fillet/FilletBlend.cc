@@ -676,34 +676,46 @@ struct Blender
   // a smooth crease build the identical cross-section at u and their strips weld.
   // At a mixed corner the two feet are seated at one pulled-in station (stripFoot)
   // so the section is a clean perpendicular slice instead of a twisted blade.
+  // The rolling-ball centre of edge (u)'s fillet arc for side triangles t0/t1 —
+  // the point crossSectionEdge sweeps its arc about. One radius off the canonical
+  // side along its sector normal (the plain rolling-ball construction, so a planar
+  // crease builds the same arc a surface-based inset would); the canonical side is
+  // the sector with the numerically smaller averaged normal, chosen so the result
+  // is independent of which incident triangle adj happened to list first. Exposed
+  // so the mixed-corner saddle can read each ring point's fillet-surface normal
+  // as (p - C): that normal is what lets the patch continue the roll's own tangent
+  // instead of relaxing to a caving minimal surface.
+  std::optional<Vector3d> filletCenter(int u, int t0, int t1, bool concave) const
+  {
+    const int x = mixedVerts.count(u) ? farOf(u, t0, t1) : -1;
+    const Vector3d Ta = x >= 0 ? stripFoot(u, x, t0) : insetForTri(u, t0);
+    const Vector3d Tb = x >= 0 ? stripFoot(u, x, t1) : insetForTri(u, t1);
+    const auto sa = sectorOf(u, t0);
+    const auto sb = sectorOf(u, t1);
+    if (!sa || !sb) return std::nullopt;
+    Vector3d nA = sa->navg, nB = sb->navg;
+    if (const auto it = normalOverride.find({u, t0}); it != normalOverride.end()) nA = it->second;
+    if (const auto it = normalOverride.find({u, t1}); it != normalOverride.end()) nB = it->second;
+    const bool aFirst = std::make_tuple(nA.x(), nA.y(), nA.z()) <=
+                        std::make_tuple(nB.x(), nB.y(), nB.z());
+    const Vector3d nCen = aFirst ? nA : nB;
+    const Vector3d Tcen = aFirst ? Ta : Tb;
+    const double sgn = concave ? size : -size;
+    return Vector3d(Tcen + sgn * nCen);
+  }
+
   std::vector<Vector3d> crossSectionEdge(int u, int t0, int t1, bool concave) const
   {
     const int x = mixedVerts.count(u) ? farOf(u, t0, t1) : -1;
     const Vector3d Ta = x >= 0 ? stripFoot(u, x, t0) : insetForTri(u, t0);
     const Vector3d Tb = x >= 0 ? stripFoot(u, x, t1) : insetForTri(u, t1);
     if (isChamfer) return {Ta, Tb};
-    const auto sa = sectorOf(u, t0);
-    const auto sb = sectorOf(u, t1);
-    if (!sa || !sb) return {Ta, Tb};
-    Vector3d nA = sa->navg, nB = sb->navg;
-    // Same override as the inset: on a shared pass-through the two strips must use
-    // one seat normal per side, so their arc points coincide and weld.
-    if (const auto it = normalOverride.find({u, t0}); it != normalOverride.end()) nA = it->second;
-    if (const auto it = normalOverride.find({u, t1}); it != normalOverride.end()) nB = it->second;
-
-    const double r = size;
-    // Fillet centre one radius off side A along its sector normal — the plain
-    // rolling-ball construction, so a planar crease builds the same arc a
-    // surface-based inset would. To stay independent of which incident triangle
-    // adj happened to list first (so two edges continuing one smooth crease
-    // weld), side A is chosen canonically as
-    // the sector with the numerically smaller averaged normal.
-    const bool aFirst = std::make_tuple(nA.x(), nA.y(), nA.z()) <=
-                        std::make_tuple(nB.x(), nB.y(), nB.z());
-    const Vector3d nCen = aFirst ? nA : nB;
-    const Vector3d Tcen = aFirst ? Ta : Tb;
-    const double sgn = concave ? r : -r;
-    const Vector3d C = Tcen + sgn * nCen;
+    // Same rolling-ball centre the saddle reads its ring normals from — with the
+    // seat-normal override applied inside filletCenter, so a shared pass-through
+    // builds one arc per side and the two strips weld.
+    const auto Copt = filletCenter(u, t0, t1, concave);
+    if (!Copt) return {Ta, Tb};
+    const Vector3d C = *Copt;
     Vector3d ra = Ta - C, rb = Tb - C;
     const double la = ra.norm(), lb = rb.norm();
     if (la < 1e-9 || lb < 1e-9) return {Ta, Tb};
@@ -1064,50 +1076,68 @@ struct Blender
   // ear-clip. A convex edge and a concave edge sharing u cannot be capped by one
   // sphere (a ball is single-signed), so the patch is a genuine saddle: it must
   // curve outward where it continues the convex roundovers and inward where it
-  // continues the concave valley. The boundary ring already encodes both — its arc
-  // points sit high on the convex sides and low in the concave ones — so a faired
-  // membrane spanning it inherits the saddle shape.
+  // continues the concave valley.
   //
-  // Build it from a centroid fan (one interior vertex joined to every ring point),
-  // refine a few times by 1->3 centroid splits (which add interior vertices without
-  // ever splitting a shared edge, so the patch stays conforming and the boundary
-  // stays welded to the arc strips), then relax the interior vertices with
-  // boundary-fixed Laplacian smoothing. The fan base is chosen over an ear-clip for
-  // SYMMETRY: a greedy ear-clip triangulates a mirror-symmetric ring asymmetrically,
-  // and since the fairing converges to the harmonic solution of whatever graph it is
-  // given, that asymmetry survives — one convex side rounds while the other stays a
-  // flat triangle. A centroid star respects every symmetry of the ring, so the faired
-  // membrane inherits it. Smoothing pulls the fan's single apex out into the saddle;
-  // the modest corner rings here stay star-shaped about their centroid, so it does
-  // not fold. Falls back (returns false) only on a degenerate ring.
-  bool emitSaddle(const std::vector<int>& ring)
+  // The patch is a tangent-continuous blend, NOT a faired membrane. A boundary-fixed
+  // Laplacian (or any area-minimiser) relaxes to a minimal surface, which caves
+  // toward the reentrant corner — it ignores where the incident fillets were
+  // heading. Instead each boundary point i carries the fillet surface's own normal
+  // there, ringNrm[i]; the patch leaves that point along the fillet's tangent (the
+  // inward chord to the centre, projected off the normal), so it continues the roll
+  // and holds the rolled radius out. Concretely each radial line from a boundary
+  // point B[i] to the shared centre Q is a quadratic Bezier through a control point
+  // M[i] = B[i] + |Q-B[i]| * tangent[i]: at the boundary its tangent is exactly the
+  // fillet tangent (G1 to the strips), and it bulges outward before curving in to Q.
+  // Opposite convex and concave sides carry opposite tangents, so the patch is a
+  // genuine saddle. It is sampled on a concentric-ring topology (k layers boundary
+  // -> centre, uniform quad bands) that tessellates evenly and scales with $fn;
+  // being an analytic evaluation, not a solve, it is resolution-independent and
+  // does not cave. Falls back (returns false) only on a degenerate ring.
+  bool emitSaddle(const std::vector<int>& ring, const std::vector<Vector3d>& ringNrm)
   {
     const int n = static_cast<int>(ring.size());
-    if (n < 4) return false;
+    if (n < 4 || static_cast<int>(ringNrm.size()) != n) return false;
 
-    // Concentric-ring mesh: k layers from the boundary in to the centre, each layer
-    // a scaled copy of the ring, connected by uniform quad bands. This replaces a
-    // centroid fan, whose long boundary-to-centre triangles read as coarse facets no
-    // amount of central subdivision refines; concentric bands tessellate the whole
-    // patch evenly. k scales with the arc resolution so the corner keeps pace with
-    // smooth high-$fn strips. Layer l occupies V indices [l*n, l*n+n); the centre is
-    // the last vertex. Layer 0 (the ring) is pinned; the rest are relaxed.
     std::vector<Vector3d> B(n);
     for (int i = 0; i < n; ++i) B[i] = out.V[ring[i]];
-    Vector3d centroid = Vector3d::Zero();
-    for (const auto& p : B) centroid += p;
-    centroid /= static_cast<double>(n);
-    const int k = std::clamp(arcSegs / 2, 2, 8);  // concentric layers, $fn-scaled
+    Vector3d Q = Vector3d::Zero();  // shared patch centre = ring centroid
+    for (const auto& p : B) Q += p;
+    Q /= static_cast<double>(n);
 
+    // Per-boundary Bezier control point: pushed one chord-length out along the
+    // fillet tangent (the inward chord projected off the boundary normal), so the
+    // radial curve leaves B[i] tangent to the incident fillet and holds the radius
+    // out instead of diving for the centre. A degenerate tangent (normal nearly
+    // along the chord) falls back to the plain chord.
+    std::vector<Vector3d> M(n);
+    for (int i = 0; i < n; ++i) {
+      const Vector3d d = Q - B[i];
+      const double nl = ringNrm[i].norm();
+      Vector3d t = d;
+      if (nl > 1e-9) {
+        const Vector3d N = ringNrm[i] / nl;
+        t = d - d.dot(N) * N;
+      }
+      const double tl = t.norm();
+      t = tl > 1e-9 ? Vector3d(t / tl) : d.normalized();
+      M[i] = B[i] + d.norm() * t;
+    }
+
+    // Concentric-ring topology: k layers from the boundary in to the centre,
+    // connected by uniform quad bands, closed by a fan to the centre vertex. Layer l
+    // occupies V indices [l*n, l*n+n); the centre is the last vertex. Layer 0 (s=0)
+    // is exactly the boundary ring, so the patch welds to the strips. k scales with
+    // the arc resolution so the corner keeps pace with smooth high-$fn strips.
+    const int k = std::clamp(arcSegs / 2, 2, 8);
     std::vector<Vector3d> V;
     V.reserve(k * n + 1);
     for (int l = 0; l < k; ++l) {
-      const double t = static_cast<double>(l) / k;
-      for (int i = 0; i < n; ++i) V.push_back(B[i] + t * (centroid - B[i]));
+      const double s = static_cast<double>(l) / k;  // 0 at the boundary
+      const double b0 = (1 - s) * (1 - s), b1 = 2 * (1 - s) * s, b2 = s * s;
+      for (int i = 0; i < n; ++i) V.push_back(b0 * B[i] + b1 * M[i] + b2 * Q);
     }
     const int cc = static_cast<int>(V.size());
-    V.push_back(centroid);
-    const int nBoundary = n;  // only layer 0 is pinned
+    V.push_back(Q);
 
     std::vector<std::array<int, 3>> F;
     for (int l = 0; l + 1 < k; ++l)
@@ -1118,24 +1148,6 @@ struct Blender
         F.push_back({a, c, d});
       }
     for (int i = 0; i < n; ++i) F.push_back({(k - 1) * n + i, (k - 1) * n + (i + 1) % n, cc});
-
-    std::vector<std::set<int>> nbr(V.size());
-    for (const auto& t : F)
-      for (int e = 0; e < 3; ++e) {
-        nbr[t[e]].insert(t[(e + 1) % 3]);
-        nbr[t[e]].insert(t[(e + 2) % 3]);
-      }
-    const int kIters = 20 * k;
-    for (int it = 0; it < kIters; ++it) {
-      std::vector<Vector3d> next = V;
-      for (int v = nBoundary; v < static_cast<int>(V.size()); ++v) {
-        if (nbr[v].empty()) continue;
-        Vector3d s = Vector3d::Zero();
-        for (const int w : nbr[v]) s += V[w];
-        next[v] = s / static_cast<double>(nbr[v].size());
-      }
-      V = std::move(next);
-    }
 
     for (const auto& t : F) out.tri(out.add(V[t[0]]), out.add(V[t[1]]), out.add(V[t[2]]));
     return true;
@@ -1197,18 +1209,30 @@ struct Blender
     // where the walk crosses it — edge-local throughout, so the ring shares its
     // vertices with the strips exactly. One ring per vertex covers a genuine
     // junction, a strip end against a kept-sharp boundary, and both at once.
+    // Each ring point carries the blend surface's own normal there (ringNrm),
+    // parallel to ring: a connector (inset) point takes its face normal; an arc
+    // point takes (p - C) off its fillet centre. The mixed-sign saddle reads these
+    // to leave every boundary point along the fillet's tangent. pushRing keeps the
+    // two arrays in lockstep through the same adjacent-duplicate dedup.
     std::vector<int> ring;
+    std::vector<Vector3d> ringNrm;
+    auto pushRing = [&](int idx, const Vector3d& nrm) {
+      if (!ring.empty() && ring.back() == idx) return;
+      ring.push_back(idx);
+      ringNrm.push_back(nrm);
+    };
     for (int off = 0; off < n; ++off) {
       const int i = (start + off) % n;
       const int tri = fan[i].first;
       const int via = fan[i].second;  // edge (u,via) leaving this triangle
-      const int ip = out.add(insetForTri(u, tri));
-      if (ring.empty() || ring.back() != ip) ring.push_back(ip);
+      pushRing(out.add(insetForTri(u, tri)), m.tris[tri].normal);
       if (isSelected(u, via)) {
         const EdgeKey e{std::min(u, via), std::max(u, via)};
         const auto& ts = adj.at(e);
-        std::vector<Vector3d> cs = crossSectionEdge(u, ts[0], ts[1], concaveOf.at(e));
+        const bool concave = concaveOf.at(e);
+        std::vector<Vector3d> cs = crossSectionEdge(u, ts[0], ts[1], concave);
         if (ts[0] != tri) std::reverse(cs.begin(), cs.end());  // start on this run's side
+        const auto Copt = filletCenter(u, ts[0], ts[1], concave);
         // Interior arc points always; at a mixed corner the two endpoints too — the
         // pulled feet no longer coincide with the sector mitre, so the ring must
         // reach them (the mitre-to-foot connector then welds the surface split and
@@ -1217,12 +1241,16 @@ struct Blender
         const size_t lo = mixedVerts.count(u) ? 0 : 1;
         const size_t hi = mixedVerts.count(u) ? cs.size() : cs.size() - 1;
         for (size_t j = lo; j < hi; ++j) {
-          const int ai = out.add(cs[j]);
-          if (ring.empty() || ring.back() != ai) ring.push_back(ai);
+          Vector3d nrm = m.tris[tri].normal;  // fallback if the centre is degenerate
+          if (Copt) {
+            const Vector3d d = cs[j] - *Copt;
+            if (d.norm() > 1e-9) nrm = d.normalized();
+          }
+          pushRing(out.add(cs[j]), nrm);
         }
       }
     }
-    if (ring.size() >= 2 && ring.front() == ring.back()) ring.pop_back();
+    if (ring.size() >= 2 && ring.front() == ring.back()) { ring.pop_back(); ringNrm.pop_back(); }
 
     // Sign of the selected edges here.
     bool anyConcave = false, anyConvex = false;
@@ -1256,7 +1284,7 @@ struct Blender
     // ball caps it — fill the ring with a curved saddle membrane instead of a flat
     // patch, removing the creased V-notch the ear-clip left where a concave crease
     // died into a face.
-    if (!isChamfer && junction && mixed && ring.size() >= 4 && emitSaddle(ring)) return;
+    if (!isChamfer && junction && mixed && ring.size() >= 4 && emitSaddle(ring, ringNrm)) return;
 
     // Strip end (a fillet ending against a kept-sharp boundary): close the ring
     // flat by ear-clipping it in its best-fit plane — the perpendicular patch that
