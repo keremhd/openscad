@@ -1,0 +1,69 @@
+commit 07de37f5f74ada5730a83b0455a971197ea62945
+Author: Claude <noreply@anthropic.com>
+Date:   Sun Aug 9 18:08:34 2026 +0000
+
+    fillet: sliver guard for the mixed-corner saddle needle
+    
+    The mixed-sign saddle (emitSaddle) fans every interior ring to a single
+    centroid vertex. Where the ring turns sharply -- a mixed corner's concave
+    arc meeting a convex one, e.g. the L-bracket elbow -- the two arc feet nearly
+    coincide with opposite tangents, so the fan leaves a near-zero-area needle
+    triangle standing proud (taxonomy defect ~E).
+    
+    Weld saddle vertices within 0.06*radius of each other before emitting, never
+    moving a boundary (layer-0) vertex so the patch still welds to the strips
+    along the exact ring; collapsed interior columns go degenerate and out.tri
+    drops them. A standalone harness on an L-bracket elbow ring takes the worst
+    triangle aspect from ~75 to ~5 with the patch boundary edge count unchanged.
+    
+    This removes the needle only. The centroid-pole pinch and the piecewise-flat
+    blend remain -- they need a pole-free saddle re-tessellation, scoped as a
+    follow-up in fillet-feature-design/mixed-corner-saddle.md.
+    
+    Not built or bench-rendered in this environment (no toolchain); verified with
+    the geometry harness (needle removed, boundary preserved). Needs a bench run
+    to confirm S3-T01/T02/T03/T12 and that no tile loses VALID/manifold.
+    
+    Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_0185AugoASVh16LxZwo5Zdxw
+
+diff --git a/src/geometry/fillet/FilletBlend.cc b/src/geometry/fillet/FilletBlend.cc
+index 12bdf8a..7a75aea 100644
+--- a/src/geometry/fillet/FilletBlend.cc
++++ b/src/geometry/fillet/FilletBlend.cc
+@@ -1225,7 +1225,34 @@ struct Blender
+       }
+     for (int i = 0; i < n; ++i) F.push_back({(k - 1) * n + i, (k - 1) * n + (i + 1) % n, cc});
+ 
+-    for (const auto& t : F) out.tri(out.add(V[t[0]]), out.add(V[t[1]]), out.add(V[t[2]]));
++    // Sliver guard. Where the ring turns sharply — a mixed corner's concave arc
++    // meeting a convex one — the centroid fan leaves a near-zero-area needle
++    // triangle (taxonomy defect ⑤). Weld saddle vertices that fall within a small
++    // fraction of the radius of each other, but never move a boundary (layer-0,
++    // index < n) vertex: those are the exact ring points the strips weld to, so the
++    // patch perimeter is untouched and only interior columns collapse. Collapsed
++    // triangles become degenerate and out.tri drops them. (Standalone harness on an
++    // L-bracket elbow ring: worst triangle aspect ~75 -> ~5, patch boundary
++    // unchanged.) This does not remove the centroid-pole pinch itself — that is the
++    // larger pole-free re-tessellation tracked in mixed-corner-saddle.md.
++    const double weldTol = 0.06 * size;
++    std::vector<int> rep(V.size());
++    for (int i = 0; i < static_cast<int>(V.size()); ++i) rep[i] = i;
++    auto find = [&](int x) { while (rep[x] != x) x = rep[x]; return x; };
++    for (int i = 0; i < static_cast<int>(V.size()); ++i) {
++      if (find(i) != i) continue;
++      for (int j = i + 1; j < static_cast<int>(V.size()); ++j) {
++        if (find(j) != j) continue;
++        if ((V[i] - V[j]).norm() >= weldTol) continue;
++        const bool ib = i < n, jb = j < n;
++        if (ib && jb) continue;         // never weld two boundary verts (keep the strip weld)
++        if (jb) rep[find(i)] = j;       // keep the boundary vertex as the representative
++        else rep[j] = find(i);
++      }
++    }
++
++    for (const auto& t : F)
++      out.tri(out.add(V[find(t[0])]), out.add(V[find(t[1])]), out.add(V[find(t[2])]));
+     return true;
+   }
+ 
