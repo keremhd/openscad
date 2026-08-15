@@ -1180,11 +1180,11 @@ struct Blender
     for (const auto& p : B) Q += p;
     Q /= static_cast<double>(n);
 
-    // Per-boundary Bezier control point: pushed one chord-length out along the
-    // fillet tangent (the inward chord projected off the boundary normal), so the
-    // radial curve leaves B[i] tangent to the incident fillet and holds the radius
-    // out instead of diving for the centre. A degenerate tangent (normal nearly
-    // along the chord) falls back to the plain chord.
+    // Per-boundary Bezier control point: pushed out along the fillet tangent (the
+    // inward chord projected off the boundary normal), so the radial curve leaves
+    // B[i] tangent to the incident fillet and bulges instead of diving straight for
+    // the centre. A degenerate tangent (normal nearly along the chord) falls back to
+    // the plain chord. See the arm length below.
     std::vector<Vector3d> M(n);
     for (int i = 0; i < n; ++i) {
       const Vector3d d = Q - B[i];
@@ -1196,24 +1196,35 @@ struct Blender
       }
       const double tl = t.norm();
       t = tl > 1e-9 ? Vector3d(t / tl) : d.normalized();
-      M[i] = B[i] + d.norm() * t;
+      // Control-arm length: about half the chord to the centre. A full-chord arm
+      // (the natural first guess) overshoots — for a boundary foot far from the
+      // centre it carries the radial curve clear across the patch and, at a mixed
+      // corner, stands proud of the opposite-sign valley as a needle flap. Half the
+      // chord keeps the fillet tangent at the boundary (G1) and a gentle bulge while
+      // staying on this foot's own side of the patch.
+      M[i] = B[i] + 0.55 * d.norm() * t;
     }
 
-    // Concentric-ring topology: k layers from the boundary in to the centre,
-    // connected by uniform quad bands, closed by a fan to the centre vertex. Layer l
-    // occupies V indices [l*n, l*n+n); the centre is the last vertex. Layer 0 (s=0)
-    // is exactly the boundary ring, so the patch welds to the strips. k scales with
-    // the arc resolution so the corner keeps pace with smooth high-$fn strips.
+    // Pole-free concentric-ring topology: k layers from the boundary ring inward,
+    // connected by uniform quad bands, and the innermost ring closed by an ear-clip
+    // (NOT a fan to a single apex). Layer l occupies flattened indices [l*n, l*n+n);
+    // layer 0 (s=0) is exactly the boundary ring, so the patch welds to the strips.
+    // k scales with the arc resolution so the corner keeps pace with high-$fn strips.
+    //
+    // Each radial column is the half-chord B[i] -> M[i] -> Q quadratic Bezier: its
+    // boundary tangent is the fillet's (G1), it bulges gently outward via M[i], and
+    // the layers land as nested rings around the centre rather than collapsing to it
+    // — the innermost ring stays a small polygon, so there is no interior pole. The
+    // half-chord control arm (set where M[i] is built) is what keeps a mixed corner's
+    // convex columns from overshooting proud of the concave valley as needle flaps.
     const int k = std::clamp(arcSegs / 2, 2, 8);
     std::vector<Vector3d> V;
-    V.reserve(k * n + 1);
+    V.reserve(k * n);
     for (int l = 0; l < k; ++l) {
       const double s = static_cast<double>(l) / k;  // 0 at the boundary
       const double b0 = (1 - s) * (1 - s), b1 = 2 * (1 - s) * s, b2 = s * s;
       for (int i = 0; i < n; ++i) V.push_back(b0 * B[i] + b1 * M[i] + b2 * Q);
     }
-    const int cc = static_cast<int>(V.size());
-    V.push_back(Q);
 
     std::vector<std::array<int, 3>> F;
     for (int l = 0; l + 1 < k; ++l)
@@ -1223,18 +1234,15 @@ struct Blender
         F.push_back({a, b, c});
         F.push_back({a, c, d});
       }
-    for (int i = 0; i < n; ++i) F.push_back({(k - 1) * n + i, (k - 1) * n + (i + 1) % n, cc});
 
     // Sliver guard. Where the ring turns sharply — a mixed corner's concave arc
-    // meeting a convex one — the centroid fan leaves a near-zero-area needle
-    // triangle (taxonomy defect ⑤). Weld saddle vertices that fall within a small
-    // fraction of the radius of each other, but never move a boundary (layer-0,
-    // index < n) vertex: those are the exact ring points the strips weld to, so the
-    // patch perimeter is untouched and only interior columns collapse. Collapsed
-    // triangles become degenerate and out.tri drops them. (Standalone harness on an
-    // L-bracket elbow ring: worst triangle aspect ~75 -> ~5, patch boundary
-    // unchanged.) This does not remove the centroid-pole pinch itself — that is the
-    // larger pole-free re-tessellation tracked in mixed-corner-saddle.md.
+    // meeting a convex one — adjacent radial columns can leave with opposite tangents
+    // and start near-coincident, leaving a near-zero-area needle triangle (taxonomy
+    // defect ⑤). Weld saddle vertices that fall within a small fraction of the radius
+    // of each other, but never move a boundary (layer-0, index < n) vertex: those are
+    // the exact ring points the strips weld to, so the patch perimeter is untouched
+    // and only interior columns collapse. Collapsed triangles become degenerate and
+    // out.tri drops them.
     const double weldTol = 0.06 * size;
     std::vector<int> rep(V.size());
     for (int i = 0; i < static_cast<int>(V.size()); ++i) rep[i] = i;
@@ -1272,6 +1280,24 @@ struct Blender
 
     for (const auto& t : F)
       out.tri(out.add(V[find(t[0])]), out.add(V[find(t[1])]), out.add(V[find(t[2])]));
+
+    // Close the innermost ring (layer k-1) by ear-clip rather than a fan to a single
+    // apex — the whole point of the pole-free patch. Emit the welded innermost
+    // positions to the shared vertex pool (out.add welds them to the quad band's
+    // copies), dropping consecutive duplicates the weld may have produced. Ear-clip
+    // returns triangles as local indices into this ring; fall back to a centroid fan
+    // only if the projection is too tangled to ear-clip, so the patch always closes.
+    std::vector<int> inner;
+    for (int i = 0; i < n; ++i) {
+      const int gi = out.add(V[find((k - 1) * n + i)]);
+      if (inner.empty() || inner.back() != gi) inner.push_back(gi);
+    }
+    if (inner.size() > 1 && inner.front() == inner.back()) inner.pop_back();
+    std::vector<std::array<int, 3>> innerTris;
+    if (inner.size() >= 3 && earClipRing(inner, innerTris))
+      for (const auto& t : innerTris) out.tri(inner[t[0]], inner[t[1]], inner[t[2]]);
+    else
+      out.fan(inner);
     return true;
   }
 
