@@ -1251,6 +1251,25 @@ struct Blender
       }
     }
 
+    // Verify the weld left an edge-manifold patch. A proximity weld can merge two
+    // vertices that are not a collapsible neighbour pair, fusing separate columns so
+    // an interior edge ends up shared by three or more surviving triangles — the
+    // manifold surgery then rejects the whole blend and returns the model unchanged.
+    // Count each surviving triangle's undirected edges; if any is used more than
+    // twice the weld is unsafe for this ring, so drop it and emit the plain fan.
+    // (The saddle is still a valid, if slightly slivered, patch without the weld.)
+    std::map<std::pair<int, int>, int> edgeUse;
+    bool manifold = true;
+    for (const auto& t : F) {
+      const int a = find(t[0]), b = find(t[1]), c = find(t[2]);
+      if (a == b || b == c || a == c) continue;  // degenerate, dropped by out.tri too
+      for (const auto& e : {std::minmax(a, b), std::minmax(b, c), std::minmax(a, c)})
+        if (++edgeUse[e] > 2) { manifold = false; break; }
+      if (!manifold) break;
+    }
+    if (!manifold)
+      for (int i = 0; i < static_cast<int>(V.size()); ++i) rep[i] = i;
+
     for (const auto& t : F)
       out.tri(out.add(V[find(t[0])]), out.add(V[find(t[1])]), out.add(V[find(t[2])]));
     return true;
