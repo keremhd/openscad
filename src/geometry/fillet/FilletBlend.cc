@@ -76,6 +76,19 @@ inline constexpr double kPassThroughMaxTurnDeg = 40.0;
 // rather than buried at the one call site.
 inline constexpr double kAlongSweep = 4.0;
 
+// Mixed-corner pull-in station, as the interpolation fraction from the shallowest
+// to the deepest face mitre. A mixed corner seats both strip feet at one
+// perpendicular station along the edge to un-twist the blade; the deepest mitre
+// (fraction 1.0) is the smallest station that keeps both feet clear of the
+// neighbouring concave setback under a purely planar analysis, but it retreats the
+// convex round-overs a full radius and leaves a necked notch. The concave fillet
+// recedes in 3D toward the corner, so the bead can seat closer: this fraction pulls
+// the station in from the deepest mitre so the round-overs flow into the corner. A
+// symmetric corner (the concave crease itself) keeps its mitre unchanged. The
+// driver tries this first and falls back to the full mitre (1.0), then the
+// baseline, if the tighter seat cannot weld.
+inline constexpr double kPullStationFrac = 0.7;
+
 // ---------------------------------------------------------------------------
 // Output mesh: a triangle soup with position-welded vertices, an orientation
 // pass to make winding consistent, and a per-component volume-sign fix so the
@@ -435,6 +448,12 @@ struct Blender
   // the pull-in cannot weld falls back to exactly the baseline blend, never worse.
   bool pullIn = true;
 
+  // How far along the edge to seat a mixed corner's pulled-in station, as a
+  // fraction of the deepest face mitre (see kPullStationFrac). 1.0 is the
+  // full-mitre seat (the conservative fallback tier); the driver runs the tighter
+  // default first so the round-overs flow into the corner.
+  double stationFrac = kPullStationFrac;
+
   void computeMixedVerts()
   {
     if (!pullIn) return;  // baseline seating: no vertex is treated as a pull-in corner
@@ -652,17 +671,33 @@ struct Blender
   // along the edge from u — the "pull-in station" — rather than at u itself. Each
   // face's own inset mitres the corner a different distance along the edge; seating
   // the section's two feet at those two distinct distances is exactly what twists
-  // the first strip quad into the blade. The furthest mitre is the station: pulling
-  // to it seats both feet on one clean perpendicular section (no twist) and starts
-  // the strip at or beyond every face's mitre, so the corner patch only ever
-  // shrinks — it never has to reach back over already-inset material. Clamped to
-  // keep a straight middle on a short corner-to-corner edge.
+  // the first strip quad into the blade. Both feet share the deepest mitre's
+  // station, so the section is one clean perpendicular slice (no twist). The full
+  // deepest mitre is the furthest the strip must ever retreat (the planar clearance
+  // from the neighbouring concave setback); the concave fillet recedes in 3D toward
+  // the corner, so stationFrac pulls the slice back in from there and the beads flow
+  // into the corner instead of necking a full radius short. Clamped to keep a
+  // straight middle on a short corner-to-corner edge.
   double pullStation(int u, int x) const
   {
     const auto& ts = adj.at(EdgeKey{std::min(u, x), std::max(u, x)});
     const Vector3d eh = (m.pos[x] - m.pos[u]).normalized();
-    double s = 0.0;
-    for (const int t : ts) s = std::max(s, (insetForTri(u, t) - m.pos[u]).dot(eh));
+    double smax = -1e30, smin = 1e30;
+    for (const int t : ts) {
+      const double d = (insetForTri(u, t) - m.pos[u]).dot(eh);
+      smax = std::max(smax, d);
+      smin = std::min(smin, d);
+    }
+    // Seat between the two face mitres: the deepest (smax) is the full un-blade
+    // station that retreats the strip a whole radius, the shallowest (smin) sits at
+    // or behind the corner. stationFrac interpolates toward smax; pulling in from it
+    // lets the convex round-overs flow into the corner (the concave fillet recedes
+    // in 3D, so the planar deepest-mitre clearance is an over-estimate). A symmetric
+    // corner (the concave crease, both mitres equal) is a no-op — it keeps its full
+    // mitre and does not overshoot. The along-sweep clamp still keeps a straight
+    // middle on a short edge and holds crowded/degenerate corners at their tiny
+    // station, so the tighter seat is a no-op there too.
+    const double s = smin + stationFrac * (smax - smin);
     return std::min(s, 0.45 * (m.pos[x] - m.pos[u]).norm());
   }
 
@@ -1819,7 +1854,8 @@ std::shared_ptr<const Geometry> buildBlend(
     std::size_t verts = 0, tris = 0;
     int boundary = 0, nonman = 0;
   };
-  auto buildOn = [&](const MergedMesh& m, double surfaceThresholdDeg, bool pullIn) -> Attempt {
+  auto buildOn = [&](const MergedMesh& m, double surfaceThresholdDeg, bool pullIn,
+                     double stationFrac) -> Attempt {
     const std::map<EdgeKey, std::vector<int>> adj = buildEdgeAdjacency(m.tris);
     // Group surfaces by near-tangency, not by the feature threshold: a sub-crease
     // seam that is not near-tangent (a tee's tangent gap) must stay a surface
@@ -1829,6 +1865,7 @@ std::shared_ptr<const Geometry> buildBlend(
     Blender b{m,            adj,       surfaceOf, node.size, isChamfer,
               thresholdDeg, node.discretizer};
     b.pullIn = pullIn;
+    b.stationFrac = stationFrac;
     // Uniform arc tessellation: a quarter-turn's worth of segments from the
     // discretizer, applied to every cross-section regardless of its subtended
     // angle. A fillet crease whose dihedral varies (an oblique elliptical seam)
@@ -1905,14 +1942,18 @@ std::shared_ptr<const Geometry> buildBlend(
   }
   const bool didSubdivide = mSub.tris.size() != m0.tris.size();
 
-  // Prefer the pulled-in seating (the mixed-corner blade fix); if it leaves the
-  // mesh open on an oblique or crowded corner it cannot weld, fall back to the
-  // baseline mitre seating — first on the subdivided mesh, then on the raw one if
-  // subdivision itself went non-manifold. Each tier is never worse than the next,
-  // so a model that cannot take the pull-in gets exactly the baseline blend.
-  Attempt a = buildOn(mSub, kDefaultSurfaceThresholdDeg, /*pullIn=*/true);
-  if (a.status == Status::Holed) a = buildOn(mSub, kDefaultSurfaceThresholdDeg, false);
-  if (didSubdivide && a.status == Status::Holed) a = buildOn(m0, kDefaultSurfaceThresholdDeg, false);
+  // Prefer the tight pulled-in seating (round-overs flow into the corner); if it
+  // leaves the mesh open on an oblique or crowded corner it cannot weld, fall back
+  // to the full-mitre pull-in (the un-blade seat that only ever shrinks the patch),
+  // then to the baseline mitre seating — each on the subdivided mesh, then on the
+  // raw one if subdivision itself went non-manifold. Each tier is never worse than
+  // the next, so a corner that cannot take the tight seat gets the full mitre, and
+  // one that cannot take the pull-in at all gets exactly the baseline blend.
+  Attempt a = buildOn(mSub, kDefaultSurfaceThresholdDeg, /*pullIn=*/true, kPullStationFrac);
+  if (a.status == Status::Holed) a = buildOn(mSub, kDefaultSurfaceThresholdDeg, true, 1.0);
+  if (a.status == Status::Holed) a = buildOn(mSub, kDefaultSurfaceThresholdDeg, false, 1.0);
+  if (didSubdivide && a.status == Status::Holed)
+    a = buildOn(m0, kDefaultSurfaceThresholdDeg, false, 1.0);
 
   switch (a.status) {
     case Status::Empty:
