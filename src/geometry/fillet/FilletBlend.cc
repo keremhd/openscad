@@ -1148,6 +1148,179 @@ struct Blender
     if (!fillPlanarPolygon(poly)) out.tri(P0, P1, P2);
   }
 
+  // A mixed corner's tangent control point at a boundary vertex: pushed inward off
+  // the boundary along the fillet tangent (the chord to the shared centre Q,
+  // projected off the boundary normal), so a curve leaving here starts tangent to
+  // the incident fillet (G1) and bulges rather than diving straight across. Shared
+  // by both saddle tessellations. arm is the control-arm length as a fraction of the
+  // chord.
+  static Vector3d tangentCtrl(const Vector3d& P, const Vector3d& N, const Vector3d& Q,
+                              double arm)
+  {
+    const Vector3d d = Q - P;
+    Vector3d t = d;
+    const double nl = N.norm();
+    if (nl > 1e-9) {
+      const Vector3d Nu = N / nl;
+      t = d - d.dot(Nu) * Nu;
+    }
+    const double tl = t.norm();
+    t = tl > 1e-9 ? Vector3d(t / tl) : d.normalized();
+    return P + arm * d.norm() * t;
+  }
+
+  // Solution A: a discrete transfinite (Coons-family) saddle across a mixed corner
+  // ring, replacing the pole-free concentric fill where the ring cleanly partitions.
+  //
+  // A mixed ring is one contiguous concave arc (the crease dying into the face) and,
+  // opposite it, the complementary run carrying the two convex round-overs and any
+  // sector-inset connectors between them. The two are joined at their ends by a
+  // single ring edge each (the ring is a cycle, so removing one contiguous concave
+  // run leaves one contiguous complement — the two share exactly two boundary edges).
+  //
+  // The patch is a transfinite blend of the two opposite boundaries: for a pair of
+  // points (one on the concave arc, one on the convex run) the cross curve between
+  // them is a cubic Bezier B(s) with the two fillet-tangent controls, so it leaves
+  // the concave boundary along the concave fillet tangent and the convex boundary
+  // along the convex fillet tangent (G1 to both strips) and carries their opposite
+  // curvatures independently — a genuine saddle with NO interior pole (every interior
+  // vertex is distinct; nothing collapses to a centre). The two boundaries have
+  // different vertex counts (a convex run is ~2x a concave arc), so they are lofted
+  // by an arc-length merge: each merge cross-link becomes a K-sample cross Bezier and
+  // adjacent cross curves are stitched by a second merge, tapering cleanly where the
+  // longer side advances alone. The two end links are the ring's connector edges and
+  // stay straight (2 samples) so no vertex is inserted on a shared boundary edge.
+  //
+  // Returns false (caller falls back to the concentric emitSaddle) when the ring does
+  // not fit this partition — not exactly one concave run, too few convex/concave
+  // points — or when the resulting patch would be edge-non-manifold.
+  bool emitCoonsSaddle(const std::vector<int>& ring, const std::vector<Vector3d>& ringNrm,
+                       const std::vector<int>& ringSign)
+  {
+    const int n = static_cast<int>(ring.size());
+    if (n < 6 || static_cast<int>(ringNrm.size()) != n ||
+        static_cast<int>(ringSign.size()) != n)
+      return false;
+
+    // Exactly one contiguous cyclic concave run, with enough convex mass opposite it.
+    int nConcave = 0, nConvex = 0, runs = 0, runStart = -1;
+    for (int i = 0; i < n; ++i) {
+      if (ringSign[i] < 0) ++nConcave;
+      else if (ringSign[i] > 0) ++nConvex;
+      if (ringSign[i] < 0 && ringSign[(i - 1 + n) % n] >= 0) { ++runs; runStart = i; }
+    }
+    if (runs != 1 || nConcave < 2 || nConvex < 2) return false;
+
+    // Concave arc Cc = the run; convex run Cv = the complement, taken anti-parallel so
+    // Cv[0] is adjacent to Cc[0] and Cv[last] to Cc[last] (the two connector edges).
+    std::vector<int> cc, cv;  // ring indices
+    for (int i = runStart; ringSign[i] < 0; i = (i + 1) % n) {
+      cc.push_back(i);
+      if (static_cast<int>(cc.size()) > n) return false;
+    }
+    const int A = static_cast<int>(cc.size());
+    const int cvStop = (runStart + A) % n;  // first vertex of the complement (Cv last)
+    for (int i = (runStart - 1 + n) % n;; i = (i - 1 + n) % n) {
+      cv.push_back(i);
+      if (i == cvStop) break;
+      if (static_cast<int>(cv.size()) > n) return false;
+    }
+    const int Bn = static_cast<int>(cv.size());
+    if (A < 2 || Bn < 2) return false;
+
+    Vector3d Q = Vector3d::Zero();
+    for (int i = 0; i < n; ++i) Q += out.V[ring[i]];
+    Q /= static_cast<double>(n);
+
+    // Boundary positions, tangent controls and normalised arc-length parameters.
+    const double arm = 0.42;
+    auto build = [&](const std::vector<int>& idx, std::vector<Vector3d>& P,
+                     std::vector<Vector3d>& M, std::vector<double>& t) {
+      const int m = static_cast<int>(idx.size());
+      P.resize(m); M.resize(m); t.resize(m);
+      for (int i = 0; i < m; ++i) P[i] = out.V[ring[idx[i]]];
+      double acc = 0; t[0] = 0;
+      for (int i = 1; i < m; ++i) { acc += (P[i] - P[i - 1]).norm(); t[i] = acc; }
+      for (int i = 1; i < m; ++i) t[i] = acc > 1e-12 ? t[i] / acc : static_cast<double>(i) / (m - 1);
+      // Taper the bulge to nothing at the arc ends: where the concave arc meets a
+      // convex arc the two feet nearly coincide with opposite tangents, so a full
+      // control arm there stands the cross curve proud as a fin. A smooth ramp over
+      // the outer fifth kills that end bulge while the mid-arc saddle keeps full arm.
+      for (int i = 0; i < m; ++i) {
+        const double e = std::clamp(std::min(t[i], 1 - t[i]) / 0.2, 0.0, 1.0);
+        const double w = e * e * (3 - 2 * e);  // smoothstep
+        M[i] = tangentCtrl(P[i], ringNrm[idx[i]], Q, arm * w);
+      }
+    };
+    std::vector<Vector3d> ccP, ccM, cvP, cvM;
+    std::vector<double> ccT, cvT;
+    build(cc, ccP, ccM, ccT);
+    build(cv, cvP, cvM, cvT);
+
+    const int K = std::clamp(arcSegs / 2, 2, 8);  // cross-curve samples, $fn-aware
+
+    // A cross curve from concave point i to convex point j, sampled at K+1 layers
+    // (s=0 on the concave boundary, s=1 on the convex boundary); a connector edge is
+    // the same curve at just its two endpoints. Returns global (welded) vertex ids
+    // and their s parameters.
+    auto crossCurve = [&](int i, int j, bool edge, std::vector<int>& gid,
+                          std::vector<double>& sp) {
+      gid.clear(); sp.clear();
+      const int steps = edge ? 1 : K;
+      for (int l = 0; l <= steps; ++l) {
+        const double s = static_cast<double>(l) / steps;
+        const double u = 1 - s;
+        const Vector3d p = u * u * u * ccP[i] + 3 * u * u * s * ccM[i] +
+                           3 * u * s * s * cvM[j] + s * s * s * cvP[j];
+        gid.push_back(out.add(p));
+        sp.push_back(s);
+      }
+    };
+
+    // Collect triangles locally, then reject (fall back) if any edge is non-manifold.
+    std::vector<std::array<int, 3>> tris;
+    auto stitch = [&](const std::vector<int>& ga, const std::vector<double>& sa,
+                      const std::vector<int>& gb, const std::vector<double>& sb) {
+      int ia = 0, ib = 0;
+      const int na = static_cast<int>(ga.size()) - 1, nb = static_cast<int>(gb.size()) - 1;
+      while (ia < na || ib < nb) {
+        bool advA;
+        if (ia >= na) advA = false;
+        else if (ib >= nb) advA = true;
+        else advA = sa[ia + 1] <= sb[ib + 1];
+        if (advA) { tris.push_back({ga[ia], ga[ia + 1], gb[ib]}); ++ia; }
+        else { tris.push_back({ga[ia], gb[ib + 1], gb[ib]}); ++ib; }
+      }
+    };
+
+    int i = 0, j = 0;
+    std::vector<int> curG, nxtG;
+    std::vector<double> curS, nxtS;
+    crossCurve(i, j, /*edge=*/true, curG, curS);  // first connector edge
+    while (i < A - 1 || j < Bn - 1) {
+      bool advI;
+      if (i >= A - 1) advI = false;
+      else if (j >= Bn - 1) advI = true;
+      else advI = ccT[i + 1] <= cvT[j + 1];
+      const int ni = advI ? i + 1 : i, nj = advI ? j : j + 1;
+      const bool nextEdge = (ni == A - 1 && nj == Bn - 1);  // last connector edge
+      crossCurve(ni, nj, nextEdge, nxtG, nxtS);
+      stitch(curG, curS, nxtG, nxtS);
+      i = ni; j = nj;
+      curG.swap(nxtG); curS.swap(nxtS);
+    }
+
+    std::map<std::pair<int, int>, int> edgeUse;
+    for (const auto& t : tris) {
+      if (t[0] == t[1] || t[1] == t[2] || t[0] == t[2]) continue;
+      for (const auto& e : {std::minmax(t[0], t[1]), std::minmax(t[1], t[2]),
+                            std::minmax(t[0], t[2])})
+        if (++edgeUse[e] > 2) return false;  // non-manifold: fall back to concentric
+    }
+    for (const auto& t : tris) out.tri(t[0], t[1], t[2]);
+    return true;
+  }
+
   // Fill a mixed-sign vertex ring with a curved saddle rather than a flat
   // ear-clip. A convex edge and a concave edge sharing u cannot be capped by one
   // sphere (a ball is single-signed), so the patch is a genuine saddle: it must
@@ -1364,18 +1537,20 @@ struct Blender
     // two arrays in lockstep through the same adjacent-duplicate dedup.
     std::vector<int> ring;
     std::vector<Vector3d> ringNrm;
+    std::vector<int> ringSign;    // +1 convex arc, -1 concave arc, 0 connector (inset)
     std::vector<int> cornerPos;  // ring indices of the sector-inset corners (the arc joins)
-    auto pushRing = [&](int idx, const Vector3d& nrm, bool corner) {
+    auto pushRing = [&](int idx, const Vector3d& nrm, bool corner, int sign) {
       if (!ring.empty() && ring.back() == idx) return;
       if (corner) cornerPos.push_back(static_cast<int>(ring.size()));
       ring.push_back(idx);
       ringNrm.push_back(nrm);
+      ringSign.push_back(sign);
     };
     for (int off = 0; off < n; ++off) {
       const int i = (start + off) % n;
       const int tri = fan[i].first;
       const int via = fan[i].second;  // edge (u,via) leaving this triangle
-      pushRing(out.add(insetForTri(u, tri)), m.tris[tri].normal, /*corner=*/true);
+      pushRing(out.add(insetForTri(u, tri)), m.tris[tri].normal, /*corner=*/true, /*sign=*/0);
       if (isSelected(u, via)) {
         const EdgeKey e{std::min(u, via), std::max(u, via)};
         const auto& ts = adj.at(e);
@@ -1396,11 +1571,11 @@ struct Blender
             const Vector3d d = cs[j] - *Copt;
             if (d.norm() > 1e-9) nrm = d.normalized();
           }
-          pushRing(out.add(cs[j]), nrm, /*corner=*/false);
+          pushRing(out.add(cs[j]), nrm, /*corner=*/false, /*sign=*/concave ? -1 : 1);
         }
       }
     }
-    if (ring.size() >= 2 && ring.front() == ring.back()) { ring.pop_back(); ringNrm.pop_back(); }
+    if (ring.size() >= 2 && ring.front() == ring.back()) { ring.pop_back(); ringNrm.pop_back(); ringSign.pop_back(); }
     while (!cornerPos.empty() && cornerPos.back() >= static_cast<int>(ring.size())) cornerPos.pop_back();
 
     // Sign of the selected edges here.
@@ -1440,7 +1615,9 @@ struct Blender
     // ball caps it — fill the ring with a curved saddle membrane instead of a flat
     // patch, removing the creased V-notch the ear-clip left where a concave crease
     // died into a face.
-    if (!isChamfer && junction && mixed && ring.size() >= 4 && emitSaddle(ring, ringNrm)) return;
+    if (!isChamfer && junction && mixed && ring.size() >= 4 &&
+        (emitCoonsSaddle(ring, ringNrm, ringSign) || emitSaddle(ring, ringNrm)))
+      return;
 
     // Strip end (a fillet ending against a kept-sharp boundary): close the ring
     // flat by ear-clipping it in its best-fit plane — the perpendicular patch that
