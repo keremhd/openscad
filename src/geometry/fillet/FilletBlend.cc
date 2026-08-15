@@ -24,6 +24,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <map>
 #include <memory>
 #include <optional>
@@ -1204,6 +1205,227 @@ struct Blender
     return P + arm * d.norm() * t;
   }
 
+  // The three rolls that actually meet over a mixed corner: the concave fillet's own
+  // cylinder, the two convex round-over cylinders, and — between them — the closing
+  // transition, the ball still rolling but now riding on the two ALREADY-ROUNDED
+  // convex edges at once instead of on their flat faces.
+  struct CornerRoll {
+    std::vector<Vector3d> C;           // the transition's ball centres, concave end first
+    Vector3d ccP, ccD;                 // the concave fillet's axis: a point and a direction
+    std::array<Vector3d, 2> axP, axD;  // the two round-overs' axes, likewise
+    bool ok() const { return C.size() >= 3; }
+  };
+
+  // Solve that transition for one mixed ring.
+  //
+  // The three static surfaces at a mixed vertex genuinely share no point — the concave
+  // fillet cylinder ends short of both round-overs — so the loft has to fill the space
+  // between them, and lofting a short boundary onto a long one fans a web across it.
+  // But the space is not surfaceless. As the ball leaves the trough it keeps two
+  // contacts, one on each round-over, and its envelope is a canal surface: a
+  // one-parameter family of shrinking circular arcs that continues the concave
+  // fillet's end cross-section and tapers to a single point on the face the two
+  // round-overs share. That surface, not a fan, is what belongs over the corner.
+  //
+  // A ball riding on a round-over of radius `size` is externally tangent to it, so its
+  // centre is 2*size off that round-over's axis and the centre curve is the
+  // intersection of the two tubes of radius 2*size about the two axes. March it from
+  // the concave arc's own centre — there the ball still fills the trough and the
+  // envelope is exactly the concave end section, so the handoff to that strip is free
+  // — until the two contacts meet at the pinch.
+  //
+  // Every input is read back off the ring: each arc's rolling-ball centre is
+  // C = P - size * ringNrm (the reconstruction the flush clamp already uses) and each
+  // arc's axis direction is the normal of its own arc's plane. Nothing is fitted and
+  // no surface is assumed. A result that is not ok() means the corner is not this
+  // canonical shape — two round-overs closing one crease, well conditioned — and the
+  // caller keeps its plain field untouched.
+  CornerRoll cornerRoll(const std::vector<int>& ring, const std::vector<int>& ringSign,
+                        const std::vector<int>& cc, const std::vector<int>& cv,
+                        const std::vector<Vector3d>& cvC, const Vector3d& C0,
+                        const Vector3d& Q) const
+  {
+    // The axis direction of one ring arc: the normal of the plane its points lie in,
+    // which for a cross-section of a roll is the edge the roll swept along.
+    auto arcAxis = [&](const std::vector<int>& idx, int lo, int hi, Vector3d& d) {
+      Vector3d nrm = Vector3d::Zero();
+      const Vector3d P0 = out.V[ring[idx[lo]]];
+      for (int k = lo; k + 1 < hi; ++k)
+        nrm += (out.V[ring[idx[k]]] - P0).cross(out.V[ring[idx[k + 1]]] - P0);
+      const double nl = nrm.norm();
+      if (nl < 1e-12) return false;
+      d = nrm / nl;
+      return true;
+    };
+
+    // The concave arc's own axis, where the ring carries enough of it to read one. Too
+    // coarse an arc simply leaves it zero, and the sample that would have gone to the
+    // concave cylinder stays on the leading ball instead — the two osculate there.
+    CornerRoll R;
+    R.ccP = C0;
+    R.ccD = Vector3d::Zero();
+    if (static_cast<int>(cc.size()) >= 3)
+      arcAxis(cc, 0, static_cast<int>(cc.size()), R.ccD);
+
+    const int Bn = static_cast<int>(cv.size());
+    std::vector<std::pair<int, int>> runs;  // convex runs [lo,hi) inside cv
+    for (int k = 0; k < Bn; ++k) {
+      if (ringSign[cv[k]] <= 0) continue;
+      if (k == 0 || ringSign[cv[k - 1]] <= 0) runs.emplace_back(k, k + 1);
+      else runs.back().second = k + 1;
+    }
+    if (runs.size() != 2) return {};
+
+    // Each round-over as a line: a point (its cross-section's rolling-ball centre)
+    // and a direction (the normal of the cross-section's plane, which is the edge).
+    for (int r = 0; r < 2; ++r) {
+      const int lo = runs[r].first, hi = runs[r].second;
+      if (hi - lo < 3 || !arcAxis(cv, lo, hi, R.axD[r])) return {};
+      Vector3d cen = Vector3d::Zero();
+      for (int k = lo; k < hi; ++k) cen += cvC[k];
+      cen /= static_cast<double>(hi - lo);
+      // The arc must really be one cross-section of one roll, or the reconstruction
+      // is meaningless (a clamped or twisted arc scatters its centres).
+      double spread = 0;
+      for (int k = lo; k < hi; ++k) spread = std::max(spread, (cvC[k] - cen).norm());
+      if (spread > 0.15 * size) return {};
+      R.axP[r] = cen;
+    }
+    const std::array<Vector3d, 2>& axP = R.axP;
+    const std::array<Vector3d, 2>& axD = R.axD;
+
+    // Distance from a centre to one round-over's axis, and the unit direction that
+    // increases it — the ball touches that round-over at c - size * g.
+    auto tube = [&](const Vector3d& c, int r, Vector3d& g) {
+      const Vector3d w = c - axP[r];
+      const Vector3d v = w - w.dot(axD[r]) * axD[r];
+      const double d = v.norm();
+      if (d < 1e-12) { g = Vector3d::Zero(); return 0.0; }
+      g = v / d;
+      return d;
+    };
+
+    // The concave arc's own centre must already be a ball of the family, or this is
+    // not the canonical two-round-overs-closing-one-crease corner.
+    Vector3d g0a, g0b;
+    if (std::abs(tube(C0, 0, g0a) - 2 * size) > 0.05 * size) return {};
+    if (std::abs(tube(C0, 1, g0b) - 2 * size) > 0.05 * size) return {};
+
+    std::vector<Vector3d> chain{C0};
+    Vector3d c = C0, prevT = Vector3d::Zero();
+    double prevAng = std::numeric_limits<double>::max();
+    const double h = 0.12 * size;
+    for (int step = 0; step < 256; ++step) {
+      Vector3d ga, gb;
+      tube(c, 0, ga);
+      tube(c, 1, gb);
+      Vector3d t = ga.cross(gb);
+      const double tl = t.norm();
+      if (tl < 1e-6) break;  // the two contacts have merged, or the axes graze
+      t /= tl;
+      // March away from the strip, into the corner: toward the ring's own centroid
+      // on the first step, then by continuity. Positional, so the marched chain does
+      // not depend on which incident triangle the fan happened to start on.
+      const double orient = prevT.squaredNorm() > 0 ? t.dot(prevT) : t.dot(Q - C0);
+      if (orient == 0.0) return {};
+      if (orient < 0) t = -t;
+      prevT = t;
+      Vector3d cn = c + h * t;
+      for (int it = 0; it < 8; ++it) {  // Newton back onto both tubes
+        Vector3d na, nb;
+        const double fa = tube(cn, 0, na) - 2 * size, fb = tube(cn, 1, nb) - 2 * size;
+        if (std::abs(fa) < 1e-12 * size && std::abs(fb) < 1e-12 * size) break;
+        const double g = na.dot(nb), det = 1 - g * g;
+        if (std::abs(det) < 1e-9) return {};
+        cn += ((-fa + g * fb) / det) * na + ((-fb + g * fa) / det) * nb;
+      }
+      Vector3d ea, eb;
+      const double da = tube(cn, 0, ea), db = tube(cn, 1, eb);
+      if (std::abs(da - 2 * size) > 1e-6 * size || std::abs(db - 2 * size) > 1e-6 * size)
+        break;  // the correction did not land on the curve; stop where it still did
+      // The characteristic arc spans the two contact directions -ea, -eb; the march
+      // ends when they meet (the pinch) and must never run past it.
+      const double ang = std::acos(std::clamp(ea.dot(eb), -1.0, 1.0));
+      if (ang > prevAng) break;
+      chain.push_back(cn);
+      prevAng = ang;
+      c = cn;
+      if (ang < 1e-3) break;
+    }
+    if (chain.size() < 3) return {};
+    R.C.swap(chain);
+    return R;
+  }
+
+  // Where a sample belongs on the corner's real surface. Over the corner the surface
+  // is three rolls stitched along tangent seams: the concave fillet cylinder where the
+  // ball still fills the trough, then the transition's canal surface, then — past each
+  // of the transition's two contacts — that round-over's own cylinder. So classify by
+  // the nearest transition ball and project onto the roll that owns the sample: the
+  // sphere of that ball inside the characteristic arc, the concave cylinder before the
+  // march starts, a round-over cylinder outside the arc on that contact's side. The
+  // seams are the contact curves, where the canal is tangent to the cylinder it hands
+  // off to, so a sample crossing one moves continuously and the patch shows no crease.
+  Vector3d rollProject(const CornerRoll& R, const Vector3d& p) const
+  {
+    auto onCyl = [&](const Vector3d& P, const Vector3d& D) {
+      const Vector3d f = P + (p - P).dot(D) * D;
+      const Vector3d v = p - f;
+      const double d = v.norm();
+      return d < 1e-9 ? p : Vector3d(f + (size / d) * v);
+    };
+
+    // Nearest ball centre on the marched chain.
+    double best = std::numeric_limits<double>::max();
+    Vector3d c = R.C.front();
+    double bestT = 0;
+    size_t bestK = 0;
+    for (size_t k = 0; k + 1 < R.C.size(); ++k) {
+      const Vector3d a = R.C[k], ab = R.C[k + 1] - a;
+      const double L2 = ab.squaredNorm();
+      const double t = L2 > 1e-18 ? std::clamp((p - a).dot(ab) / L2, 0.0, 1.0) : 0.0;
+      const Vector3d q = a + t * ab;
+      const double d = (p - q).norm();
+      if (d < best) { best = d; c = q; bestK = k; bestT = t; }
+    }
+
+    // The ball at c touches round-over r at c - size*g[r], so the characteristic arc
+    // runs between those two directions in the plane the march is normal to.
+    std::array<Vector3d, 2> g;
+    for (int r = 0; r < 2; ++r) {
+      const Vector3d w = c - R.axP[r];
+      const Vector3d v = w - w.dot(R.axD[r]) * R.axD[r];
+      const double d = v.norm();
+      if (d < 1e-12) return p;
+      g[r] = v / d;
+    }
+    Vector3d t = g[0].cross(g[1]);
+    const double tl = t.norm();
+    if (tl < 1e-9) return p;  // at the pinch the arc has closed; leave the sample
+    t /= tl;
+    if (t.dot(R.C.back() - R.C.front()) < 0) t = -t;
+
+    // Before the march even starts the ball is still the trough's own, so the sample
+    // belongs to the concave fillet cylinder rather than to the leading sphere.
+    if (bestK == 0 && bestT <= 0.0 && (p - c).dot(t) < 0 && R.ccD.squaredNorm() > 0.5)
+      return onCyl(R.ccP, R.ccD);
+
+    const Vector3d a = -g[0], b = -g[1];
+    Vector3d u = p - c;
+    u -= u.dot(t) * t;
+    const double ul = u.norm();
+    if (ul < 1e-12) return p;
+    u /= ul;
+    const double ref = a.cross(b).dot(t);
+    if (std::abs(ref) > 1e-12 && a.cross(u).dot(t) * ref > 0 && u.cross(b).dot(t) * ref > 0) {
+      const Vector3d rv = p - c;               // inside the arc: the transition's own ball
+      const double d = rv.norm();
+      return d < 1e-9 ? p : Vector3d(c + (size / d) * rv);
+    }
+    const int r = u.dot(a) >= u.dot(b) ? 0 : 1;  // past a contact: that round-over
+    return onCyl(R.axP[r], R.axD[r]);
+  }
+
   // Solution A: a discrete transfinite (Coons-family) saddle across a mixed corner
   // ring, replacing the pole-free concentric fill where the ring cleanly partitions.
   //
@@ -1291,6 +1513,20 @@ struct Blender
     build(cc, ccP, ccM, ccT, ccC);
     build(cv, cvP, cvM, cvT, cvC);
 
+    // The corner's real rolls, if this corner is the canonical one. The concave arc is
+    // one cross-section of one roll, so its ring points share a single reconstructed
+    // centre — the ball that still fills the trough, and the march's start. A scattered
+    // reconstruction means the arc is not that, and the patch stays on the plain field.
+    CornerRoll roll;
+    {
+      Vector3d C0 = Vector3d::Zero();
+      for (const auto& p : ccC) C0 += p;
+      C0 /= static_cast<double>(ccC.size());
+      bool tight = true;
+      for (const auto& p : ccC) tight = tight && (p - C0).norm() <= 0.15 * size;
+      if (tight) roll = cornerRoll(ring, ringSign, cc, cv, cvC, C0, Q);
+    }
+
     const int K = std::max(2, arcSegs);  // cross-curve samples, matches strip arcSegs
 
     // Push a proud sample back onto the rolling-ball fillet surface it stands over.
@@ -1310,15 +1546,15 @@ struct Blender
 
     // A cross curve from concave point i to convex point j, sampled at K+1 layers
     // (s=0 on the concave boundary, s=1 on the convex boundary); a connector edge is
-    // the same curve at just its two endpoints. Returns global (welded) vertex ids
-    // and their s parameters. The interior layers within the outer band of each end are
+    // the same curve at just its two endpoints. Returns the layer positions, which the
+    // caller places once the whole field is laid out. The interior layers within the
+    // outer band of each end are
     // clamped flush onto that end's fillet surface (weight smoothstepped to zero across
     // the band) so the patch continues the strip near the seam instead of bulging proud;
     // the boundary layers (s=0, s=1) are left untouched so they stay welded to the ring.
     const double band = 0.35;  // outer fraction of the cross curve kept flush to the strip
-    auto crossCurve = [&](int i, int j, bool edge, std::vector<int>& gid,
-                          std::vector<double>& sp) {
-      gid.clear(); sp.clear();
+    auto crossCurve = [&](int i, int j, bool edge, std::vector<Vector3d>& lay) {
+      lay.clear();
       const int steps = edge ? 1 : K;
       for (int l = 0; l <= steps; ++l) {
         const double s = static_cast<double>(l) / steps;
@@ -1331,8 +1567,7 @@ struct Blender
           p = flush(p, ccC[i], /*concave=*/true, ec * ec * (3 - 2 * ec));
           p = flush(p, cvC[j], /*concave=*/false, ev * ev * (3 - 2 * ev));
         }
-        gid.push_back(out.add(p));
-        sp.push_back(s);
+        lay.push_back(p);
       }
     };
 
@@ -1352,20 +1587,95 @@ struct Blender
       }
     };
 
-    int i = 0, j = 0;
-    std::vector<int> curG, nxtG;
-    std::vector<double> curS, nxtS;
-    crossCurve(i, j, /*edge=*/true, curG, curS);  // first connector edge
-    while (i < A - 1 || j < Bn - 1) {
+    // The arc-length merge of the two boundaries, as the row sequence it walks.
+    std::vector<std::pair<int, int>> seq{{0, 0}};
+    for (int i = 0, j = 0; i < A - 1 || j < Bn - 1;) {
       bool advI;
       if (i >= A - 1) advI = false;
       else if (j >= Bn - 1) advI = true;
       else advI = ccT[i + 1] <= cvT[j + 1];
-      const int ni = advI ? i + 1 : i, nj = advI ? j : j + 1;
-      const bool nextEdge = (ni == A - 1 && nj == Bn - 1);  // last connector edge
-      crossCurve(ni, nj, nextEdge, nxtG, nxtS);
+      i = advI ? i + 1 : i;
+      j = advI ? j : j + 1;
+      seq.emplace_back(i, j);
+    }
+    const int R = static_cast<int>(seq.size());
+    std::vector<std::vector<Vector3d>> grid(R);
+    for (int r = 0; r < R; ++r)
+      crossCurve(seq[r].first, seq[r].second, /*edge=*/r == 0 || r == R - 1, grid[r]);
+
+    // Draw the interior of that field onto the corner's real rolls.
+    //
+    // Only interior samples move: the ring itself, both boundary layers of every row
+    // and the ring's two connector edges (single straight chords carrying no interior
+    // layer) stay exactly where the loft welded them. Those chords are also why the
+    // pull is ramped in — over a margin of rows from each end, and across s from each
+    // boundary layer — so a row never drops onto the roll while the neighbour it fans
+    // onto cannot follow.
+    //
+    // A projection alone is not enough. It moves every sample by its own amount, and
+    // the merge fans several rows off one shared boundary point, so the field arrives
+    // both bunched (neighbouring layers a fortieth of a step apart) and pleated across
+    // the fan. So alternate: relax the interior toward its four grid neighbours, then
+    // draw it back onto the roll. The relaxation spreads the samples out and the
+    // redraw undoes the caving it would otherwise leave, and after a few rounds the
+    // patch is an evenly sampled piece of the real surface.
+    if (roll.ok() && R > 4 && K >= 2) {
+      const double rowMargin = 3, sMargin = 0.15;
+      std::vector<double> rw(R);
+      for (int r = 0; r < R; ++r) {
+        const double d = std::clamp(std::min(r, R - 1 - r) / rowMargin, 0.0, 1.0);
+        rw[r] = d * d * (3 - 2 * d);
+      }
+      std::vector<double> sw(K + 1);
+      for (int l = 0; l <= K; ++l) {
+        const double s = static_cast<double>(l) / K;
+        const double d = std::clamp(std::min(s, 1 - s) / sMargin, 0.0, 1.0);
+        sw[l] = d * d * (3 - 2 * d);
+      }
+      // A row's layer l, for the two chord rows read at the same s as the rest.
+      auto at = [&](int r, int l) {
+        const std::vector<Vector3d>& g = grid[r];
+        if (static_cast<int>(g.size()) == K + 1) return g[l];
+        const double s = static_cast<double>(l) / K;
+        return Vector3d(g.front() + s * (g.back() - g.front()));
+      };
+      auto draw = [&](int r, int l, Vector3d p) {
+        const Vector3d q = rollProject(roll, p);
+        if ((q - p).norm() < 0.75 * size) p += rw[r] * sw[l] * (q - p);
+        return p;
+      };
+      for (int r = 1; r + 1 < R; ++r)
+        if (static_cast<int>(grid[r].size()) == K + 1)
+          for (int l = 1; l < K; ++l) grid[r][l] = draw(r, l, grid[r][l]);
+      // enough rounds for the relaxation to reach across the fan
+      for (int pass = 0; pass < 48; ++pass) {
+        std::vector<std::vector<Vector3d>> next = grid;
+        for (int r = 1; r + 1 < R; ++r) {
+          if (static_cast<int>(grid[r].size()) != K + 1) continue;
+          for (int l = 1; l < K; ++l) {
+            const Vector3d avg =
+                0.25 * (at(r - 1, l) + at(r + 1, l) + grid[r][l - 1] + grid[r][l + 1]);
+            next[r][l] = draw(r, l, grid[r][l] + 0.85 * (avg - grid[r][l]));
+          }
+        }
+        grid.swap(next);
+      }
+    }
+
+    std::vector<int> curG, nxtG;
+    std::vector<double> curS, nxtS;
+    auto place = [&](int r, std::vector<int>& gid, std::vector<double>& sp) {
+      gid.clear(); sp.clear();
+      const int steps = static_cast<int>(grid[r].size()) - 1;
+      for (int l = 0; l <= steps; ++l) {
+        gid.push_back(out.add(grid[r][l]));
+        sp.push_back(static_cast<double>(l) / steps);
+      }
+    };
+    place(0, curG, curS);
+    for (int r = 1; r < R; ++r) {
+      place(r, nxtG, nxtS);
       stitch(curG, curS, nxtG, nxtS);
-      i = ni; j = nj;
       curG.swap(nxtG); curS.swap(nxtS);
     }
 
