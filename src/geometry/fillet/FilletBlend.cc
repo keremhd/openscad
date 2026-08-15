@@ -1292,7 +1292,7 @@ struct Blender
     build(cc, ccP, ccM, ccT);
     build(cv, cvP, cvM, cvT);
 
-    const int K = std::clamp(arcSegs / 2, 2, 8);  // cross-curve samples, $fn-aware
+    const int K = std::max(2, arcSegs);  // cross-curve samples, matches strip arcSegs
 
     // A cross curve from concave point i to convex point j, sampled at K+1 layers
     // (s=0 on the concave boundary, s=1 on the convex boundary); a connector edge is
@@ -1425,7 +1425,7 @@ struct Blender
     // — the innermost ring stays a small polygon, so there is no interior pole. The
     // half-chord control arm (set where M[i] is built) is what keeps a mixed corner's
     // convex columns from overshooting proud of the concave valley as needle flaps.
-    const int k = std::clamp(arcSegs / 2, 2, 8);
+    const int k = std::max(2, arcSegs);
     std::vector<Vector3d> V;
     V.reserve(k * n);
     for (int l = 0; l < k; ++l) {
