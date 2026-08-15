@@ -1267,37 +1267,55 @@ struct Blender
     for (int i = 0; i < n; ++i) Q += out.V[ring[i]];
     Q /= static_cast<double>(n);
 
-    // Boundary positions, tangent controls and normalised arc-length parameters.
+    // Boundary positions, tangent controls, normalised arc-length parameters, and the
+    // rolling-ball centre of the fillet surface at each boundary point. The ring normal
+    // is the outward radius of that surface, ringNrm[i] = unit(P - C), and every arc
+    // boundary point lies one radius off its centre, so C = P - size * ringNrm[i]
+    // reconstructs the centre the near-seam clamp (below) projects onto.
     const double arm = 0.42;
     auto build = [&](const std::vector<int>& idx, std::vector<Vector3d>& P,
-                     std::vector<Vector3d>& M, std::vector<double>& t) {
+                     std::vector<Vector3d>& M, std::vector<double>& t, std::vector<Vector3d>& C) {
       const int m = static_cast<int>(idx.size());
-      P.resize(m); M.resize(m); t.resize(m);
+      P.resize(m); M.resize(m); t.resize(m); C.resize(m);
       for (int i = 0; i < m; ++i) P[i] = out.V[ring[idx[i]]];
       double acc = 0; t[0] = 0;
       for (int i = 1; i < m; ++i) { acc += (P[i] - P[i - 1]).norm(); t[i] = acc; }
       for (int i = 1; i < m; ++i) t[i] = acc > 1e-12 ? t[i] / acc : static_cast<double>(i) / (m - 1);
-      // Taper the bulge to nothing at the arc ends: where the concave arc meets a
-      // convex arc the two feet nearly coincide with opposite tangents, so a full
-      // control arm there stands the cross curve proud as a fin. A smooth ramp over
-      // the outer fifth kills that end bulge while the mid-arc saddle keeps full arm.
       for (int i = 0; i < m; ++i) {
-        const double e = std::clamp(std::min(t[i], 1 - t[i]) / 0.2, 0.0, 1.0);
-        const double w = e * e * (3 - 2 * e);  // smoothstep
-        M[i] = tangentCtrl(P[i], ringNrm[idx[i]], Q, arm * w);
+        M[i] = tangentCtrl(P[i], ringNrm[idx[i]], Q, arm);
+        C[i] = P[i] - size * ringNrm[idx[i]].normalized();
       }
     };
-    std::vector<Vector3d> ccP, ccM, cvP, cvM;
+    std::vector<Vector3d> ccP, ccM, cvP, cvM, ccC, cvC;
     std::vector<double> ccT, cvT;
-    build(cc, ccP, ccM, ccT);
-    build(cv, cvP, cvM, cvT);
+    build(cc, ccP, ccM, ccT, ccC);
+    build(cv, cvP, cvM, cvT, cvC);
 
     const int K = std::max(2, arcSegs);  // cross-curve samples, matches strip arcSegs
+
+    // Push a proud sample back onto the rolling-ball fillet surface it stands over.
+    // The surface at centre C is the sphere of radius size; convex fillet material is
+    // INSIDE it (a sample farther than size stands proud), a concave valley is OUTSIDE
+    // it (a sample nearer than size stands proud). Only proud samples move, and only by
+    // the blend weight w, so the result is flush-or-slightly-inside, never a new dip.
+    auto flush = [&](const Vector3d& p, const Vector3d& C, bool concave, double w) {
+      const Vector3d rv = p - C;
+      const double d = rv.norm();
+      if (d < 1e-9 || w <= 0.0) return p;
+      const bool proud = concave ? (d < size) : (d > size);
+      if (!proud) return p;
+      const Vector3d onSurf = C + size * (rv / d);
+      return Vector3d(p + w * (onSurf - p));
+    };
 
     // A cross curve from concave point i to convex point j, sampled at K+1 layers
     // (s=0 on the concave boundary, s=1 on the convex boundary); a connector edge is
     // the same curve at just its two endpoints. Returns global (welded) vertex ids
-    // and their s parameters.
+    // and their s parameters. The interior layers within the outer band of each end are
+    // clamped flush onto that end's fillet surface (weight smoothstepped to zero across
+    // the band) so the patch continues the strip near the seam instead of bulging proud;
+    // the boundary layers (s=0, s=1) are left untouched so they stay welded to the ring.
+    const double band = 0.35;  // outer fraction of the cross curve kept flush to the strip
     auto crossCurve = [&](int i, int j, bool edge, std::vector<int>& gid,
                           std::vector<double>& sp) {
       gid.clear(); sp.clear();
@@ -1305,8 +1323,14 @@ struct Blender
       for (int l = 0; l <= steps; ++l) {
         const double s = static_cast<double>(l) / steps;
         const double u = 1 - s;
-        const Vector3d p = u * u * u * ccP[i] + 3 * u * u * s * ccM[i] +
-                           3 * u * s * s * cvM[j] + s * s * s * cvP[j];
+        Vector3d p = u * u * u * ccP[i] + 3 * u * u * s * ccM[i] +
+                     3 * u * s * s * cvM[j] + s * s * s * cvP[j];
+        if (l > 0 && l < steps) {  // never move the welded boundary layers
+          const double ec = std::clamp((band - s) / band, 0.0, 1.0);
+          const double ev = std::clamp((band - (1 - s)) / band, 0.0, 1.0);
+          p = flush(p, ccC[i], /*concave=*/true, ec * ec * (3 - 2 * ec));
+          p = flush(p, cvC[j], /*concave=*/false, ev * ev * (3 - 2 * ev));
+        }
         gid.push_back(out.add(p));
         sp.push_back(s);
       }
