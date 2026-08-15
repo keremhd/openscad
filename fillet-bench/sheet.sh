@@ -126,3 +126,9 @@ for s in $(seq 1 $nsheets); do
       sheets/sheet-$s.png 2>/dev/null
   print "sheets/sheet-$s.png"
 done
+
+# Bundle the freshly montaged sheets into the A4 PDF. Non-fatal: a machine
+# without sips/gs still gets its PNGs.
+if [[ -x ./sheets-to-pdf.sh ]]; then
+  ./sheets-to-pdf.sh || print -u2 "sheets-to-pdf.sh failed -- PNGs are still current"
+fi
