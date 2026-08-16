@@ -70,6 +70,14 @@ inline constexpr double kCreaseFollowMaxTurnDeg = 40.0;
 // the two strips at such a vertex depends on the two staying in step.
 inline constexpr double kPassThroughMaxTurnDeg = 40.0;
 
+// Mitre limit: how far a set-back vertex may stand off its own position, in
+// setbacks. A face-sector corner's mitre stands 1/sin(half-angle) setbacks out,
+// so this is a floor on the sector angle -- 4 is 29 deg, tighter than the 40 deg
+// turn above, at which two edges stop being one crease and become a corner at
+// all. Anything that sharp is a razor sector a tessellation put there, not a
+// corner, and its mitre is off the face rather than on it.
+inline constexpr double kMitreLimit = 4.0;
+
 // Along-sweep station floor: a long selected crease is split so a straight fillet
 // holds a constant profile instead of tapering to its corner-distorted ends. The
 // cap on the spacing is kAlongSweep * size — an along-sweep counterpart to the
@@ -246,6 +254,44 @@ Vector3d lineIntersect(const Vector3d& P1, const Vector3d& d1, const Vector3d& P
   const Vector3d r = P2 - P1;
   const double lambda = r.cross(d2).dot(cx) / den;
   return P1 + lambda * d1;
+}
+
+// Where a vertex lands when the two feature edges bounding one of its face
+// sectors are set back: the mitre of their offset lines, held to a mitre limit.
+// U is the vertex; each line is given by its offset base, its unit direction
+// along its edge, and the setback that offset it.
+//
+// The bare crossing is the answer for any honest corner, but it is conditioned
+// only by the angle the two edges leave U at: it stands 1/sin(half-angle)
+// setbacks out, so let them leave nearly the same way -- a tessellated
+// near-tangent junction, where one crease family re-enters a vertex as a razor
+// sector -- and the crossing races off down the boundary, tens of millimetres
+// out for a one-millimetre fillet, taking the face's retreat and every strip
+// foot with it. That point is not a seat: a ball of the blend's own radius
+// seated at U touches the face only within the two setback bands, so nothing a
+// couple of setbacks out is reachable from U at all, and past there the blend is
+// the neighbouring edge's strip rather than this vertex's mitre.
+//
+// So the mitre is capped at kMitreLimit setbacks, by clamping the slide along
+// the deeper offset line -- which keeps that line's retreat exactly and gives up
+// only the slide the near-parallel crossing invented. The setback and the slide
+// are the legs of a right angle on that line, so the clamp meets the raw mitre
+// at the limit and the map stays continuous; and where the two setbacks are
+// equal, either line clamps to the same point, so sections that welded on the
+// raw mitre weld on the clamped one.
+Vector3d mitre(const Vector3d& U, const Vector3d& b1, const Vector3d& d1, double s1,
+               const Vector3d& b2, const Vector3d& d2, double s2)
+{
+  const Vector3d M = lineIntersect(b1, d1, b2, d2);
+  const double limit = kMitreLimit * std::max(s1, s2);
+  if ((M - U).norm() <= limit) return M;
+  const bool first = s1 >= s2;
+  const Vector3d& b = first ? b1 : b2;
+  const Vector3d& d = first ? d1 : d2;
+  const double s = first ? s1 : s2;
+  const double slide = (M - b).dot(d);
+  const double cap = std::sqrt(std::max(limit * limit - s * s, 0.0));
+  return b + std::clamp(slide, -cap, cap) * d;
 }
 
 // Split the mesh edge (a,b) into `parts` equal collinear pieces, re-fanning each
@@ -771,7 +817,10 @@ struct Blender
     Vector3d b1, d1, b2, d2;
     offsetLine(nb[0], b1, d1);
     offsetLine(nb[1], b2, d2);
-    return lineIntersect(b1, d1, b2, d2);
+    const EdgeKey e0{std::min(u, nb[0]), std::max(u, nb[0])};
+    const EdgeKey e1{std::min(u, nb[1]), std::max(u, nb[1])};
+    return mitre(m.pos[u], b1, d1, selected.count(e0) ? setback(e0) : 0.0, b2, d2,
+                 selected.count(e1) ? setback(e1) : 0.0);
   }
 
   // One local face-side of a crease at vertex u: the fan sector containing a
@@ -855,7 +904,10 @@ struct Blender
     Vector3d b1, d1, b2, d2;
     offsetLine(s->xb, s->tb, b1, d1);
     offsetLine(s->xf, s->tf, b2, d2);
-    return lineIntersect(b1, d1, b2, d2);
+    const EdgeKey eb{std::min(u, s->xb), std::max(u, s->xb)};
+    const EdgeKey ef{std::min(u, s->xf), std::max(u, s->xf)};
+    return mitre(m.pos[u], b1, d1, selected.count(eb) ? setback(eb) : 0.0, b2, d2,
+                 selected.count(ef) ? setback(ef) : 0.0);
   }
 
   // The far endpoint of the selected edge whose two incident triangles are t0/t1
@@ -2922,7 +2974,9 @@ struct Blender
         Vector3d b1, dd1, b2, dd2;
         offsetLine(viaStart, triStart, b1, dd1);
         offsetLine(viaEnd, triEnd, b2, dd2);
-        const Vector3d T = lineIntersect(b1, dd1, b2, dd2);
+        const Vector3d T =
+          mitre(m.pos[u], b1, dd1, setback(EdgeKey{std::min(u, viaStart), std::max(u, viaStart)}),
+                b2, dd2, setback(EdgeKey{std::min(u, viaEnd), std::max(u, viaEnd)}));
         for (const int t : tris) {
           insetOverride[{u, t}] = T;
           normalOverride[{u, t}] = nSide;
