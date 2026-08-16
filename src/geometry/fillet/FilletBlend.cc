@@ -403,6 +403,167 @@ void subdivideLongCreaseEdges(MergedMesh& m, const std::set<EdgeKey>& edges, dou
   for (const Split& s : todo) splitEdge(m, s.a, s.b, s.parts);
 }
 
+// Ear-clip a planar polygon given by position, in the plane of `nrm`, into index
+// triples wound to agree with `nrm`. False if the polygon is degenerate or leaves
+// an ear the clip cannot find.
+bool earClipPlanar(const std::vector<Vector3d>& p, const Vector3d& nrm,
+                   std::vector<std::array<int, 3>>& tris)
+{
+  const int n = static_cast<int>(p.size());
+  if (n < 3) return false;
+  Vector3d ex = (std::abs(nrm.x()) < 0.9 ? Vector3d::UnitX() : Vector3d::UnitY());
+  ex = (ex - ex.dot(nrm) * nrm).normalized();
+  const Vector3d ey = nrm.cross(ex);
+  std::vector<Vector2d> q(n);
+  for (int i = 0; i < n; ++i) q[i] = {p[i].dot(ex), p[i].dot(ey)};
+  double area = 0;  // signed area to fix winding
+  for (int i = 0; i < n; ++i)
+    area += q[i].x() * q[(i + 1) % n].y() - q[(i + 1) % n].x() * q[i].y();
+  if (std::abs(area) < 1e-15) return false;
+  std::vector<int> ring(n);
+  for (int i = 0; i < n; ++i) ring[i] = (area < 0) ? (n - 1 - i) : i;
+  auto cross2 = [](const Vector2d& a, const Vector2d& b, const Vector2d& c) {
+    return (b.x() - a.x()) * (c.y() - a.y()) - (b.y() - a.y()) * (c.x() - a.x());
+  };
+  // Clip the roundest ear each round, not the first one round the ring: these
+  // triangles are about to have their corners set back to their mitres, and a
+  // sliver spanning a reflex corner turns inside out when they move.
+  auto roundness = [&](const Vector2d& a, const Vector2d& b, const Vector2d& c) {
+    const double e0 = (b - a).squaredNorm(), e1 = (c - b).squaredNorm(),
+                 e2 = (a - c).squaredNorm();
+    const double longest = std::max({e0, e1, e2});
+    return longest > 0 ? std::abs(cross2(a, b, c)) / longest : 0.0;
+  };
+  tris.clear();
+  int guard = 0;
+  while (ring.size() > 3 && guard++ < 4 * n) {
+    const int m2 = static_cast<int>(ring.size());
+    int bestI = -1;
+    double bestR = 0;
+    for (int i = 0; i < m2; ++i) {
+      const int ia = ring[(i + m2 - 1) % m2], ib = ring[i], ic = ring[(i + 1) % m2];
+      if (cross2(q[ia], q[ib], q[ic]) <= 1e-12) continue;  // reflex or collinear
+      bool ear = true;
+      for (int j = 0; j < m2 && ear; ++j) {
+        const int k = ring[j];
+        if (k == ia || k == ib || k == ic) continue;
+        ear = !(cross2(q[ia], q[ib], q[k]) >= 0 && cross2(q[ib], q[ic], q[k]) >= 0 &&
+                cross2(q[ic], q[ia], q[k]) >= 0);
+      }
+      if (!ear) continue;
+      const double r = roundness(q[ia], q[ib], q[ic]);
+      if (bestI < 0 || r > bestR) {
+        bestI = i;
+        bestR = r;
+      }
+    }
+    if (bestI < 0) return false;
+    tris.push_back({ring[(bestI + m2 - 1) % m2], ring[bestI], ring[(bestI + 1) % m2]});
+    ring.erase(ring.begin() + bestI);
+  }
+  if (ring.size() == 3) tris.push_back({ring[0], ring[1], ring[2]});
+  // The clip ran on the winding-corrected copy; wind every triangle with nrm.
+  for (auto& t : tris)
+    if ((p[t[1]] - p[t[0]]).cross(p[t[2]] - p[t[0]]).dot(nrm) < 0) std::swap(t[1], t[2]);
+  return true;
+}
+
+// The ring of vertices around u, in the fan's own winding: each incident triangle
+// contributes the directed edge opposite u, and those edges chain into one cycle.
+// Empty if they do not (u is not a clean manifold fan).
+std::vector<int> ringAround(const MergedMesh& m, const std::vector<int>& tris, int u)
+{
+  std::map<int, int> nextOf;
+  for (const int t : tris) {
+    const auto& v = m.tris[t].v;
+    for (int i = 0; i < 3; ++i)
+      if (v[i] == u && !nextOf.emplace(v[(i + 1) % 3], v[(i + 2) % 3]).second) return {};
+  }
+  if (nextOf.size() != tris.size()) return {};
+  std::vector<int> ring{nextOf.begin()->first};
+  for (size_t k = 0; k < nextOf.size(); ++k) {
+    const auto it = nextOf.find(ring.back());
+    if (it == nextOf.end()) return {};
+    if (it->second == ring.front()) break;
+    ring.push_back(it->second);
+  }
+  return ring.size() == nextOf.size() ? ring : std::vector<int>{};
+}
+
+// Dissolve the vertices the blend swallows.
+//
+// A face triangulation may carry a vertex no crease touches — a union leaves one
+// wherever it merges two coplanar faces into one. Such a vertex has no boundary to
+// mitre against, so the inset leaves it exactly where it is; where it happens to lie
+// within a blended edge's setback that is inside the region the strip (or, at a
+// corner, the corner patch) now covers, and the surface triangles around it lap over
+// that region and fold back on themselves — a zero-volume flap lying in the face,
+// edge-manifold and closed, so nothing downstream of the blend refuses it.
+//
+// Dropping the vertex first costs nothing: its whole fan is one flat piece of face,
+// so re-triangulating the ring it leaves behind reproduces the same face, with the
+// same boundary, out of vertices the inset can all seat. Geometry-exact, like
+// splitEdge — the solid, its dihedrals and its surface grouping are unchanged.
+void dissolveSwallowedVertices(MergedMesh& m, const std::map<EdgeKey, EdgeClass>& crease,
+                               const std::set<EdgeKey>& blended, double size, bool isChamfer)
+{
+  if (blended.empty()) return;
+  std::set<int> onCrease;
+  for (const auto& [key, ec] : crease) {
+    onCrease.insert(key.first);
+    onCrease.insert(key.second);
+  }
+  // How far each blended edge sets its faces back — the band it takes over.
+  std::vector<std::pair<EdgeKey, double>> band;
+  for (const EdgeKey& key : blended) {
+    const auto it = crease.find(key);
+    if (it == crease.end()) continue;
+    band.emplace_back(key, isChamfer ? size
+                                     : size * std::tan(0.5 * it->second.dihedralDeg * M_PI / 180.0));
+  }
+
+  for (int u = 0; u < static_cast<int>(m.pos.size()); ++u) {
+    if (onCrease.count(u)) continue;  // it has a boundary of its own to mitre against
+    const Vector3d p = m.pos[u];
+    bool swallowed = false;
+    for (const auto& [key, sb] : band) {
+      const Vector3d a = m.pos[key.first], ab = m.pos[key.second] - a;
+      const double l2 = ab.squaredNorm();
+      const double s = l2 > 1e-18 ? std::clamp((p - a).dot(ab) / l2, 0.0, 1.0) : 0.0;
+      if ((p - Vector3d(a + s * ab)).norm() < sb - 1e-9) { swallowed = true; break; }
+    }
+    if (!swallowed) continue;
+
+    std::vector<int> tris;
+    for (size_t t = 0; t < m.tris.size(); ++t)
+      for (const int w : m.tris[t].v)
+        if (w == u) { tris.push_back(static_cast<int>(t)); break; }
+    if (tris.size() < 3) continue;
+    const Vector3d nrm = m.tris[tris.front()].normal;
+    bool flat = true;
+    for (const int t : tris) flat = flat && m.tris[t].normal.dot(nrm) > 1 - 1e-12;
+    if (!flat) continue;  // not one flat fan: dropping it would move the surface
+
+    const std::vector<int> ring = ringAround(m, tris, u);
+    if (ring.size() < 3) continue;
+    std::vector<Vector3d> poly;
+    poly.reserve(ring.size());
+    for (const int w : ring) poly.push_back(m.pos[w]);
+    std::vector<std::array<int, 3>> flatTris;
+    if (!earClipPlanar(poly, nrm, flatTris)) continue;
+
+    const uint32_t id = m.tris[tris.front()].originalID;
+    const std::set<int> drop(tris.begin(), tris.end());
+    std::vector<Tri> next;
+    next.reserve(m.tris.size() - tris.size() + flatTris.size());
+    for (size_t t = 0; t < m.tris.size(); ++t)
+      if (!drop.count(static_cast<int>(t))) next.push_back(m.tris[t]);
+    for (const auto& t : flatTris)
+      next.push_back(Tri{{ring[t[0]], ring[t[1]], ring[t[2]]}, nrm, id});
+    m.tris = std::move(next);
+  }
+}
+
 // The dominant blend construction. Fields captured once so the per-edge and
 // per-vertex helpers read one context.
 struct Blender
@@ -2466,7 +2627,7 @@ std::shared_ptr<const Geometry> buildBlend(
     return target;
   }
 
-  const MergedMesh m0 = mergeMesh(target->getManifold().GetMeshGL64());
+  MergedMesh m0 = mergeMesh(target->getManifold().GetMeshGL64());
   const double thresholdDeg = node.min_angle >= 0 ? node.min_angle : kDefaultCreaseThresholdDeg;
 
   // The selection brush (the union of the node's brush children), as the solid a
@@ -2557,13 +2718,15 @@ std::shared_ptr<const Geometry> buildBlend(
   // degenerate region (two fillets colliding along an exact tangency line) it can
   // turn a marginally-valid over-size case non-manifold; there, fall back to the
   // un-subdivided build, which is never worse than before this floor existed.
-  MergedMesh mSub = m0;
   // The edges to densify are exactly the ones buildOn will blend: the eligible
   // set computed on the raw mesh at the same two thresholds, tool-sign filtered.
   // Taking it from selectCreaseEdges (rather than the feature key alone) means a
   // shallow tangent stretch carried into the selection by crease-following — a
   // tee's tangent sides — is given stations too, so a straight fillet there holds
-  // its profile instead of tapering to the corner-distorted ends.
+  // its profile instead of tapering to the corner-distorted ends. The same set says
+  // which face vertices the blend swallows, dissolved off both meshes before either
+  // build so the raw fallback carries the fix too.
+  MergedMesh mSub;
   {
     const std::map<EdgeKey, std::vector<int>> adj0 = buildEdgeAdjacency(m0.tris);
     const CreaseSelection sel0 =
@@ -2571,6 +2734,8 @@ std::shared_ptr<const Geometry> buildBlend(
     std::set<EdgeKey> toSplit;
     for (const auto& key : sel0.eligible)
       if (sel0.crease.at(key).concave ? node.concave : node.convex) toSplit.insert(key);
+    dissolveSwallowedVertices(m0, sel0.crease, toSplit, node.size, isChamfer);
+    mSub = m0;
     subdivideLongCreaseEdges(mSub, toSplit, kAlongSweep * node.size);
   }
   const bool didSubdivide = mSub.tris.size() != m0.tris.size();
