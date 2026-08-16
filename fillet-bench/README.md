@@ -58,7 +58,10 @@ the fragment count the model actually achieves at those defaults, from
 check 1 made visible** — the same solid, arriving two ways. If they differ, the
 classifier is reading render variables, which is what promise 2 forbids.
 
-Models carrying no curvature render once; `expect.txt` marks them `-`.
+Models carrying no curvature render once; `expect.txt` marks them `-`. So do the
+two that carry *two* facet scales at once, marked `skip`: no single forced `$fn`
+can reproduce a stock render that used 30 fragments for a cylinder and 7 for the
+fillet, so the second tile would compare two different solids and prove nothing.
 
 `mesh.py` reads the OFF and answers A1 and A3:
 
@@ -141,7 +144,7 @@ The claim that a truncated open bead shows up in `bnd` and nowhere else is
   even count — two — to the single edge it has left.
 
 So no edge can come out carried by exactly one face. `bnd` is zero on a
-correct solid and zero on a broken one, and 37 of 37 tiles read zero. The
+correct solid and zero on a broken one, and 48 of 48 tiles read zero. The
 non-manifold edges that do appear are carried by **four** faces, never three,
 which is the same parity argument seen from the other side.
 
@@ -174,24 +177,49 @@ elbow, equal radii), otherwise the roll-field loft. The page puts one tile on
 each class, so a change that moves a corner from one branch to the other is
 visible as a change in *shape*, side by side with the classes that did not move:
 
-| tiles | class |
+| tiles | measured class |
 |---|---|
-| S5-T01…T07 | `torus` — lbracket both elbows, box_step both elbows, rib, pocket, shallow_crease |
-| S5-T08, T09 | `loft:T`, `loft:star` — cylinder junctions |
-| S5-T10 | `loft:oblique` — the same tee off-axis |
-| S5-T11 | `loft:partial` — a built bead running into a refused crease |
-| S5-T12 | `loft:curved` — 48-facet trunk, 10-facet branch |
+| S5-T01…T04 | `tube=2` — exact torus, lbracket both elbows and box_step both elbows |
+| S5-T05 | `tube=4 saddle=4` — rib: torus and saddle in one model |
+| S5-T06 | `tube=4 cap=4` — pocket |
+| S5-T07 | `tube=0` at stock, `tube=2` at `min_angle = 25` — shallow_crease's fold is not selected at stock, so at stock there is no fold corner to dispatch |
+| S5-T08, T10 | `flat=2`, `flat=4` — the flat ear-clip, on the tee and on the same tee off-axis |
+| S5-T09 | `cap=8` — cross has no mixed corner at all, only single-sign spherical caps |
+| S5-T11 | `saddle=6` — a built bead running into a refused crease |
+| S5-T12 | `fan=4` — the crude centroid fan, 48-facet trunk against 10-facet branch |
 
-**The class in the caption is documented, not measured.** `fillet()` echoes one
-line per call — edges blended, verts, tris — and says nothing about which corner
-path fired, and nothing here instruments it. The labels record what each corner
-is *expected* to take, which is exactly why a tile that stops looking like its
-label is a finding rather than a repaint.
+**The class in the caption is measured.** `fillet()` echoes a second line per
+call —
+
+```
+ECHO: fillet: corners tube=N capTri=N cap=N coons=N saddle=N flat=N fan=N weld=N none=N
+```
+
+— and `corner-sheet.sh` reads it back out of the log of the very render that made
+the picture, puts a label on it in the caption and the literal counters in
+`INDEX.md`. A label that stops matching its counters is now a mechanical finding
+rather than an eyeball one.
+
+**Five of these labels were expectations that measurement contradicted** when the
+echo landed: `tee` and `tee_oblique` were captioned `loft:T` and `loft:oblique`
+and actually close on the flat ear-clip; `cross` was `loft:star` and has no mixed
+corner at all; `mixed_fn` was `loft:curved` and falls to the centroid fan;
+`refused_neighbour` was `loft:partial` and is the saddle field. Of the seven
+`torus` rows, four came through unchanged and three were incomplete rather than
+wrong: rib is half saddle, pocket half cap, and shallow_crease has no fold corner
+at all at stock defaults because the fold is not selected there. **Five of twelve
+labels wrong and three more incomplete** is the argument for having an
+instrument.
+
+The counters are **per call, not per corner**, so a model that mixes classes —
+rib, pocket, step_notch — is captioned with the mix rather than with the one
+class its tile happens to aim at.
 
 `sheets/INDEX.md` carries the page in its own table: tile, model, corner,
-dispatch and the literal `--camera` string, so a tile id resolves to model +
-corner + camera without opening an image. A full `./sheet.sh` runs this page
-last, before the PDF; run standalone it re-bundles `sheets/sheets.pdf` itself.
+dispatch label, the measured counter line and the literal `--camera` string, so a
+tile id resolves to model + corner + camera without opening an image. A full
+`./sheet.sh` runs this page last, before the PDF; run standalone it re-bundles
+`sheets/sheets.pdf` itself.
 
 ## Sheet 6 — the torus-gate boundary page
 
@@ -219,19 +247,51 @@ moving.
 | S6-T10 | `step_notch`, the inverse elbow: two concave and one convex at one vertex |
 | S6-T11, T12 | controls that must still take the torus path — the same square elbow rotated 30° about z at a third the scale, and at 3× the scale with 3× the radius |
 
-**These twelve are not in `expect.txt`, on purpose.** Sheets 1–4 and the 353-cell
-sweep are a measured baseline; adding twelve unmeasured models to the corpus
-would move every headline count in this file for no gain. They are staged here
-instead, and `corner-sheet6.sh` is self-contained — it renders and montages only
-sheet 6, then re-bundles the PDF.
+**Eleven of the twelve are now in `expect.txt`.** They were staged outside the
+corpus while unmeasured, on the argument that adding unmeasured models to a
+measured baseline moves every headline count for no gain. They are measured now:
+each of the eleven is VALID at every cell of the sweep's own `$fn` and radius
+axes, so they are appended to `expect.txt` — appended, not sorted in, because a
+tile id is only stable while that file keeps its order — and the corpus grows
+from 24 models and 353 cells to 35 and 452. `step_notch` is the exception and is
+still staged here alone. `corner-sheet6.sh` remains self-contained: it renders
+and montages only sheet 6, then re-bundles the PDF.
 
-**The dispatch column is documented, not measured**, exactly as on sheet 5.
-Nothing instruments which corner path fired; the labels record what each corner
-is *expected* to take. **The mesh verdict is measured**: every tile exports an
-exact ASCII STL from the same invocation set as its picture and runs `mesh.py` on
-it at weld 1e-6, and the verdict is on the label. These are new models in new
-territory and a broken one is the point of the page, so the tile says so itself
-rather than leaving it to a footnote.
+All eleven are marked `-` or `skip`, so none of them adds a second `$fn` tile,
+and sheets 1–4 come out at exactly 48 tiles — four full sheets, which is what
+keeps the corner pages at 5 and 6. Two subtleties worth writing down: the `-` is
+a statement about the *model*, and the fillet's own arcs do honour `$fn`
+(`elbow_big` at R = 6 forced to `$fn = 19` returns the stock-default solid
+exactly, v=597 e=1785 f=1190); and `elbow_curved_endface` and `elbow_curved_wall`
+are `skip` rather than a number because each carries two facet scales at once —
+a 30-facet cylinder and a 7-facet fillet — so no single `$fn` reproduces stock,
+the same reason `mixed_fn` is `skip`.
+
+**The dispatch column is measured**, exactly as on sheet 5: `corner-sheet6.sh`
+reads the `fillet: corners …` echo back out of the log of the render that made
+the picture. The oblique and dihedral rows were captioned `loft:*` because that
+is what those corners took before the exact canal-surface corner landed; all four
+are `tube` now. **The mesh verdict is measured too**: every tile exports an exact
+ASCII STL from the same invocation set as its picture and runs `mesh.py` on it at
+weld 1e-6, and the verdict is on the label. These are models in new territory and
+a broken one is the point of the page, so the tile says so itself rather than
+leaving it to a footnote.
+
+Three things the promotion sweep found that one stock-defaults tile could not:
+
+- **`elbow_thin_arm` is not refused and is not crowded.** Its label said "refuse
+  or crowd"; at stock it is `tube=2` with zero warnings, arm 3 thick against
+  2R = 4 and all. The one radius where something gives is r = 1.5, which drops to
+  `saddle=2` and a mesh of 84 vertices against the usual 219 — still VALID.
+- **`elbow_rot30` at r = 1.5 refuses the whole blend.** `WARNING: fillet: the
+  blend left 0 open edge(s) and 2 non-manifold edge(s); the model is returned
+  unchanged` — 2R = 3 is exactly the standing arm's thickness. The safety net
+  works, the model comes back as the bare L, and the cell reads VALID with
+  `warn=1`. It is the only warning anywhere in the enlarged corpus.
+- **r = 0.9 is a dispatch discontinuity** on three models. `elbow_facet_endface`,
+  `elbow_oblique50` and `elbow_oblique75` are `tube` at 0.8 and at 1.0 and fall to
+  `saddle=2` at 0.9 exactly. All three are VALID there; nothing on any sheet would
+  have shown it, because no sheet renders those models at r = 0.9.
 
 Two of the twelve were *rebuilt* after their first render, and the reason is worth
 keeping: a "curved" wall at stock defaults is `$fa`-bound to 12° facets, so a
@@ -242,8 +302,8 @@ curved-face model now uses a 9.5 mm cylinder so the crease terminus is three
 facets wide, and the facet model kinks by 10° exactly at the crease.
 
 `sheets/INDEX.md` carries the page in a `## Gate boundary (sheet 6)` table: tile,
-model, what it probes, expected dispatch, the measured mesh line and the literal
-`--camera` string. One caution on that file — `corner-sheet.sh` truncates the
+model, what it probes, the dispatch label, the measured counter line, the
+measured mesh line and the literal `--camera` string. One caution on that file — `corner-sheet.sh` truncates the
 index from its own `## Corner dispatch` heading to the end, so running it *after*
 this page drops the sheet-6 table; re-run `./corner-sheet6.sh` to put it back.
 
@@ -313,11 +373,20 @@ results do not move, and that was checked rather than assumed — all 24 models
 were rendered before and after the edit and every mesh statistic is identical.
 
 The sweep is a **cross, not a grid**: the `$fn` axis is walked at the model's own
-radius and the radius axis at stock defaults, because the full product is 24 × 11
+radius and the radius axis at stock defaults, because the full product is 35 × 11
 × 9 renders and most of it is redundant. `--grid` asks for the product anyway on
 a filtered model. Planar models get no `$fn` axis at all — `expect.txt` marks
 them `-`, and sweeping `$fn` over a planar model tests nothing (one whole
 reported series in this effort was vacuous that way).
+
+That last sentence needs one correction, found while promoting the elbow family:
+a planar *source* does not mean a `$fn`-invariant *result*, because the blend's
+own arcs are tessellated from `$fn` like anything else. `elbow_big` is two cubes
+and reads v=237 at `$fn`=8, v=597 at stock and v=2995 at `$fn`=64. What the `-`
+buys is therefore narrower than the trap claims — it is the A2 *check* that is
+vacuous on a planar source, not the axis — and the eleven promoted elbows were
+walked over the full `$fn` axis by hand before being marked `-`, VALID at every
+one of 8, 10, 12, 14, 16, 19, 24, 26, 32, 48 and 64.
 
 Every row is appended to `results/sweep.tsv` as it completes and a re-run skips
 rows already there, so a run killed by the stall watchdog leaves everything it
@@ -580,8 +649,13 @@ control it always was, so the pair still separates a real difference from a
 reader inventing one — it now does it by agreeing rather than by disagreeing.
 
 ## Known gaps, stated rather than left silent
-- **The sweep is one binary deep.** All 353 rows of `results/sweep.tsv` are
-  `md5 11b6b3b1`; the pre-fix table in `results/sweep-21cd49a8.tsv` is all
+- **The sweep is one binary deep.** All 452 rows of `results/sweep.tsv` are
+  `md5 dfb85441` — the enlarged 35-model corpus, **452 of 452 VALID**, no pinched
+  vertex, no shed fragment, no cell whose three runs disagreed, and one warning
+  in the whole table (`elbow_rot30` at r=1.5, where the blend is refused and the
+  model is returned unchanged). The previous table, 353 rows on the previous
+  build, is kept beside it as `results/sweep-f8631365.tsv`, and the pre-fix table
+  in `results/sweep-21cd49a8.tsv` is all
   `21cd49a8`. The binary was replaced under this instrument four times in one
   session, so each table was taken against a copy pinned aside; neither says
   anything about any other build, and the `bin` column is there so that stays

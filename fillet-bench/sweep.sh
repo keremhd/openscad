@@ -518,7 +518,12 @@ fi
 # expect.txt is the model list and the authority on which models have a $fn axis
 # at all: "-" and "skip" mean no curvature, and sweeping $fn over a planar model
 # tests nothing (trap 7). One whole reported series has been vacuous that way.
-models=(); tess=()
+#
+# Two different marks land a model outside the $fn axis and they are not the
+# same finding, so `twoscale` remembers which: "-" is a planar source, "skip" is
+# a source carrying two facet scales at once, where no single forced $fn
+# reproduces the stock render at all and the axis is not vacuous but unaskable.
+models=(); tess=(); twoscale=()
 while read -r name fn rest; do
   [[ -z $name || $name == \#* ]] && continue
   if [[ -n $MODEL_FILTER ]]; then
@@ -528,6 +533,7 @@ while read -r name fn rest; do
   fi
   models+=($name)
   [[ $fn == - || $fn == skip ]] || tess+=($name)
+  [[ $fn == skip ]] && twoscale+=($name)
 done < expect.txt
 
 (( ${#models} )) || { print -u2 "no models matched '$MODEL_FILTER'"; exit 1; }
@@ -550,7 +556,11 @@ for m in $models; do
   if (( has_fn )); then
     for fn in $FN_AXIS; do emit $m $fn def; done    # $fn axis at the model's own radius
   else
-    print "  - $m has no curvature; \$fn axis skipped (trap 7)"
+    if (( ${twoscale[(Ie)$m]} )); then
+      print "  - $m carries two facet scales; no single \$fn reproduces stock, axis skipped"
+    else
+      print "  - $m has no curvature; \$fn axis skipped (trap 7)"
+    fi
   fi
   for r in $R_AXIS; do
     [[ $r == $own ]] && continue                    # already covered by the defaults row

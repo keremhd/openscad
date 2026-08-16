@@ -1,0 +1,98 @@
+binary: ../build/OpenSCAD.app/Contents/MacOS/OpenSCAD
+        built Aug 16 13:33:34 2026
+sources newer than the binary:
+
+48 tiles, 4 sheets
+
+S1-T01 tee defaults -> VALID warnings=0
+S1-T02 tee fn=16 -> VALID warnings=0
+S1-T03 tee_oblique defaults -> VALID warnings=0
+S1-T04 tee_oblique fn=16 -> VALID warnings=0
+S1-T05 tee_small defaults -> VALID warnings=0
+S1-T06 tee_small fn=10 -> VALID warnings=0
+S1-T07 tee_large defaults -> VALID warnings=0
+S1-T08 tee_large fn=30 -> VALID warnings=0
+S1-T09 cross defaults -> VALID warnings=0
+S1-T10 cross fn=19 -> VALID warnings=0
+S1-T11 boss_plate defaults -> VALID warnings=0
+S1-T12 boss_plate fn=26 -> VALID warnings=0
+S2-T01 two_bosses defaults -> VALID warnings=0
+S2-T02 two_bosses fn=26 -> VALID warnings=0
+S2-T03 pipe_into_face defaults -> VALID warnings=0
+S2-T04 pipe_into_face fn=19 -> VALID warnings=0
+S2-T05 dome defaults -> VALID warnings=0
+S2-T06 dome fn=30 -> VALID warnings=0
+S2-T07 hole_plate defaults -> VALID warnings=0
+S2-T08 hole_plate fn=22 -> VALID warnings=0
+S2-T09 bevel_boss defaults -> VALID warnings=0
+S2-T10 bevel_boss fn=29 -> VALID warnings=0
+S2-T11 cyl_control defaults -> VALID warnings=0
+S2-T12 cyl_control fn=30 -> VALID warnings=0
+S3-T01 lbracket defaults -> VALID warnings=0
+S3-T02 box_step defaults -> VALID warnings=0
+S3-T03 rib defaults -> VALID warnings=0
+S3-T04 thin_slab defaults -> VALID warnings=0
+S3-T05 pocket defaults -> VALID warnings=0
+S3-T06 chamfer_box defaults -> VALID warnings=0
+S3-T07 brush_one_edge defaults -> VALID warnings=0
+S3-T08 cube_control defaults -> VALID warnings=0
+S3-T09 mixed_fn defaults -> VALID warnings=0
+S3-T10 rib_into_boss defaults -> VALID warnings=0
+S3-T11 rib_into_boss fn=26 -> VALID warnings=0
+S3-T12 refused_neighbour defaults -> VALID warnings=0
+S4-T01 shallow_crease defaults -> VALID warnings=0
+S4-T02 elbow_big defaults -> VALID warnings=0
+S4-T03 elbow_crowded defaults -> VALID warnings=0
+S4-T04 elbow_curved_endface defaults -> VALID warnings=0
+S4-T05 elbow_curved_wall defaults -> VALID warnings=0
+S4-T06 elbow_dihedral120 defaults -> VALID warnings=0
+S4-T07 elbow_dihedral60 defaults -> VALID warnings=0
+S4-T08 elbow_facet_endface defaults -> VALID warnings=0
+S4-T09 elbow_oblique50 defaults -> VALID warnings=0
+S4-T10 elbow_oblique75 defaults -> VALID warnings=0
+S4-T11 elbow_rot30 defaults -> VALID warnings=0
+S4-T12 elbow_thin_arm defaults -> VALID warnings=0
+sheets/sheet-1.png
+sheets/sheet-2.png
+sheets/sheet-3.png
+sheets/sheet-4.png
+
+binary: ../build/OpenSCAD.app/Contents/MacOS/OpenSCAD
+        built Aug 16 13:33:34 2026
+sources newer than the binary:
+
+12 corner tiles -> sheets/sheet-5.png
+
+S5-T01 lbracket front elbow (6,0,6) [torus tube=2] tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=53 none=0 cam=40.855,-34.855,30.398,6,0,6 warnings=0
+S5-T02 lbracket back elbow (6,30,6) mirrored [torus tube=2] tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=53 none=0 cam=40.855,64.855,30.398,6,30,6 warnings=0
+S5-T03 box_step front elbow (24,0,10) [torus tube=2] tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=30 none=0 cam=62.023,-38.023,36.616,24,0,10 warnings=0
+S5-T04 box_step back elbow (24,40,10) mirrored [torus tube=2] tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=30 none=0 cam=62.023,78.023,36.616,24,40,10 warnings=0
+S5-T05 rib rib end on plate (20,2.5,2.5) [torus + saddle tube=4 saddle=4] tube=4 capTri=16 cap=0 coons=0 saddle=4 flat=0 fan=0 weld=100 none=0 cam=39.695,22.195,18.256,20,2.5,2.5 warnings=0
+S5-T06 pocket pocket floor corner (12,12,-2) [torus + cap tube=4 cap=4] tube=4 capTri=8 cap=4 coons=0 saddle=0 flat=0 fan=0 weld=56 none=0 cam=-4.059,-4.059,33.330,12,12,-2 warnings=0
+S5-T07 shallow_crease fold end face, ridge x=60 (60,0,16..36) [stock tube=0; min_angle 25 tube=2] tube=0 capTri=8 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=40 none=0 / tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=40 none=0 cam=107.976,-119.939,79.972,60,0,26 warnings=0
+S5-T08 tee cylinder junction (5,0,10) [flat ear-clip flat=2] tube=0 capTri=0 cap=0 coons=0 saddle=0 flat=2 fan=0 weld=62 none=0 cam=21.963,-35.926,28.463,4,0,10.5 warnings=0
+S5-T09 cross three-axis star (0,0,0) [spherical cap cap=8] tube=0 capTri=0 cap=8 coons=0 saddle=0 flat=0 fan=0 weld=199 none=0 cam=33.486,-33.486,33.486,0,0,0 warnings=0
+S5-T10 tee_oblique oblique junction (5,0,11.5) [flat ear-clip flat=4] tube=0 capTri=0 cap=0 coons=0 saddle=0 flat=4 fan=0 weld=58 none=0 cam=21.963,-35.926,29.463,4,0,11.5 warnings=0
+S5-T11 refused_neighbour refused crease (7.5,4,7.44) + built bead [saddle saddle=6] tube=0 capTri=14 cap=0 coons=0 saddle=6 flat=0 fan=0 weld=122 none=0 cam=35.784,-16.971,30.077,7.5,0,7.45 warnings=0
+S5-T12 mixed_fn 48/10-facet junction (6,0,10) [centroid fan fan=4] tube=0 capTri=0 cap=0 coons=0 saddle=0 flat=0 fan=4 weld=140 none=0 cam=25.412,-40.825,30.912,5,0,10.5 warnings=0
+sheets/sheet-5.png
+wrote sheets/sheets.pdf  (6 A4 pages: sheet-6.png)
+binary: ../build/OpenSCAD.app/Contents/MacOS/OpenSCAD
+        built Aug 16 13:33:34 2026
+
+12 gate-boundary tiles -> sheets/sheet-6.png
+
+S6-T01 elbow_oblique75 [canal tube=2] tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=52 none=0 -> VALID v=238 e=708 f=472 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06 warnings=0
+S6-T02 elbow_oblique50 [canal tube=2] tube=2 capTri=8 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=46 none=0 -> VALID v=208 e=618 f=412 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06 warnings=0
+S6-T03 elbow_dihedral60 [canal tube=2] tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=52 none=0 -> VALID v=236 e=702 f=468 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06 warnings=0
+S6-T04 elbow_dihedral120 [canal tube=4] tube=4 capTri=12 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=48 none=0 -> VALID v=256 e=762 f=508 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06 warnings=0
+S6-T05 elbow_curved_endface [coons=2 at stock] tube=0 capTri=2 cap=0 coons=2 saddle=0 flat=0 fan=0 weld=72 none=0 -> VALID v=271 e=807 f=538 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06 warnings=0
+S6-T06 elbow_curved_wall [coons=2 at stock, tube=2 at fn 16/64] tube=0 capTri=10 cap=0 coons=2 saddle=0 flat=0 fan=0 weld=56 none=0 -> VALID v=263 e=783 f=522 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06 warnings=0
+S6-T07 elbow_facet_endface [one of each: tube=1 coons=1] tube=1 capTri=10 cap=0 coons=1 saddle=0 flat=0 fan=0 weld=55 none=0 -> VALID v=256 e=762 f=508 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06 warnings=0
+S6-T08 elbow_crowded [torus tube=2, not crowded out] tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=25 none=0 -> VALID v=234 e=696 f=464 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06 warnings=0
+S6-T09 elbow_thin_arm [torus tube=2, no refusal] tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=46 none=0 -> VALID v=219 e=651 f=434 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06 warnings=0
+S6-T10 step_notch [torus + cap tube=3 cap=1] tube=3 capTri=10 cap=1 coons=0 saddle=0 flat=0 fan=0 weld=50 none=0 -> VALID v=253 e=753 f=502 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06 warnings=0
+S6-T11 elbow_rot30 [torus tube=2] tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=53 none=0 -> VALID v=239 e=711 f=474 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06 warnings=0
+S6-T12 elbow_big [torus tube=2] tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=52 none=0 -> VALID v=597 e=1785 f=1190 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06 warnings=0
+sheets/sheet-6.png
+wrote sheets/sheets.pdf  (6 A4 pages: sheet-6.png)

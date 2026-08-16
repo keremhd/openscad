@@ -33,3 +33,27 @@ mixed_fn                skip    CONTROL, expect clean; two facet scales in one m
 rib_into_boss           26      cylinder r=8; the curved-arrival seam vertex
 refused_neighbour       -       A3; refuses 5 creases next to built ones
 shallow_crease          -       documentation case; the min_angle exhibit, two solids per tile
+#
+# The torus-gate boundary family, sheet 6's models, promoted into the corpus.
+# They were staged outside it while unmeasured; each is now VALID at every cell
+# of the sweep's own fn and radius axes, so the gate is walked by the sweep and
+# not only by one contact-sheet render. Appended rather than sorted in, because
+# a tile id is only stable while this file keeps its order.
+#
+# All eleven are planar sources, so "-" for the same reason lbracket carries it.
+# That is a statement about the MODEL: the fillet's own arcs do honour $fn (at
+# R = 6, elbow_big forced to $fn = 19 returns the stock-default solid exactly),
+# and the two models whose source does carry curvature are marked "skip" because
+# they carry two facet scales at once and no single $fn reproduces stock.
+#
+elbow_big               -       CONTROL, lbracket at 3x size and 3x radius
+elbow_crowded           -       arms 6 thick against 2R = 5.8
+elbow_curved_endface    skip    cylinder r=9.5 (30 facets) + fillet R=2 (7): two scales
+elbow_curved_wall       skip    cylinder r=60 (30 facets) + fillet R=2 (7): two scales
+elbow_dihedral120       -       120deg trough, leaning wall
+elbow_dihedral60        -       60deg trough, square end face
+elbow_facet_endface     -       end face kinks 10deg at the crease
+elbow_oblique50         -       crease meets the end face at 50deg
+elbow_oblique75         -       crease meets the end face at 75deg
+elbow_rot30             -       CONTROL, square elbow rotated 30deg about z
+elbow_thin_arm          -       arm 3 thick against 2R = 4
