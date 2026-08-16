@@ -346,7 +346,13 @@ CreaseSelection selectCreaseEdges(const MergedMesh& m,
     }
     // A seam radiating from the junction has no partner at its start vertex, but
     // it runs straight on past its far end w — where a collinear continuation
-    // (other than back to v) marks it a seam too.
+    // (other than back to v) marks it a seam too. A seam is only ever picked up
+    // by TURNING onto it, though, so this end of the test is off when the
+    // candidate carries on straight from the edge we arrived on: an intersection
+    // curve running out to a tangency straightens as it goes, and every one of
+    // its own continuations is collinear like a seam's.
+    const Vector3d din = (m.pos[v] - m.pos[u]).normalized();
+    if (din.dot(dw) >= cosStraight) return false;
     for (const int z : vinc[w]) {
       if (z == v) continue;
       if ((m.pos[z] - m.pos[w]).normalized().dot(dw) >= cosStraight) return true;
