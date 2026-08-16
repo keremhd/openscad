@@ -614,6 +614,11 @@ struct Blender
   // consumer — surface pass, strips, seams, corner patches — moves together.
   std::map<std::pair<int, int>, Vector3d> insetCollapse;
 
+  // Face triangles whose emitted corners are not their own vertices' insets,
+  // because flipInvertedInsets has re-cut the diagonal they share with a
+  // neighbour. Keyed by source triangle; the three points are already inset.
+  std::map<int, std::array<Vector3d, 3>> surfaceOverride;
+
   // Vertices where selected edges of BOTH signs meet — the mixed corners whose
   // strips otherwise blade. Populated by computeMixedVerts() before any emit.
   // Everything keyed off this set (the pulled-in cross-section, the surface
@@ -1398,6 +1403,10 @@ struct Blender
   // corner-cut polygon, falling back to the plain triangle if the clip refuses.
   void emitSurfaceTri(int ti)
   {
+    if (const auto it = surfaceOverride.find(ti); it != surfaceOverride.end()) {
+      out.tri(it->second[0], it->second[1], it->second[2]);
+      return;
+    }
     const std::vector<Vector3d> poly = surfacePolygon(ti);
     if (poly.size() == 3) {
       out.tri(poly[0], poly[1], poly[2]);
@@ -1406,6 +1415,109 @@ struct Blender
     if (!fillPlanarPolygon(poly)) {
       const auto& v = m.tris[ti].v;
       out.tri(insetForTri(v[0], ti), insetForTri(v[1], ti), insetForTri(v[2], ti));
+    }
+  }
+
+  // --- the surface's own triangulation --------------------------------------
+
+  // The triangles of each smooth surface, by surface id.
+  std::map<int, std::vector<int>> surfaceGroups() const
+  {
+    std::map<int, std::vector<int>> g;
+    for (size_t t = 0; t < m.tris.size(); ++t) g[surfaceOf[t]].push_back(static_cast<int>(t));
+    return g;
+  }
+
+  // A surface is planar when every one of its triangles carries the same normal.
+  // Only there is "which side of the face is this triangle on" a question a signed
+  // area answers, and only there is one diagonal as good as another.
+  bool surfacePlanar(const std::vector<int>& tris, Vector3d& nrm) const
+  {
+    nrm = m.tris[tris.front()].normal;
+    for (const int t : tris)
+      if (m.tris[t].normal.dot(nrm) < 1 - 1e-12) return false;
+    return true;
+  }
+
+  // Where the inset turns a face triangle inside out and the surface's boundary is
+  // not what crossed, the fault is in the diagonal rather than in the points: two
+  // triangles sharing an interior seam of the source triangulation have been
+  // carried to mitres that put the seam on the wrong side of the quad they span,
+  // and the pair comes back as a fold lying in the face. Flipping the seam costs
+  // nothing — it moves no point, so every strip, kept seam and corner patch still
+  // seats exactly where it did and the surface keeps the same boundary edges — and
+  // it takes both triangles the right way round again.
+  //
+  // Only a seam interior to one planar surface is eligible, and only a flip that
+  // leaves fewer triangles turned over is taken, so the pass either improves the
+  // face or does nothing to it. A boundary link that has reversed is a different
+  // fault, in the offset itself rather than in the triangulation, and this does not
+  // touch it.
+  void flipInvertedInsets()
+  {
+    for (const auto& [S, tris] : surfaceGroups()) {
+      Vector3d nrm;
+      if (tris.size() < 2 || !surfacePlanar(tris, nrm)) continue;
+
+      // One inset per vertex of this surface. A vertex the surface reaches through
+      // two separate fans has two, and no single answer to seat a flipped triangle
+      // on; it is left out, along with the mixed corners whose face triangles are
+      // re-triangulated round the pulled-in strip feet.
+      std::map<int, Vector3d> at;
+      std::set<int> barred;
+      for (const int t : tris)
+        for (const int u : m.tris[t].v) {
+          const Vector3d p = insetForTri(u, t);
+          const auto [it, ins] = at.emplace(u, p);
+          if (!ins && (it->second - p).squaredNorm() > 1e-24) barred.insert(u);
+          if (mixedVerts.count(u)) barred.insert(u);
+        }
+
+      std::map<int, std::array<int, 3>> cur;
+      for (const int t : tris) cur[t] = m.tris[t].v;
+      const auto area = [&](const std::array<int, 3>& f) {
+        return (at.at(f[1]) - at.at(f[0])).cross(at.at(f[2]) - at.at(f[0])).dot(nrm);
+      };
+      bool any = false;
+      for (int pass = 0; pass < 8; ++pass) {
+        std::map<EdgeKey, std::vector<int>> use;
+        for (const auto& [t, f] : cur)
+          for (int i = 0; i < 3; ++i)
+            use[{std::min(f[i], f[(i + 1) % 3]), std::max(f[i], f[(i + 1) % 3])}].push_back(t);
+        bool flipped = false;
+        for (const auto& [e, ts] : use) {
+          if (ts.size() != 2) continue;  // a boundary of the surface, not a seam in it
+          const std::array<int, 3>&f0 = cur[ts[0]], &f1 = cur[ts[1]];
+          int a = -1, b = -1, c = -1, d = -1;
+          for (int i = 0; i < 3; ++i)
+            if ((f0[i] == e.first && f0[(i + 1) % 3] == e.second) ||
+                (f0[i] == e.second && f0[(i + 1) % 3] == e.first)) {
+              a = f0[i];
+              b = f0[(i + 1) % 3];
+              c = f0[(i + 2) % 3];
+            }
+          for (const int x : f1)
+            if (x != a && x != b) d = x;
+          if (a < 0 || d < 0) continue;
+          if (barred.count(a) || barred.count(b) || barred.count(c) || barred.count(d)) continue;
+          if (use.count({std::min(c, d), std::max(c, d)})) continue;  // the flip already exists
+          const int was = (area(f0) < -1e-12) + (area(f1) < -1e-12);
+          if (!was) continue;
+          const std::array<int, 3> g0{a, d, c}, g1{d, b, c};
+          const double s0 = area(g0), s1 = area(g1);
+          if ((s0 < -1e-12) + (s1 < -1e-12) >= was) continue;
+          if (std::abs(s0) < 1e-18 || std::abs(s1) < 1e-18) continue;
+          cur[ts[0]] = g0;
+          cur[ts[1]] = g1;
+          flipped = any = true;
+          break;
+        }
+        if (!flipped) break;
+      }
+      if (!any) continue;
+      for (const int t : tris)
+        if (cur[t] != m.tris[t].v)
+          surfaceOverride[t] = {at.at(cur[t][0]), at.at(cur[t][1]), at.at(cur[t][2])};
     }
   }
 
@@ -2832,6 +2944,7 @@ struct Blender
     prepareShared();
     computeCornerStations();
     repairInsetFolds();
+    flipInvertedInsets();
     for (size_t t = 0; t < m.tris.size(); ++t) {
       // Inset each vertex on the side triangle t sits on — sector-local, so a
       // facet of a split wall sets back along its own sector rather than mitring
