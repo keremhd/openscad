@@ -328,3 +328,39 @@ curves as its seams, and a **smooth** transfinite gap-filler seeded on the exist
 tangent-Bézier field — i.e. refine `emitCoonsSaddle`, do **not** replace it with a
 trim blend. That is Phase-3-scale effort for a marginal visual gain over the current
 loft, and is not recommended unless the sail becomes a priority on real models.
+
+---
+
+## 8. §7 is wrong — the corner is a torus patch (built 2026-08-16)
+
+§7 concluded the sail is intrinsic because "the concave fillet and the convex corner
+share no point". That reasoning modelled the target as *open* only (round the convex
+edges) and looked for a **static** rolling-ball surface through the vertex. The real
+target — `gt.scad`, `dil ero ero dil`, i.e. **close then open** — has no such gap, and
+the corner is one exact analytic surface:
+
+Close first, and the eroded solid's cross-section at the elbow is not a reflex 270°
+corner but a **concave arc of radius 2r** about the concave fillet's own axis, meeting
+the two flat offsets tangentially. Open that, and the corner is the **tube of radius r
+swept along that arc** — equivalently, the rolling ball's centre swings on a circle of
+radius 2r about the concave section's centre, from one round-over's axis to the other,
+in the concave section's own plane. Exactly the quarter of the tube between the concave
+section and the face the two round-overs share is the corner. It is a torus patch.
+
+Everything it needs is on the ring: `C0` (concave section's centre), the shared face's
+normal, and the concave section's samples as the swing directions. Its first and last
+cross-sections *are* the two round-over strips' end sections, its concave-side boundary
+*is* the concave strip's end section, and it meets the shared face tangentially along an
+arc of radius 2r — inside which the face stays flat, so the sliver between that arc and
+the ring's mitre is a plain planar patch.
+
+Two consequences for §1–§4 as written: the three "pairwise trim curves" do not exist as
+distinct seams (there is one surface, not three trimmed ones), and the convex round-over
+strips must be seated at their **full mitre**, not the tighter default station, or their
+end sections are not the tube's end sections. Both are in `FilletBlend.cc` as
+`emitCornerTube` and `computeCornerStations`.
+
+Measured on `lbracket` against `gt.stl`, in the corner box: mean distance to ground truth
+0.108mm → 0.008mm (the ground truth's own tessellation noise), and 16.7mm of >90° crease
+in the corner → none. **§7's recommendation is superseded; §6's "stop at Phase 1" was
+right about scope but wrong about which surface Phase 1 should build.**
