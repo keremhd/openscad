@@ -7,6 +7,8 @@ effort designed to be *looked at* rather than reported.
 ./sheet.sh                  # render everything, rebuild all sheets
 ./sheet.sh S2-T07           # re-render one tile, drop it back into its sheet
 ./sheet.sh --models tee     # every tile of one model
+./corner-sheet.sh           # just sheet 5, the zoomed corner-dispatch page
+./corner-sheet6.sh          # just sheet 6, the torus-gate boundary page
 open sheets/sheet-1.png
 ```
 
@@ -151,6 +153,99 @@ edge carried by four faces, and it shows up in `nonman`, not `bnd`.
 **Weld tolerance is stated on every line and is not a detail** — the same mesh has
 read 205 non-manifold edges at 1e-5 and 0 at 1e-6 in this effort. Default 1e-6,
 `--tol` to change it, and never quote a count without it.
+
+## Sheet 5 — the corner-dispatch page
+
+```sh
+./corner-sheet.sh           # the whole page, and re-bundles sheets/sheets.pdf
+./corner-sheet.sh S5-T02    # one tile, back into its sheet
+```
+
+Sheets 1–4 are whole models at `--viewall`: they answer *is the mesh valid*, and
+at that zoom a 2 mm blend on a 40 mm bracket is four pixels. Sheet 5 answers the
+other question — **what does the corner actually look like** — with twelve tiles,
+each the same stock-defaults render as its whole-model tile, with the camera
+parked on one junction vertex read off the model's own source. No `--viewall`,
+no `--autocenter`: the aim is the point.
+
+`fillet()` blends a mixed-sign corner through a dispatch chain — an exact torus
+patch when the gate proves the strips and the corner are one torus (square
+elbow, equal radii), otherwise the roll-field loft. The page puts one tile on
+each class, so a change that moves a corner from one branch to the other is
+visible as a change in *shape*, side by side with the classes that did not move:
+
+| tiles | class |
+|---|---|
+| S5-T01…T07 | `torus` — lbracket both elbows, box_step both elbows, rib, pocket, shallow_crease |
+| S5-T08, T09 | `loft:T`, `loft:star` — cylinder junctions |
+| S5-T10 | `loft:oblique` — the same tee off-axis |
+| S5-T11 | `loft:partial` — a built bead running into a refused crease |
+| S5-T12 | `loft:curved` — 48-facet trunk, 10-facet branch |
+
+**The class in the caption is documented, not measured.** `fillet()` echoes one
+line per call — edges blended, verts, tris — and says nothing about which corner
+path fired, and nothing here instruments it. The labels record what each corner
+is *expected* to take, which is exactly why a tile that stops looking like its
+label is a finding rather than a repaint.
+
+`sheets/INDEX.md` carries the page in its own table: tile, model, corner,
+dispatch and the literal `--camera` string, so a tile id resolves to model +
+corner + camera without opening an image. A full `./sheet.sh` runs this page
+last, before the PDF; run standalone it re-bundles `sheets/sheets.pdf` itself.
+
+## Sheet 6 — the torus-gate boundary page
+
+```sh
+./corner-sheet6.sh          # the whole page, and re-bundles sheets/sheets.pdf
+./corner-sheet6.sh S6-T05   # one tile, back into its sheet
+```
+
+Sheet 5 puts one tile on each dispatch class using models the corpus already
+had. Sheet 6 does the opposite: **twelve models that exist only to sit just
+outside, or just inside, the exact-torus corner gate** — the gate that fires at
+a canonical mixed corner (crease perpendicular to the terminating face, 90°
+dihedrals, planar walls) and hands everything else to the loft chain. Nothing in
+sheets 1–5 covers an oblique end face, a non-square trough, a curved wall, a
+crowded arm or the inverse elbow, so nothing in them could show the gate's edge
+moving.
+
+| tiles | what they probe |
+|---|---|
+| S6-T01, T02 | end face raked 15° and 40°, crease meeting it at 75° and 50° |
+| S6-T03, T04 | 60° and 120° troughs, square end face (`elbow_dihedral120` is a leaning wall, so it carries one of each) |
+| S6-T05, T06 | curved end wall, curved trough wall |
+| S6-T07 | end face kinking 10° **exactly at the crease** — the surface-grouping threshold |
+| S6-T08, T09 | arms 6 thick against 2R = 5.8, then 3 thick against 2R = 4 |
+| S6-T10 | `step_notch`, the inverse elbow: two concave and one convex at one vertex |
+| S6-T11, T12 | controls that must still take the torus path — the same square elbow rotated 30° about z at a third the scale, and at 3× the scale with 3× the radius |
+
+**These twelve are not in `expect.txt`, on purpose.** Sheets 1–4 and the 353-cell
+sweep are a measured baseline; adding twelve unmeasured models to the corpus
+would move every headline count in this file for no gain. They are staged here
+instead, and `corner-sheet6.sh` is self-contained — it renders and montages only
+sheet 6, then re-bundles the PDF.
+
+**The dispatch column is documented, not measured**, exactly as on sheet 5.
+Nothing instruments which corner path fired; the labels record what each corner
+is *expected* to take. **The mesh verdict is measured**: every tile exports an
+exact ASCII STL from the same invocation set as its picture and runs `mesh.py` on
+it at weld 1e-6, and the verdict is on the label. These are new models in new
+territory and a broken one is the point of the page, so the tile says so itself
+rather than leaving it to a footnote.
+
+Two of the twelve were *rebuilt* after their first render, and the reason is worth
+keeping: a "curved" wall at stock defaults is `$fa`-bound to 12° facets, so a
+large-radius cylinder puts the whole corner inside a single facet and quietly
+becomes a plain oblique elbow. `elbow_curved_endface` and `elbow_facet_endface`
+first rendered to *identical* mesh counts, which is what gave it away. The
+curved-face model now uses a 9.5 mm cylinder so the crease terminus is three
+facets wide, and the facet model kinks by 10° exactly at the crease.
+
+`sheets/INDEX.md` carries the page in a `## Gate boundary (sheet 6)` table: tile,
+model, what it probes, expected dispatch, the measured mesh line and the literal
+`--camera` string. One caution on that file — `corner-sheet.sh` truncates the
+index from its own `## Corner dispatch` heading to the end, so running it *after*
+this page drops the sheet-6 table; re-run `./corner-sheet6.sh` to put it back.
 
 ## First run, 2026-08-04 — superseded, and its table is gone
 
