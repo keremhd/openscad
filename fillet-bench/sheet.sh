@@ -127,6 +127,14 @@ for s in $(seq 1 $nsheets); do
   print "sheets/sheet-$s.png"
 done
 
+# The corner-dispatch page is one more sheet, numbered after these, and it
+# appends its own rows to the index this run just rewrote -- so it has to run
+# after the loop above and before the PDF, which it is told to skip.
+if [[ -z $ONLY && -z $MODEL_FILTER && -x ./corner-sheet.sh ]]; then
+  print ""
+  BIN=$BIN FLAGS=$FLAGS ./corner-sheet.sh --no-pdf || print -u2 "corner-sheet.sh failed -- sheets 1-$nsheets are still current"
+fi
+
 # Bundle the freshly montaged sheets into the A4 PDF. Non-fatal: a machine
 # without sips/gs still gets its PNGs.
 if [[ -x ./sheets-to-pdf.sh ]]; then
