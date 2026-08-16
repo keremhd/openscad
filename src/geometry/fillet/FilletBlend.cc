@@ -530,7 +530,12 @@ void dissolveSwallowedVertices(MergedMesh& m, const std::map<EdgeKey, EdgeClass>
       const Vector3d a = m.pos[key.first], ab = m.pos[key.second] - a;
       const double l2 = ab.squaredNorm();
       const double s = l2 > 1e-18 ? std::clamp((p - a).dot(ab) / l2, 0.0, 1.0) : 0.0;
-      if ((p - Vector3d(a + s * ab)).norm() < sb - 1e-9) { swallowed = true; break; }
+      // The band is closed at sb: a vertex sitting exactly on the setback distance
+      // lands exactly on the inset line the strip's foot runs along, so the surface
+      // triangles through it come out collinear and can carry neither their own area
+      // nor the foot. That is the same swallowing as one strictly inside, and it is
+      // what a stray vertex a whole radius from a corner hits on an exact size.
+      if ((p - Vector3d(a + s * ab)).norm() < sb + 1e-9) { swallowed = true; break; }
     }
     if (!swallowed) continue;
 
@@ -597,6 +602,12 @@ struct Blender
   std::map<std::pair<int, int>, Vector3d> insetOverride;
   std::map<std::pair<int, int>, Vector3d> normalOverride;
 
+  // Inset points that a fold repair has collapsed onto a neighbour's, keyed the
+  // same way. Populated by repairInsetFolds(); empty wherever the offset is
+  // well-behaved, which is most of the bench. Read first by insetForTri so every
+  // consumer — surface pass, strips, seams, corner patches — moves together.
+  std::map<std::pair<int, int>, Vector3d> insetCollapse;
+
   // Vertices where selected edges of BOTH signs meet — the mixed corners whose
   // strips otherwise blade. Populated by computeMixedVerts() before any emit.
   // Everything keyed off this set (the pulled-in cross-section, the surface
@@ -622,6 +633,15 @@ struct Blender
   // strips have to end there for their sections to be its first and last
   // cross-sections. Populated by computeCornerStations(), empty everywhere else.
   std::map<std::pair<int, int>, double> stationOverride;
+
+  // One tally per terminal path of emitCorner; every control-flow exit there
+  // increments exactly one, so the fields sum to the number of corner vertices.
+  struct CornerCounts
+  {
+    int tube = 0, capTri = 0, cap = 0, coons = 0, saddle = 0, flat = 0, fan = 0, weld = 0, none = 0;
+    int total() const { return tube + capTri + cap + coons + saddle + flat + fan + weld + none; }
+  };
+  CornerCounts cornerCounts;
 
   void computeMixedVerts()
   {
@@ -804,6 +824,8 @@ struct Blender
   // disk-patch majority (where sector and surface agree) is unchanged.
   Vector3d insetForTri(int u, int t) const
   {
+    const auto cl = insetCollapse.find({u, t});
+    if (cl != insetCollapse.end()) return cl->second;
     const auto ov = insetOverride.find({u, t});
     if (ov != insetOverride.end()) return ov->second;
     const auto s = sectorOf(u, t);
@@ -845,30 +867,37 @@ struct Blender
   // deepest mitre is the furthest the strip must ever retreat (the planar clearance
   // from the neighbouring concave setback); the concave fillet recedes in 3D toward
   // the corner, so stationFrac pulls the slice back in from there and the beads flow
-  // into the corner instead of necking a full radius short. Clamped to keep a
-  // straight middle on a short corner-to-corner edge.
-  double pullStation(int u, int x) const
+  // into the corner instead of necking a full radius short.
+  //
+  // rawStation is that seat: between the two face mitres, the deepest (smax) the full
+  // un-blade station that retreats the strip a whole radius, the shallowest (smin) at or
+  // behind the corner. A symmetric corner (the concave crease, both mitres equal) is a
+  // no-op — it keeps its full mitre and does not overshoot. The along-sweep clamp keeps a
+  // straight middle on a short corner-to-corner edge and holds crowded/degenerate corners
+  // at their tiny station, so the tighter seat is a no-op there too.
+  double rawStation(int u, int x) const
   {
-    const auto& ts = adj.at(EdgeKey{std::min(u, x), std::max(u, x)});
     const Vector3d eh = (m.pos[x] - m.pos[u]).normalized();
     double smax = -1e30, smin = 1e30;
-    for (const int t : ts) {
+    for (const int t : adj.at(EdgeKey{std::min(u, x), std::max(u, x)})) {
       const double d = (insetForTri(u, t) - m.pos[u]).dot(eh);
       smax = std::max(smax, d);
       smin = std::min(smin, d);
     }
-    // Seat between the two face mitres: the deepest (smax) is the full un-blade
-    // station that retreats the strip a whole radius, the shallowest (smin) sits at
-    // or behind the corner. stationFrac interpolates toward smax; pulling in from it
-    // lets the convex round-overs flow into the corner (the concave fillet recedes
-    // in 3D, so the planar deepest-mitre clearance is an over-estimate). A symmetric
-    // corner (the concave crease, both mitres equal) is a no-op — it keeps its full
-    // mitre and does not overshoot. The along-sweep clamp still keeps a straight
-    // middle on a short edge and holds crowded/degenerate corners at their tiny
-    // station, so the tighter seat is a no-op there too.
-    double s = smin + stationFrac * (smax - smin);
-    if (const auto it = stationOverride.find({u, x}); it != stationOverride.end()) s = it->second;
-    return std::min(s, 0.45 * (m.pos[x] - m.pos[u]).norm());
+    return std::min(smin + stationFrac * (smax - smin), 0.45 * (m.pos[x] - m.pos[u]).norm());
+  }
+
+  double pullStation(int u, int x) const
+  {
+    const auto it = stationOverride.find({u, x});
+    if (it == stationOverride.end()) return rawStation(u, x);
+    // A corner override is the exact seat the surface the corner hands over to is built
+    // on, so the straight-middle clamp does not apply to it — it would seat the strip
+    // where that surface is not, and the corner would refuse. It still has to stop short
+    // of what the far end takes, or the strip folds; on a raked corner the crease can be
+    // split by a mesh vertex a couple of radii along, which is exactly that case.
+    return std::min(it->second,
+                    0.9 * ((m.pos[x] - m.pos[u]).norm() - rawStation(x, u)));
   }
 
   // Where edge (u,x)'s cross-section touches face t at u — the perpendicular foot
@@ -1118,9 +1147,10 @@ struct Blender
       }
   }
 
-  // Tessellate a convex trihedral corner as a subdivided spherical triangle rather
-  // than emitCap's pole-and-rings fan. A genuine convex box corner is three fillet
-  // arcs meeting at three sector corners, all on one sphere about C. A
+  // Tessellate a trihedral corner as a subdivided spherical triangle rather
+  // than emitCap's pole-and-rings fan. A box corner — convex vertex rounded off or
+  // concave valley filled in — is three fillet arcs meeting at three sector corners,
+  // all on one sphere about C, so both signs are the same construction here. A
   // pole fan sweeps every boundary point to one shared apex, so its facets swing
   // toward that apex and shade as a whorl pinched at the centre with dark, recessed-
   // looking wedges where the arcs meet — the "corner bead". This instead lays a
@@ -1131,7 +1161,7 @@ struct Blender
   // not perfect great circles (a non-right-angle corner). `cornerPos` are the ring
   // indices of the three sector corners, in ring order. Returns false — and the
   // caller falls back to emitCap — unless the ring is exactly three equal-length
-  // arcs, which is every real convex box/plate corner.
+  // arcs, which is every real box/plate/pocket corner.
   bool emitCapTri(const std::vector<int>& ring, const std::vector<int>& cornerPos,
                   const Vector3d& C)
   {
@@ -1313,35 +1343,40 @@ struct Blender
     return true;
   }
 
-  // One surface triangle, re-triangulated where it meets a mixed corner. Away from
-  // a mixed corner it is just the three inset vertices (unchanged). At a mixed
-  // corner u the strip along a selected edge (u,x) is pulled in to a common station
-  // (stripFoot), which lands past that face's mitre on the shorter-mitre face; the
-  // face must carry the strip's foot as a boundary vertex there, or the strip's
-  // tangent point T-junctions the mitre and opens a hole. Insert each such foot on
-  // the inset edge between the corner's mitre and x's inset, in order from the
-  // corner outward, then ear-clip the resulting planar polygon. Feet that coincide
-  // with the mitre (the furthest-mitre face) add nothing.
-  void emitSurfaceTri(int ti)
+  // The ring one surface triangle lands on, re-triangulated where it meets a mixed
+  // corner. Away from a mixed corner it is just the three inset vertices
+  // (unchanged). At a mixed corner u the strip along a selected edge (u,x) is
+  // pulled in to a common station (stripFoot), which lands past that face's mitre
+  // on the shorter-mitre face; the face must carry the strip's foot as a boundary
+  // vertex there, or the strip's tangent point T-junctions the mitre and opens a
+  // hole. Each such foot goes on the inset edge between the corner's mitre and x's
+  // inset, in order from the corner outward — but only where it actually falls
+  // inside that edge, see below.
+  std::vector<Vector3d> surfacePolygon(int ti) const
   {
     const auto& v = m.tris[ti].v;
-    const Vector3d P0 = insetForTri(v[0], ti), P1 = insetForTri(v[1], ti),
-                   P2 = insetForTri(v[2], ti);
-    const std::array<Vector3d, 3> P{P0, P1, P2};
+    const std::array<Vector3d, 3> P{insetForTri(v[0], ti), insetForTri(v[1], ti),
+                                    insetForTri(v[2], ti)};
     bool anyCorner = false;
     for (const int k : v)
       if (mixedVerts.count(k)) anyCorner = true;
-    if (!anyCorner) {
-      out.tri(P0, P1, P2);
-      return;
-    }
+    if (!anyCorner) return {P[0], P[1], P[2]};
     // Walk the three directed edges, emitting each tail vertex's inset then any
     // strip feet that fall on that edge — near-tail first, near-head second.
     std::vector<Vector3d> poly;
     auto footOn = [&](int a, int b) -> std::optional<Vector3d> {
       if (!mixedVerts.count(a) || !isSelected(a, b)) return std::nullopt;
       const Vector3d f = stripFoot(a, b, ti);
-      if ((f - insetForTri(a, ti)).norm() < 1e-9) return std::nullopt;  // at the mitre
+      // The foot only belongs to this face where it falls strictly inside the inset
+      // edge it is being inserted into. On the furthest-mitre face it lands on the
+      // mitre and adds nothing; where the pull-in station outruns the inset edge it
+      // lands at or beyond one of its ends, and inserting it there would spike the
+      // ring back on itself — a self-overlapping polygon no triangulation can save.
+      const Vector3d A = insetForTri(a, ti), d = insetForTri(b, ti) - A;
+      const double dd = d.squaredNorm();
+      if (dd < 1e-18) return std::nullopt;
+      const double s = (f - A).dot(d) / dd;
+      if (s < 1e-9 || s > 1.0 - 1e-9) return std::nullopt;
       return f;
     };
     for (int i = 0; i < 3; ++i) {
@@ -1350,7 +1385,114 @@ struct Blender
       if (auto fa = footOn(a, b)) poly.push_back(*fa);        // near tail a
       if (auto fb = footOn(b, a)) poly.push_back(*fb);        // near head b
     }
-    if (!fillPlanarPolygon(poly)) out.tri(P0, P1, P2);
+    return poly;
+  }
+
+  // Emit that ring: the plain inset triangle, or an in-plane ear-clip of the
+  // corner-cut polygon, falling back to the plain triangle if the clip refuses.
+  void emitSurfaceTri(int ti)
+  {
+    const std::vector<Vector3d> poly = surfacePolygon(ti);
+    if (poly.size() == 3) {
+      out.tri(poly[0], poly[1], poly[2]);
+      return;
+    }
+    if (!fillPlanarPolygon(poly)) {
+      const auto& v = m.tris[ti].v;
+      out.tri(insetForTri(v[0], ti), insetForTri(v[1], ti), insetForTri(v[2], ti));
+    }
+  }
+
+  // Trim the folds out of the inset map before anything is emitted.
+  //
+  // A surface's boundary chain is set back edge by edge, and the chain is only
+  // faithful while every link still runs the way its source edge ran. Where two
+  // boundary creases meet shallowly the corner mitre travels further ALONG the
+  // boundary than the next boundary vertex does; the two cross, the link between
+  // them runs backwards, and the offset boundary has a spike — a self-intersection.
+  // The sliver of face between the crossing pair is then emitted inside-out, lying
+  // in the face plane on top of its neighbours as an exact 180 deg fold pair, which
+  // stays edge-manifold and so passes every gate while shading as a bright dart.
+  //
+  // An offset is trimmed by dropping what the crossing swallowed, and the mesh
+  // counterpart of that is an edge collapse: seat the swallowed vertex's inset on
+  // the surviving one. The reversed link becomes a point, the slivers hanging off it
+  // become degenerate (OutMesh::tri drops them) and everything else re-attaches to
+  // the survivor. Of the crossing pair the survivor is the one that advanced further
+  // along the link — the mitre that did the swallowing is the one that actually bounds
+  // the offset region. Every incident triangle seated at the same point moves with it, so
+  // the collapse follows the whole sector, which is what keeps the strips, seams and
+  // corner patches welded to the face; and one crossing can expose the next, so the
+  // sweep repeats until the chain runs forward everywhere.
+  void repairInsetFolds()
+  {
+    std::vector<std::vector<int>> vTris(m.pos.size());
+    for (size_t t = 0; t < m.tris.size(); ++t)
+      for (const int u : m.tris[t].v) vTris[u].push_back(static_cast<int>(t));
+
+    for (int sweep = 0; sweep < 8; ++sweep) {
+      bool collapsed = false;
+      for (const auto& [e, ts] : adj) {
+        // Only a surface boundary is a chain of the offset; an interior seam moves
+        // with the surface and cannot spike. Same test sectorOf bounds a sector by.
+        if (ts.size() != 2 || surfaceOf[ts[0]] == surfaceOf[ts[1]]) continue;
+        const double L = (m.pos[e.second] - m.pos[e.first]).norm();
+        if (L < 1e-12) continue;
+        const Vector3d eh = (m.pos[e.second] - m.pos[e.first]) / L;
+        for (const int t : ts) {
+          const Vector3d Pa = insetForTri(e.first, t), Pb = insetForTri(e.second, t);
+          // How far each end has advanced along the link toward the other. Their sum
+          // exceeding the link's length is exactly the reversal.
+          const double sa = (Pa - m.pos[e.first]).dot(eh), sb = (m.pos[e.second] - Pb).dot(eh);
+          if (sa + sb <= L) continue;
+          // Two different things reverse a link, and only one of them is a spike. When
+          // ONE end has run past the far end on its own, that end's mitre has swallowed
+          // the link and the trim is to seat the far end on it. When neither has — the
+          // two ends simply eat the link from opposite sides — the feature is narrower
+          // than the blend, which is the size regime the strips and corner patches
+          // already answer for; there is no spike to trim and moving a seat there only
+          // unseats them.
+          if (sa <= L && sb <= L) continue;
+          const bool keepA = sa > sb;
+          const int lose = keepA ? e.second : e.first;
+          const Vector3d keep = keepA ? Pa : Pb;
+          const Vector3d at = keepA ? Pb : Pa;
+          if ((keep - at).squaredNorm() < 1e-24) continue;
+          // A mitre is where two offset lines cross, and when they run near-parallel
+          // that crossing races off down the boundary — tens of millimetres from its
+          // own vertex on a fraction-of-a-millimetre link. Such a point is an artefact
+          // of the intersection, not a seat: collapsing onto it would teleport a strip
+          // across the solid. Nothing further than a couple of setbacks from the vertex
+          // it belongs to is a survivor.
+          const int win = keepA ? e.first : e.second;
+          if ((keep - m.pos[win]).norm() >
+              2.0 * (selected.count(e) ? setback(e) : size))
+            continue;
+          // Only a plain link in a chain may be trimmed. A vertex where more than two
+          // surface boundaries meet is a junction — a crowded corner, a tangent
+          // meeting of two walls — and its seat is what the corner patches and the
+          // shared cross-sections are all built against. Merging it away pinches
+          // them together instead of trimming an offset, and the pinch is two shells
+          // touching at a point: closed, edge-manifold, and invalid.
+          std::set<int> chain;
+          for (const int tt : vTris[lose])
+            for (int i = 0; i < 3; ++i) {
+              const int a = m.tris[tt].v[i], b = m.tris[tt].v[(i + 1) % 3];
+              if (a != lose && b != lose) continue;
+              const auto jt = adj.find(EdgeKey{std::min(a, b), std::max(a, b)});
+              if (jt != adj.end() && jt->second.size() == 2 &&
+                  surfaceOf[jt->second[0]] != surfaceOf[jt->second[1]])
+                chain.insert(a == lose ? b : a);
+            }
+          if (chain.size() != 2) continue;
+          for (const int tt : vTris[lose])
+            if ((insetForTri(lose, tt) - at).squaredNorm() < 1e-18)
+              insetCollapse[{lose, tt}] = keep;
+          collapsed = true;
+        }
+      }
+      if (!collapsed) return;
+    }
   }
 
   // A mixed corner's tangent control point at a boundary vertex: pushed inward off
@@ -1595,135 +1737,212 @@ struct Blender
     return onCyl(R.axP[r], R.axD[r]);
   }
 
+  // The rolling ball's own geometry at such a corner, read off the concave section.
+  //
+  // C0 is the concave section's centre, e the crease direction pointing into the solid
+  // and m the shared face's outward normal. For swing direction u the ball's centre sits
+  // one diameter out along u, slid along e by just enough to keep it one radius clear of
+  // the face; the surface is one radius off that centre, on the arc running from the
+  // concave contact (-u) round to the face contact (m). Where the face is square to the
+  // crease that slide is nil and that arc is a quarter turn for every u — the swing is a
+  // circle and the sweep a torus. Rake the face and the swing stretches into an ellipse
+  // and the arc's turn opens and closes along it, but it is the same ball on the same
+  // two contacts throughout.
+  struct CornerCanal
+  {
+    Vector3d C0 = Vector3d::Zero(), e = Vector3d::Zero(), m = Vector3d::Zero(),
+             uTop = Vector3d::Zero();
+    double r = 0;
+    // How far along the crease the centre slides. Zero at uTop, the swing direction that
+    // leans furthest into the face — so the concave section seats there and every other
+    // direction slides back off it, never past it.
+    double lift(const Vector3d& u) const { return -2 * r * (u - uTop).dot(m) / e.dot(m); }
+    Vector3d centre(const Vector3d& u) const { return C0 + 2 * r * u + lift(u) * e; }
+    Vector3d at(const Vector3d& u, double t) const
+    {
+      const Vector3d n1 = -u;
+      Vector3d w = m - m.dot(n1) * n1;
+      const double wl = w.norm();
+      if (wl < 1e-12) return centre(u) + r * n1;
+      const double a = t * std::acos(std::clamp(n1.dot(m), -1.0, 1.0));
+      return centre(u) + r * (std::cos(a) * n1 + (std::sin(a) / wl) * w);
+    }
+  };
+
   // The corner where two convex round-overs close over a concave crease, built as the
   // one piece of surface it actually is.
   //
-  // Keep rolling the ball into the corner. Its centre leaves the concave section's own
-  // centre and swings round until it reaches each round-over's axis; because all three
-  // centres lie one ball-diameter apart in the concave section's plane, that swing is a
-  // circular arc about the concave centre, of radius one diameter. The ball sweeping it
-  // traces a tube, and the quarter of that tube between the concave section and the face
-  // the two round-overs share IS the corner: its first and last cross-sections are the
-  // two round-over strips' end sections exactly, its concave-side boundary is the
-  // concave strip's end section exactly, and it runs into the shared face tangentially
-  // along an arc, so the two round-overs meet each other smoothly instead of at a mitre.
-  // Nothing is lofted and nothing is fitted — every sample is one radius off a centre
-  // the ring itself hands over.
+  // Keep rolling the ball into the corner. Its centre leaves the concave section and
+  // swings round until it reaches each round-over's axis, staying one diameter off the
+  // crease axis and one radius clear of the shared face the whole way; the ball sweeping
+  // that swing traces a tube, and the piece of it between the concave section and the
+  // face IS the corner. Its first and last cross-sections are the two round-over strips'
+  // end sections exactly, and it runs into the shared face tangentially along an arc, so
+  // the two round-overs meet each other smoothly instead of at a mitre. Nothing is
+  // lofted and nothing is fitted — every sample is one radius off a centre the ring
+  // itself hands over.
   //
-  // The shared face is left flat inside that arc: the tube only touches it, so the
-  // sliver between the arc and the ring's own mitre is a plain planar patch, coplanar
-  // with the face it continues.
+  // On a raked face the swing also slides along the crease, so the tube's concave-side
+  // boundary is a slanted cut of the concave fillet cylinder rather than the strip's own
+  // square end section. The strip is seated at the deepest point of that cut, and the
+  // gap between the two is filled by the run of the cylinder itself — an extra column of
+  // the same grid, degenerate where the face is square.
   //
-  // The ring must be exactly this corner and is checked to be: a connector on the shared
-  // face and three arcs of arcSegs+1 samples each, the middle one a circle of the blend
-  // radius whose centre and plane are the swing's, and the tube built off that swing
-  // landing back on the ring's two round-over arcs sample for sample. That last check is
-  // the whole gate — it passes only if the strips and the corner describe one surface.
-  // Anything else returns false and the caller keeps its loft.
+  // The shared face is left flat inside the tangent arc: the tube only touches it, so
+  // the sliver between the arc and the ring's own mitre is a plain planar patch,
+  // coplanar with the face it continues.
+  //
+  // The ring must be exactly this corner and is checked to be: three arcs of arcSegs+1
+  // samples each, the concave one a circle of the blend radius pinning the swing, and
+  // the tube built off that swing landing back on the ring's two round-over arcs sample
+  // for sample. That last check is the whole gate — it passes only if the strips and the
+  // corner describe one surface. Anything else returns false and the caller keeps its
+  // loft.
   bool emitCornerTube(const std::vector<int>& ring, const std::vector<Vector3d>& ringNrm,
                       const std::vector<int>& ringSign)
   {
     const int k = arcSegs;
     const int n = static_cast<int>(ring.size());
-    if (k < 2 || n != 3 * k + 2) return false;
+    if (k < 2 || n < 3 * k + 2 || n > 3 * k + 6) return false;
     if (static_cast<int>(ringNrm.size()) != n || static_cast<int>(ringSign.size()) != n)
       return false;
-
-    // Cut the connector out and the ring is a path of three arcs of arcSegs+1 samples
-    // chained at the two samples the neighbouring arcs share — whichever rotation and
-    // winding the fan walk happened to leave it in. Which sample carries which sign
-    // depends on that walk (an arc's shared end keeps the sign of whichever arc reached
-    // it first, and a walk that started on a face keeps a face normal there), so the
-    // split is not read off the signs: each candidate connector, each direction, is
-    // tried and the geometry below decides. It is exact, so at most one can pass.
     const double tol = 1e-3 * size;
-    std::vector<int> ord(n - 1);
-    std::vector<Vector3d> uc(k + 1);  // the swing directions, off the concave arc itself
-    Vector3d C0 = Vector3d::Zero(), nf = Vector3d::Zero();
-    auto P = [&](int o) { return out.V[ring[ord[o]]]; };
-    // A sample of the tube: the ball centred one diameter out along u sweeps from the
-    // concave section (a = 0) to the shared face (a = pi/2, where it touches).
-    auto tube = [&](const Vector3d& u, double a) {
-      return Vector3d(C0 + size * ((2 - std::cos(a)) * u + std::sin(a) * nf));
-    };
 
-    auto fits = [&]() {
-      // The middle arc must be one circle of radius size: its centre is the tube's own
-      // swing centre and its plane is the shared face's. Three samples pin both.
-      const Vector3d p0 = P(k), p1 = P(k + (k + 1) / 2), p2 = P(2 * k);
+    // The shared face's normal is a connector's own face normal — but which connector is
+    // the shared face's is not known ahead of the fit, so every distinct one is tried.
+    std::vector<Vector3d> mcand;
+    for (int i = 0; i < n; ++i) {
+      if (ringSign[i] != 0) continue;
+      bool dup = false;
+      for (const Vector3d& q : mcand) dup = dup || (q - ringNrm[i]).norm() < 1e-9;
+      if (!dup) mcand.push_back(ringNrm[i]);
+    }
+
+    // The ring is one round-over arc, the concave arc and the other round-over arc, in
+    // that cyclic order, each arcSegs+1 samples, separated by a shared end sample (gap
+    // 0), nothing (gap 1) or one connector (gap 2); whatever is left over after the
+    // three is the shared face's mitre. Which sample carries which sign depends on the
+    // fan walk (an arc's shared end keeps the sign of whichever arc reached it first),
+    // so the split is not read off the signs: every rotation, direction and pair of gaps
+    // is tried and the geometry decides. It is exact, so at most one can pass.
+    CornerCanal cc;
+    cc.r = size;
+    std::vector<Vector3d> uc(k + 1);  // the swing directions, off the concave arc itself
+    Vector3d np = Vector3d::Zero();   // the concave arc's plane normal: the crease's line
+    int lead = 0, dir = 1, gA = 0, gB = 0;
+    auto at = [&](int p) { return ((lead + dir * p) % n + n) % n; };
+    auto P = [&](int p) { return out.V[ring[at(p)]]; };
+
+    // The concave arc must be one circle of radius size: its centre is the swing's own
+    // and its plane is square to the crease. Three samples pin both.
+    auto fitArc = [&]() {
+      const int c0 = k + gA;
+      const Vector3d p0 = P(c0), p1 = P(c0 + (k + 1) / 2), p2 = P(c0 + k);
       const Vector3d e0 = p1 - p0, e1 = p2 - p0;
-      Vector3d np = e0.cross(e1);
+      np = e0.cross(e1);
       const double nl = np.norm();
       if (nl < 1e-12) return false;
       np /= nl;
       const Vector3d mid0 = 0.5 * (p0 + p1), mid1 = 0.5 * (p0 + p2);
-      C0 = lineIntersect(mid0, np.cross(e0).normalized(), mid1, np.cross(e1).normalized());
+      cc.C0 = lineIntersect(mid0, np.cross(e0).normalized(), mid1, np.cross(e1).normalized());
       for (int i = 0; i <= k; ++i) {
-        const Vector3d w = P(k + i) - C0;
+        const Vector3d w = P(c0 + i) - cc.C0;
         if (std::abs(w.norm() - size) > tol || std::abs(w.dot(np)) > tol) return false;
         uc[i] = w.normalized();
       }
-      if (std::abs(uc[0].dot(uc[k])) >= 0.95) return false;  // the swing must really turn
-      // The tube's two end cross-sections must land back on the ring's two round-over
-      // arcs, sample for sample, or the strips and the corner are not one surface. Only
-      // one side of the concave arc's plane is the material's, and that is the side the
-      // arcs settle it on.
-      for (int s = 0; s < 2; ++s) {
-        nf = s ? Vector3d(-np) : np;
-        bool ok = true;
-        for (int j = 0; j <= k && ok; ++j) {
-          const double a = 0.5 * M_PI * j / k;
-          ok = (tube(uc[0], a) - P(k - j)).norm() <= tol &&
-               (tube(uc[k], a) - P(2 * k + j)).norm() <= tol;
-        }
-        if (ok) return true;
-      }
-      return false;
+      return std::abs(uc[0].dot(uc[k])) < 0.95;  // the swing must really turn
     };
 
-    int con = -1;
-    for (int c = 0; c < n && con < 0; ++c) {
-      if (ringSign[c] != 0) continue;
-      for (int dir = 0; dir < 2 && con < 0; ++dir) {
-        for (int i = 0; i < n - 1; ++i)
-          ord[i] = dir ? (c - 1 - i + 2 * n) % n : (c + 1 + i) % n;
-        if (fits()) con = c;
+    auto fits = [&](const Vector3d& mc) {
+      cc.m = mc;
+      // Of the crease's two directions the solid's is the one leading away from the
+      // face; a crease running along the face has no corner of this shape at all.
+      cc.e = np.dot(mc) < 0 ? np : Vector3d(-np);
+      if (cc.e.dot(mc) > -1e-6) return false;
+      // The concave section seats at the swing direction leaning furthest into the face,
+      // which is one of the arc's two ends — and the lift test below is what says so: it
+      // fails if any interior direction leans further. (Reading the maximum off the
+      // samples instead would read floating-point noise on a face square to the crease,
+      // where every direction leans the same nil amount.)
+      cc.uTop = uc[0].dot(mc) >= uc[k].dot(mc) ? uc[0] : uc[k];
+      for (int i = 0; i <= k; ++i)
+        if (cc.lift(uc[i]) > tol) return false;
+      // The tube's two end cross-sections must land back on the ring's two round-over
+      // arcs, sample for sample, or the strips and the corner are not one surface.
+      const int b0 = 2 * k + gA + gB;
+      for (int j = 0; j <= k; ++j) {
+        const double t = static_cast<double>(j) / k;
+        if ((cc.at(uc[0], t) - P(k - j)).norm() > tol) return false;
+        if ((cc.at(uc[k], t) - P(b0 + j)).norm() > tol) return false;
+      }
+      return true;
+    };
+
+    bool found = false;
+    for (int d = 0; d < 2 && !found; ++d)
+      for (int l = 0; l < n && !found; ++l)
+        for (int a = 0; a < 3 && !found; ++a)
+          for (int b = 0; b < 3 && !found; ++b) {
+            if (3 * k + a + b + 1 > n) continue;
+            dir = d ? -1 : 1;
+            lead = l;
+            gA = a;
+            gB = b;
+            if (!fitArc()) continue;
+            // Square to the crease, the shared face's normal is the concave arc's own
+            // plane normal and no connector is needed to name it; raked, it is not, and
+            // only a connector on that face carries it. Both are offered and the arcs
+            // decide, so neither case depends on which face the ring's mitre landed on.
+            for (const Vector3d& mc : mcand)
+              if (fits(mc)) { found = true; break; }
+            if (!found && (fits(np) || fits(Vector3d(-np)))) found = true;
+          }
+    if (!found) return false;
+    const int c0 = k + gA, b0 = 2 * k + gA + gB;
+
+    // Column 0 is the concave strip's end section, column 1 the slanted cut the tube
+    // really starts on, columns 1..k+1 the swing's arc. Rows 0 and k are the two
+    // round-over sections. Where the face is square the first two columns coincide and
+    // the grid is the plain tube.
+    std::vector<std::vector<int>> g(k + 1, std::vector<int>(k + 2));
+    for (int i = 0; i <= k; ++i) {
+      g[i][0] = ring[at(c0 + i)];
+      for (int j = 1; j <= k + 1; ++j) {
+        if (i == 0) { g[i][j] = ring[at(k - j + 1)]; continue; }
+        if (i == k) { g[i][j] = ring[at(b0 + j - 1)]; continue; }
+        const Vector3d p = cc.at(uc[i], static_cast<double>(j - 1) / k);
+        g[i][j] = (p - out.V[g[i][0]]).norm() < 1e-9 ? g[i][0] : out.add(p);
       }
     }
-    if (con < 0) return false;
-    // ord[0..k] is one round-over arc, shared face first; ord[k..2k] the concave arc;
-    // ord[2k..3k] the other round-over arc, shared face last.
-
-    std::vector<std::vector<int>> g(k + 1, std::vector<int>(k + 1));
-    for (int i = 0; i <= k; ++i)
-      for (int j = 0; j <= k; ++j) {
-        if (i == 0) g[i][j] = ring[ord[k - j]];         // first round-over arc
-        else if (i == k) g[i][j] = ring[ord[2 * k + j]];  // second round-over arc
-        else if (j == 0) g[i][j] = ring[ord[k + i]];      // concave arc
-        else g[i][j] = out.add(tube(uc[i], 0.5 * M_PI * j / k));
-      }
 
     std::vector<std::array<int, 3>> tris;
+    auto push = [&](int a, int b, int c) {
+      if (a != b && b != c && a != c) tris.push_back({a, b, c});
+    };
     for (int i = 0; i < k; ++i)
-      for (int j = 0; j < k; ++j) {
-        tris.push_back({g[i][j], g[i + 1][j], g[i + 1][j + 1]});
-        tris.push_back({g[i][j], g[i + 1][j + 1], g[i][j + 1]});
+      for (int j = 0; j <= k; ++j) {
+        push(g[i][j], g[i + 1][j], g[i + 1][j + 1]);
+        push(g[i][j], g[i + 1][j + 1], g[i][j + 1]);
       }
     // The flat sliver: the tube's tangent arc on the shared face, closed back over the
-    // ring's mitre connector. It reuses the arc's own vertices, so no T-junction.
-    std::vector<int> sliver{ring[con]};
-    for (int i = 0; i <= k; ++i) sliver.push_back(g[i][k]);
-    std::vector<std::array<int, 3>> flat;
-    if (!earClipRing(sliver, flat)) return false;
-    for (const auto& t : flat) tris.push_back({sliver[t[0]], sliver[t[1]], sliver[t[2]]});
+    // ring's mitre. It reuses the arc's own vertices, so no T-junction.
+    std::vector<int> sliver;
+    for (int i = 0; i <= k; ++i)
+      if (sliver.empty() || sliver.back() != g[i][k + 1]) sliver.push_back(g[i][k + 1]);
+    for (int p = b0 + k + 1; p < n; ++p)
+      if (sliver.back() != ring[at(p)]) sliver.push_back(ring[at(p)]);
+    while (sliver.size() > 1 && sliver.front() == sliver.back()) sliver.pop_back();
+    if (sliver.size() >= 3) {
+      std::vector<std::array<int, 3>> flat;
+      if (!earClipRing(sliver, flat)) return false;
+      for (const auto& t : flat) push(sliver[t[0]], sliver[t[1]], sliver[t[2]]);
+    }
 
     std::map<std::pair<int, int>, int> edgeUse;
-    for (const auto& t : tris) {
-      if (t[0] == t[1] || t[1] == t[2] || t[0] == t[2]) continue;
+    for (const auto& t : tris)
       for (const auto& e : {std::minmax(t[0], t[1]), std::minmax(t[1], t[2]),
                             std::minmax(t[0], t[2])})
         if (++edgeUse[e] > 2) return false;
-    }
     for (const auto& t : tris) out.tri(t[0], t[1], t[2]);
     return true;
   }
@@ -2233,7 +2452,7 @@ struct Blender
     for (const auto& [key, ts] : adj)
       if ((key.first == u || key.second == u) && selected.count(key))
         selVia.push_back(key.first == u ? key.second : key.first);
-    if (selVia.empty()) return;
+    if (selVia.empty()) { ++cornerCounts.none; return; }
 
     // A smooth crease passing through u: exactly two selected edges whose
     // edge-local cross-sections coincide. emitEdge already welds their two strips
@@ -2242,16 +2461,18 @@ struct Blender
     // the rim/pass-through skip — geometric, so it holds whether or not the wall is
     // split into per-facet surfaces (the surface-pair count no longer decides it).
     if (selVia.size() == 2 &&
-        sectionsWeld(edgeCrossSection(u, selVia[0]), edgeCrossSection(u, selVia[1])))
+        sectionsWeld(edgeCrossSection(u, selVia[0]), edgeCrossSection(u, selVia[1]))) {
+      ++cornerCounts.weld;
       return;
+    }
 
     const std::vector<std::pair<int, int>> fan = fanAround(u);
-    if (fan.empty()) return;
+    if (fan.empty()) { ++cornerCounts.none; return; }
     const int n = static_cast<int>(fan.size());
     int start = -1;
     for (int i = 0; i < n; ++i)
       if (isSelected(u, fan[i].second)) { start = i; break; }
-    if (start < 0) return;
+    if (start < 0) { ++cornerCounts.none; return; }
 
     // Walk the fan once, building the ring around u: the sector-local inset point
     // wherever a run of triangles turns, and each selected edge's arc interior
@@ -2322,11 +2543,12 @@ struct Blender
     // Only for a real junction — a strip end gets a flat cap instead.
     if (!isChamfer && junction && !mixed && ring.size() >= 3) {
       if (auto C = cornerBall(u, anyConcave)) {
-        // A convex box corner (three equal fillet arcs) tessellates as a subdivided
+        // A trihedral corner (three equal fillet arcs) tessellates as a subdivided
         // spherical triangle — no central pole, facets flowing with the strips — so
-        // it does not read as a beaded knuckle. Concave caps and any ring that is not
-        // three equal arcs fall through to the pole-fan below.
-        if (!anyConcave && emitCapTri(ring, cornerPos, *C)) return;
+        // it does not read as a beaded knuckle. Convex round-over and concave valley
+        // are the same construction on the same ball; rings that are not three equal
+        // arcs fall through to the pole-fan below.
+        if (emitCapTri(ring, cornerPos, *C)) { ++cornerCounts.capTri; return; }
         Vector3d poleUnit = (m.pos[u] - *C).normalized();
         if (poleUnit.squaredNorm() < 0.5) {  // u sits on the centre: fall back to the ring
           Vector3d centroid = Vector3d::Zero();
@@ -2335,6 +2557,7 @@ struct Blender
           poleUnit = (centroid - *C).normalized();
         }
         emitCap(ring, *C, size, poleUnit);
+        ++cornerCounts.cap;
         return;
       }
     }
@@ -2345,18 +2568,20 @@ struct Blender
     // died into a face.
     // Where the two round-overs and the crease close over the vertex as one exact
     // piece of surface, build that piece instead of any membrane.
-    if (!isChamfer && junction && mixed && ring.size() >= 4 &&
-        (emitCornerTube(ring, ringNrm, ringSign) ||
-         emitCoonsSaddle(ring, ringNrm, ringSign) || emitSaddle(ring, ringNrm)))
-      return;
+    if (!isChamfer && junction && mixed && ring.size() >= 4) {
+      if (emitCornerTube(ring, ringNrm, ringSign)) { ++cornerCounts.tube; return; }
+      if (emitCoonsSaddle(ring, ringNrm, ringSign)) { ++cornerCounts.coons; return; }
+      if (emitSaddle(ring, ringNrm)) { ++cornerCounts.saddle; return; }
+    }
 
     // Strip end (a fillet ending against a kept-sharp boundary): close the ring
     // flat by ear-clipping it in its best-fit plane — the perpendicular patch that
     // seals the volume and leaves the kept edges sharp. Falls back to the crude
     // centroid fan if the ring is too tangled to triangulate cleanly (orient()
     // then refuses if that left a hole).
-    if (ring.size() >= 4 && ringSaddle(ring)) return;
+    if (ring.size() >= 4 && ringSaddle(ring)) { ++cornerCounts.flat; return; }
     out.fan(ring);
+    ++cornerCounts.fan;
   }
 
   // Triangulate a (non-planar) ring directly, no central vertex, by ear-clipping
@@ -2420,13 +2645,24 @@ struct Blender
     if (!C0) return false;
     const std::vector<Vector3d> csy = crossSectionEdge(u, tsy[0], tsy[1], /*concave=*/true);
     if (static_cast<int>(csy.size()) != arcSegs + 1) return false;
+    CornerCanal cc;
+    cc.r = size;
+    cc.C0 = *C0;
+    cc.m = nf;
+    cc.e = (m.pos[y] - m.pos[u]).normalized();  // along the crease, into the solid
+    if (cc.e.dot(nf) > -1e-6) return false;
     // The concave section must be one circle of the swing's own radius, square to the
-    // shared face: it is the tube's first cross-section, and the swing runs along it.
+    // crease: it is the tube's first cross-section, and the swing runs along it.
     for (const Vector3d& p : csy) {
       const Vector3d w = p - *C0;
-      if (std::abs(w.norm() - size) > tol || std::abs(w.dot(nf)) > tol) return false;
+      if (std::abs(w.norm() - size) > tol || std::abs(w.dot(cc.e)) > tol) return false;
     }
-    std::array<Vector3d, 2> d;
+    // …and it must seat at the swing direction leaning furthest into the face, or the
+    // strip overhangs the corner it hands over to.
+    const Vector3d s0 = (csy.front() - *C0).normalized(), s1 = (csy.back() - *C0).normalized();
+    cc.uTop = s0.dot(nf) >= s1.dot(nf) ? s0 : s1;
+    for (const Vector3d& p : csy)
+      if (cc.lift((p - *C0).normalized()) > tol) return false;
     for (int r = 0; r < 2; ++r) {
       const auto& ts = adj.at(EdgeKey{std::min(u, cvx[r]), std::max(u, cvx[r])});
       const auto C = filletCenter(u, ts[0], ts[1], /*concave=*/false);
@@ -2436,27 +2672,26 @@ struct Blender
       if ((stripFoot(u, cvx[r], tf) - (*C + size * nf)).norm() > tol) return false;
       const std::vector<Vector3d> cs = crossSectionEdge(u, ts[0], ts[1], /*concave=*/false);
       if (static_cast<int>(cs.size()) != arcSegs + 1) return false;
-      // Exactly one end of the round-over section already welds to the concave one —
-      // the sample the swing starts (or ends) on.
-      auto welds = [&](const Vector3d& p) {
-        return std::min((p - csy.front()).norm(), (p - csy.back()).norm()) < 1e-6;
+      // Exactly one end of the round-over section is the crease-side one: the sample the
+      // swing starts (or ends) on, one radius off the swing centre for one of the
+      // concave section's own two directions.
+      auto onSwing = [&](const Vector3d& p) {
+        for (const Vector3d& su : {s0, s1})
+          if ((cc.at(su, 0.0) - p).norm() < tol) return true;
+        return false;
       };
-      const bool head = welds(cs.front());
-      if (head == welds(cs.back())) return false;
-      const Vector3d w = (head ? cs.front() : cs.back()) - *C0;
-      if (std::abs(w.norm() - size) > tol || std::abs(w.dot(nf)) > tol) return false;
-      const Vector3d su = w.normalized();
-      d[r] = 2 * size * su;
-      if ((*C - (*C0 + d[r])).norm() > tol) return false;
+      const bool head = onSwing(cs.front());
+      if (head == onSwing(cs.back())) return false;
+      const Vector3d w = cs[head ? 0 : arcSegs] - *C0;
+      const Vector3d su = (w - w.dot(cc.e) * cc.e).normalized();
+      if ((*C - cc.centre(su)).norm() > tol) return false;
       // …and the section must BE the tube's cross-section there, sample for sample.
       for (int j = 0; j <= arcSegs; ++j) {
-        const double a = 0.5 * M_PI * j / arcSegs;
-        const Vector3d q = *C0 + size * ((2 - std::cos(a)) * su + std::sin(a) * nf);
+        const Vector3d q = cc.at(su, static_cast<double>(j) / arcSegs);
         if ((q - cs[head ? j : arcSegs - j]).norm() > tol) return false;
       }
     }
-    const double c = d[0].dot(d[1]) / (4 * size * size);
-    return std::abs(c) < 0.95;  // the two round-overs must genuinely turn apart
+    return std::abs(s0.dot(s1)) < 0.95;  // the two round-overs must genuinely turn apart
   }
 
   // Seat the two convex strips of such a corner at their full mitre.
@@ -2489,17 +2724,25 @@ struct Blender
           if (a != b && surfaceOf[a] == surfaceOf[b] && fx < 0) { fx = a; fz = b; }
       if (fx < 0 || m.tris[fx].normal.dot(m.tris[fz].normal) < 0.999999) continue;
 
-      // Reseat first, then read the corner back at the new seat — every helper below
-      // goes through pullStation — and back the reseat out if it does not close.
-      for (const int x : cvx) {
+      auto seatFull = [&](int x) {
         const Vector3d eh = (m.pos[x] - m.pos[u]).normalized();
         double smax = -1e30;
         for (const int t : adj.at(EdgeKey{std::min(u, x), std::max(u, x)}))
           smax = std::max(smax, (insetForTri(u, t) - m.pos[u]).dot(eh));
         stationOverride[{u, x}] = smax;
-      }
+      };
+      // Reseat first, then read the corner back at the new seat — every helper below
+      // goes through pullStation — and back the reseat out if it does not close.
+      seatFull(cvx[0]);
+      seatFull(cvx[1]);
+      if (cornerCloses(u, cvx, cc[0], surfaceOf[fx], m.tris[fx].normal)) continue;
+      // Where the shared face is raked the tube's concave boundary is a slanted cut of
+      // the crease's own fillet, and the strip has to seat at the deepest point of it or
+      // it overhangs the corner. That is a second reseat, tried only after the plain one
+      // has failed, so a corner that already closed keeps the seat it closed on.
+      seatFull(cc[0]);
       if (!cornerCloses(u, cvx, cc[0], surfaceOf[fx], m.tris[fx].normal))
-        for (const int x : cvx) stationOverride.erase({u, x});
+        for (const int x : {cvx[0], cvx[1], cc[0]}) stationOverride.erase({u, x});
     }
   }
 
@@ -2582,6 +2825,7 @@ struct Blender
     computeMixedVerts();
     prepareShared();
     computeCornerStations();
+    repairInsetFolds();
     for (size_t t = 0; t < m.tris.size(); ++t) {
       // Inset each vertex on the side triangle t sits on — sector-local, so a
       // facet of a split wall sets back along its own sector rather than mitring
@@ -2647,6 +2891,7 @@ std::shared_ptr<const Geometry> buildBlend(
     std::size_t selected = 0, nConcave = 0, nConvex = 0;
     std::size_t verts = 0, tris = 0;
     int boundary = 0, nonman = 0;
+    Blender::CornerCounts corners;
   };
   auto buildOn = [&](const MergedMesh& m, double surfaceThresholdDeg, bool pullIn,
                      double stationFrac) -> Attempt {
@@ -2699,6 +2944,7 @@ std::shared_ptr<const Geometry> buildBlend(
     a.selected = b.selected.size();
     if (b.selected.empty()) { a.status = Status::NoSelection; return a; }
     b.run();
+    a.corners = b.cornerCounts;
     a.boundary = b.out.orient();
     a.nonman = b.out.nonManifoldEdges();
     if (b.out.F.empty()) { a.status = Status::Empty; return a; }
@@ -2779,5 +3025,11 @@ std::shared_ptr<const Geometry> buildBlend(
       node.name(), sizeName, node.size, static_cast<int>(a.selected),
       static_cast<int>(a.nConcave), static_cast<int>(a.nConvex), static_cast<int>(a.verts),
       static_cast<int>(a.tris));
+  if (a.corners.total() > 0)
+    LOG(message_group::Echo, node.modinst->location(), "",
+        "%1$s: corners tube=%2$d capTri=%3$d cap=%4$d coons=%5$d saddle=%6$d flat=%7$d fan=%8$d "
+        "weld=%9$d none=%10$d",
+        node.name(), a.corners.tube, a.corners.capTri, a.corners.cap, a.corners.coons,
+        a.corners.saddle, a.corners.flat, a.corners.fan, a.corners.weld, a.corners.none);
   return std::move(a.geom);
 }
