@@ -7,7 +7,12 @@
 # solid must come back, with the same warnings.
 #
 # fn = "-" means the model carries no curvature, so A2 is vacuous for it and
-# only A1 and A3 apply.
+# only A1 and A3 apply. "skip" means the model carries two facet scales at once,
+# where no single forced $fn reproduces the stock render at all. "arc" is "-"
+# with the $fn axis swept anyway: the SOURCE is planar, so there is no second
+# tile and A2 is still vacuous, but the blend's own arcs are tessellated from $fn
+# like anything else, and a model marked "arc" has a fault band there worth
+# walking. None of the three earns a second tile, so tile ids do not move.
 #
 tee                     16
 tee_oblique             16
@@ -31,7 +36,13 @@ brush_one_edge          -
 cube_control            -       CONTROL, expect clean
 mixed_fn                skip    CONTROL, expect clean; two facet scales in one mesh
 rib_into_boss           26      cylinder r=8; the curved-arrival seam vertex
-refused_neighbour       -       A3; refuses 5 creases next to built ones
+refused_neighbour       arc     A3; refuses 5 creases next to built ones. "arc": planar
+#                               source, so it earns no second tile, but its FILLET has a
+#                               fault band on the $fn axis -- at $fn 10 and 12 the blend
+#                               leaves 5 non-manifold edges and refuses outright, and at
+#                               14 and 16 it builds a pinched solid. Nothing swept it
+#                               until that band was found by hand, because "-" had kept
+#                               the axis unwalked; "arc" walks it.
 shallow_crease          -       documentation case; the min_angle exhibit, two solids per tile
 #
 # The torus-gate boundary family, sheet 6's models, promoted into the corpus.

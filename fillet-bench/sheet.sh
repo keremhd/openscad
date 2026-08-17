@@ -42,12 +42,17 @@ if [[ ${1:-} == --models ]]; then MODEL_FILTER=${2:-}; elif [[ -n ${1:-} ]]; the
 # and every model carrying curvature renders again with $fn forced to the
 # fragment count it actually achieves. Those two tiles side by side are A2
 # check 1 made visible -- if they differ, the classifier is reading $fn.
+#
+# "-", "skip" and "arc" all mean no second tile, for three different reasons --
+# no curvature, two facet scales at once, and a planar source whose FILLET has a
+# $fn fault band (sweep.sh walks that one, this page does not, so tile ids do
+# not move).
 tiles=()
 while read -r name fn rest; do
   [[ -z $name || $name == \#* ]] && continue
   [[ -n $MODEL_FILTER && $name != *$MODEL_FILTER* ]] && continue
   tiles+=("$name|defaults|")
-  [[ $fn == - || $fn == skip ]] || tiles+=("$name|fn=$fn|-D FNSET=$fn")
+  [[ $fn == - || $fn == skip || $fn == arc ]] || tiles+=("$name|fn=$fn|-D FNSET=$fn")
 done < expect.txt
 
 total=${#tiles[@]}

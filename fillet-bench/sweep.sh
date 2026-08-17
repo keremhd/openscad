@@ -523,6 +523,13 @@ fi
 # same finding, so `twoscale` remembers which: "-" is a planar source, "skip" is
 # a source carrying two facet scales at once, where no single forced $fn
 # reproduces the stock render at all and the axis is not vacuous but unaskable.
+#
+# "arc" is the third: a planar source that is swept over $fn anyway. What "-"
+# buys is narrower than trap 7 claims -- a planar SOURCE does not make a
+# $fn-invariant RESULT, because the blend's own arcs are tessellated from $fn
+# like anything else. A model marked "arc" is one whose fillet has a fault band
+# on that axis, so the axis is walked even though the A2 check on it is vacuous
+# and it earns no second contact-sheet tile.
 models=(); tess=(); twoscale=()
 while read -r name fn rest; do
   [[ -z $name || $name == \#* ]] && continue
@@ -532,7 +539,8 @@ while read -r name fn rest; do
     (( hit )) || continue
   fi
   models+=($name)
-  [[ $fn == - || $fn == skip ]] || tess+=($name)
+  [[ $fn == - || $fn == skip || $fn == arc ]] || tess+=($name)
+  [[ $fn == arc ]] && tess+=($name)
   [[ $fn == skip ]] && twoscale+=($name)
 done < expect.txt
 
