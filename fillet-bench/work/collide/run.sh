@@ -8,8 +8,6 @@ export LC_ALL=C LC_NUMERIC=C
 
 BIN=/Users/kerem/Devel/openscad/build/OpenSCAD.app/Contents/MacOS/OpenSCAD
 BENCH=/Users/kerem/Devel/openscad/fillet-bench
-PY=/private/tmp/claude-501/-Users-kerem-Devel-openscad/84d9bee9-8cfb-41d1-8df7-9006c106d19e/scratchpad/venv/bin/python
-CENSUS=/private/tmp/claude-501/-Users-kerem-Devel-openscad/84d9bee9-8cfb-41d1-8df7-9006c106d19e/scratchpad/foldcensus.py
 
 mkdir -p out
 print "model\tr\tcorners\tblend\trefused\twarn\tmesh\tfolds"
@@ -41,7 +39,7 @@ for entry in $cases; do
     if grep -q "returned unchanged" $log; then refused=REFUSED; else refused=built; fi
     if [[ -f $stl ]]; then
       mesh=$(python3 $BENCH/mesh.py --tol 1e-6 $stl 2>&1 | sed "s|.*$tag.stl: ||")
-      folds=$($PY $CENSUS $stl 2>&1 | head -1 | cut -f2)
+      folds=$(python3 $BENCH/folds.py $stl 2>&1 | head -1 | cut -f2)
     else
       mesh="NO MESH"; folds="-"
     fi
