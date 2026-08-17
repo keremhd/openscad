@@ -24,6 +24,7 @@
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <limits>
 #include <map>
 #include <memory>
@@ -276,6 +277,13 @@ inline constexpr double kWeldTolMm = 1e-6;
 // ear clip starts cutting slivers whose normals are noise.
 inline constexpr double kFootprintEpsFrac = 1e-4;
 
+// The dihedral above which two faces sharing an edge are a fold rather than a
+// crease, in degrees. A fold proper is 180; a fold between two tessellated surfaces
+// closes to within a few degrees of it rather than exactly, so the test is short of
+// 180. Raise it past about 178 and the lapped strips this counts stop being counted;
+// drop it below about 165 and honest creases on a coarse tessellation start being.
+inline constexpr double kFoldDihedralDeg = 170.0;
+
 // Two consecutive points of a retreated boundary are ONE SEAT below this distance,
 // in mm. They arrive coincident whenever a trim has collapsed a link away, and a
 // zero-length link is an ear clipper's one unrecoverable input. It is the mesh's
@@ -408,6 +416,38 @@ struct OutMesh
     int n = 0;
     for (const auto& [k, c] : use)
       if (c > 2) ++n;
+    return n;
+  }
+
+  // Face pairs the surface has laid back onto each other: an edge whose two faces
+  // meet at a dihedral this close to 180 degrees is a zero-volume flap. It is the
+  // one defect that leaves a solid closed, edge-manifold, of unchanged genus and
+  // still wrong, so nothing else in this file can see it. Winding must already be
+  // consistent (call after orient()), because the test is on the angle between
+  // OUTWARD normals -- 180 only when the two point against each other.
+  int foldPairs() const
+  {
+    std::map<std::pair<int, int>, std::vector<int>> use;
+    std::vector<Vector3d> nrm(F.size());
+    std::vector<double> area(F.size());
+    for (size_t i = 0; i < F.size(); ++i) {
+      const Vector3d n = (V[F[i][1]] - V[F[i][0]]).cross(V[F[i][2]] - V[F[i][0]]);
+      area[i] = 0.5 * n.norm();
+      nrm[i] = n.norm() > 1e-30 ? Vector3d(n.normalized()) : Vector3d::Zero();
+      for (int k = 0; k < 3; ++k) {
+        const int a = F[i][k], b = F[i][(k + 1) % 3];
+        use[{std::min(a, b), std::max(a, b)}].push_back(static_cast<int>(i));
+      }
+    }
+    const double cosFold = std::cos(kFoldDihedralDeg * M_PI / 180.0);
+    int n = 0;
+    for (const auto& [e, fs] : use) {
+      if (fs.size() != 2) continue;
+      // A triangle smaller than the weld quantisation has no reliable normal: its
+      // direction is the rounding. Counting those reads folds on clean meshes.
+      if (area[fs[0]] < kWeldTolMm * kWeldTolMm || area[fs[1]] < kWeldTolMm * kWeldTolMm) continue;
+      if (nrm[fs[0]].dot(nrm[fs[1]]) < cosFold) ++n;
+    }
     return n;
   }
 
@@ -1009,6 +1049,8 @@ struct Blender
   // so single-sign caps and pass-through welds are untouched.
   std::set<int> mixedVerts;
 
+  bool pulled(int u) const { return mixedVerts.count(u) > 0; }
+
   // Whether to seat mixed corners with the pulled-in cross-section (the blade fix)
   // or the baseline mitre. The driver runs the pulled build first and, only if it
   // leaves the mesh open, re-runs with this false — so an oblique or crowded corner
@@ -1337,7 +1379,7 @@ struct Blender
   // the roll's own tangent instead of relaxing to a caving minimal surface.
   std::optional<Vector3d> filletCenter(int u, int t0, int t1, bool concave) const
   {
-    const int x = mixedVerts.count(u) ? farOf(u, t0, t1) : -1;
+    const int x = pulled(u) ? farOf(u, t0, t1) : -1;
     const Vector3d Ta = x >= 0 ? stripFoot(u, x, t0) : insetForTri(u, t0);
     const Vector3d Tb = x >= 0 ? stripFoot(u, x, t1) : insetForTri(u, t1);
     const auto sa = sectorOf(u, t0);
@@ -1352,7 +1394,7 @@ struct Blender
 
   std::vector<Vector3d> crossSectionEdge(int u, int t0, int t1, bool concave) const
   {
-    const int x = mixedVerts.count(u) ? farOf(u, t0, t1) : -1;
+    const int x = pulled(u) ? farOf(u, t0, t1) : -1;
     const Vector3d Ta = x >= 0 ? stripFoot(u, x, t0) : insetForTri(u, t0);
     const Vector3d Tb = x >= 0 ? stripFoot(u, x, t1) : insetForTri(u, t1);
     if (isChamfer) return {Ta, Tb};
@@ -1809,7 +1851,7 @@ struct Blender
   // face boundary vertex for vertex, whichever emits.
   std::optional<Vector3d> footOn(int a, int b, int ti) const
   {
-    if (!mixedVerts.count(a) || !isSelected(a, b)) return std::nullopt;
+    if (!pulled(a) || !isSelected(a, b)) return std::nullopt;
     const Vector3d f = stripFoot(a, b, ti);
     const Vector3d A = insetForTri(a, ti), d = insetForTri(b, ti) - A;
     const double dd = d.squaredNorm();
@@ -1826,7 +1868,7 @@ struct Blender
                                     insetForTri(v[2], ti)};
     bool anyCorner = false;
     for (const int k : v)
-      if (mixedVerts.count(k)) anyCorner = true;
+      if (pulled(k)) anyCorner = true;
     if (!anyCorner) return {P[0], P[1], P[2]};
     // Walk the three directed edges, emitting each tail vertex's inset then any
     // strip feet that fall on that edge — near-tail first, near-head second.
@@ -2188,7 +2230,7 @@ struct Blender
           const Vector3d p = insetForTri(u, t);
           const auto [it, ins] = at.emplace(u, p);
           if (!ins && (it->second - p).squaredNorm() > 1e-24) barred.insert(u);
-          if (mixedVerts.count(u)) barred.insert(u);
+          if (pulled(u)) barred.insert(u);
         }
 
       std::map<int, std::array<int, 3>> cur;
@@ -3346,8 +3388,8 @@ struct Blender
         // reach them (the mitre-to-foot connector then welds the surface split and
         // the strip). Elsewhere the endpoints are the mitre already pushed, so they
         // stay excluded and the single-sign cap sees the ring it expects.
-        const size_t lo = mixedVerts.count(u) ? 0 : 1;
-        const size_t hi = mixedVerts.count(u) ? cs.size() : cs.size() - 1;
+        const size_t lo = pulled(u) ? 0 : 1;
+        const size_t hi = pulled(u) ? cs.size() : cs.size() - 1;
         for (size_t j = lo; j < hi; ++j) {
           Vector3d nrm = m.tris[tri].normal;  // fallback if the centre is degenerate
           if (Copt) {
@@ -3766,11 +3808,16 @@ std::shared_ptr<const Geometry> buildBlend(
     std::unique_ptr<PolySet> geom;
     std::size_t selected = 0, nConcave = 0, nConvex = 0;
     std::size_t verts = 0, tris = 0;
-    int boundary = 0, nonman = 0;
+    int boundary = 0, nonman = 0, folds = 0;
+    // Whether this attempt was built on a mesh whose long creases were split. Two
+    // attempts are only comparable by fold count when this agrees: an unsplit build
+    // carries a fraction of the stations and so a fraction of the chances to fold,
+    // and would win a fold comparison by having less surface rather than better.
+    bool sub = false;
     Blender::CornerCounts corners;
   };
   auto buildOn = [&](const MergedMesh& m, double surfaceThresholdDeg, bool pullIn,
-                     double stationFrac) -> Attempt {
+                     double stationFrac, bool sub = true) -> Attempt {
     const std::map<EdgeKey, std::vector<int>> adj = buildEdgeAdjacency(m.tris);
     // Group surfaces by near-tangency, not by the feature threshold: a sub-crease
     // seam that is not near-tangent (a tee's tangent gap) must stay a surface
@@ -3828,6 +3875,8 @@ std::shared_ptr<const Geometry> buildBlend(
     // than emit it (a false refusal is the safe error, promise 1).
     if (a.boundary > 0 || a.nonman > 0) { a.status = Status::Holed; return a; }
     a.status = Status::Ok;
+    a.sub = sub;
+    a.folds = b.out.foldPairs();
     a.verts = b.out.V.size();
     a.tris = b.out.F.size();
     a.geom = b.out.build();
@@ -3869,12 +3918,31 @@ std::shared_ptr<const Geometry> buildBlend(
   // raw one if subdivision itself went non-manifold. Each tier is never worse than
   // the next, so a corner that cannot take the tight seat gets the full mitre, and
   // one that cannot take the pull-in at all gets exactly the baseline blend.
+  //
+  // A tier that closes is not the same as a tier that is right, and the difference
+  // is exactly the fold: a seat can leave every strip welded and two of them lapped.
+  // So the tiers are also walked when the first one closes but folds, and the best
+  // is kept. A clean first build ends the search immediately, which is every model
+  // that has no crowded corner in it, so the common case still costs one build.
+  auto better = [](const Attempt& x, const Attempt& y) {  // is x better than y
+    if (x.status != Status::Ok) return false;
+    if (y.status != Status::Ok) return true;
+    if (x.sub != y.sub) return x.sub;  // never trade the along-sweep stations for folds
+    return x.folds < y.folds;
+  };
   Attempt a = buildOn(mSub, kDefaultSurfaceThresholdDeg, /*pullIn=*/true, kPullStationFrac);
-  if (a.status == Status::Holed) a = buildOn(mSub, kDefaultSurfaceThresholdDeg, true, 1.0);
-  if (a.status == Status::Holed) a = buildOn(mSub, kDefaultSurfaceThresholdDeg, false, 1.0);
-  if (didSubdivide && a.status == Status::Holed)
-    a = buildOn(m0, kDefaultSurfaceThresholdDeg, false, 1.0);
-
+  if (a.status != Status::Ok || a.folds > 0) {
+    Attempt b1 = buildOn(mSub, kDefaultSurfaceThresholdDeg, true, 1.0);
+    if (better(b1, a)) a = std::move(b1);
+  }
+  if (a.status != Status::Ok || a.folds > 0) {
+    Attempt b2 = buildOn(mSub, kDefaultSurfaceThresholdDeg, false, 1.0);
+    if (better(b2, a)) a = std::move(b2);
+  }
+  if (didSubdivide && (a.status != Status::Ok || a.folds > 0)) {
+    Attempt b3 = buildOn(m0, kDefaultSurfaceThresholdDeg, false, 1.0, /*sub=*/false);
+    if (better(b3, a)) a = std::move(b3);
+  }
   switch (a.status) {
     case Status::Empty:
       return target;
