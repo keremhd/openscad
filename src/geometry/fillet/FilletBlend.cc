@@ -284,6 +284,15 @@ inline constexpr double kFootprintEpsFrac = 1e-4;
 // drop it below about 165 and honest creases on a coarse tessellation start being.
 inline constexpr double kFoldDihedralDeg = 170.0;
 
+// A blended crease edge shorter than this fraction of the blend size is a sliver
+// the blend cannot resolve: its strip is one cross-section's worth of surface hung
+// on an edge far shorter than the section is wide, so it blades and laps its
+// neighbours. Its two ends are welded before anything is built. Raise it and real
+// crease geometry is welded away -- a short but genuine segment of a chain stops
+// being one, and the turn it carried lands on the wrong vertex; lower it and the
+// sliver survives and its strip laps the strips either side of it.
+inline constexpr double kSliverCreaseFrac = 0.05;
+
 // Two consecutive points of a retreated boundary are ONE SEAT below this distance,
 // in mm. They arrive coincident whenever a trim has collapsed a link away, and a
 // zero-length link is an ear clipper's one unrecoverable input. It is the mesh's
@@ -996,6 +1005,79 @@ bool bridgeHole(std::vector<int>& ring, const std::vector<int>& hole,
   next.insert(next.end(), ring.begin() + bi, ring.end());
   ring = std::move(next);
   return true;
+}
+
+// Weld the crease vertices the blend cannot tell apart.
+//
+// A blended edge carries a strip, and the strip is spanned between one
+// cross-section at each end. Where a boolean leaves a crease edge orders of
+// magnitude shorter than the blend — two cylinders merging leave a sliver a few
+// microns long at the waist where their walls graze, and the crease chain steps
+// through it — that strip is a whole fillet section's worth of surface hung on an
+// edge it cannot resolve. Its two sections sit at essentially the same place and
+// point in different directions, so the strip is a blade, and it sweeps through the
+// strips on either side of it: they lap, and the lap is a fold.
+//
+// The crease is one crease and the turn is one turn; the sliver is the
+// tessellation's, not the model's. Welding its two ends puts the turn at a single
+// vertex, where the corner patch is built to take it. The cost is bounded by the
+// threshold: nothing moves further than a fraction of the blend size, well under
+// the resolution of the surface being built.
+//
+// A collapse is refused unless the link condition holds — a and b share exactly the
+// two vertices opposite the edge — because collapsing across any other shared
+// neighbour folds the surrounding fan onto itself and makes a non-manifold mesh out
+// of a manifold one.
+void weldSliverCreaseEdges(MergedMesh& m, const std::set<EdgeKey>& blended, double limit)
+{
+  if (blended.empty() || !(limit > 0)) return;
+  std::vector<int> remap(m.pos.size());
+  for (size_t i = 0; i < remap.size(); ++i) remap[i] = static_cast<int>(i);
+  std::function<int(int)> find = [&](int a) {
+    while (remap[a] != a) a = remap[a] = remap[remap[a]];
+    return a;
+  };
+
+  bool any = false;
+  for (const EdgeKey& key : blended) {
+    const int a = find(key.first), b = find(key.second);
+    if (a == b) continue;
+    if ((m.pos[a] - m.pos[b]).norm() >= limit) continue;
+
+    std::map<int, std::vector<int>> ring;  // neighbour -> the triangles carrying it
+    std::set<int> na, nb, both;
+    for (const Tri& T : m.tris) {
+      int has = 0;
+      for (const int v : T.v) {
+        if (find(v) == a) has |= 1;
+        if (find(v) == b) has |= 2;
+      }
+      if (!has) continue;
+      for (const int v : T.v) {
+        const int w = find(v);
+        if (w == a || w == b) continue;
+        (has & 1 ? na : nb).insert(w);
+        if (has == 3) both.insert(w);
+      }
+    }
+    std::set<int> shared;
+    for (const int w : na)
+      if (nb.count(w)) shared.insert(w);
+    if (shared != both || shared.size() != 2) continue;  // link condition
+
+    remap[b] = a;
+    any = true;
+  }
+  if (!any) return;
+
+  std::vector<Tri> next;
+  next.reserve(m.tris.size());
+  for (const Tri& T : m.tris) {
+    const std::array<int, 3> v{find(T.v[0]), find(T.v[1]), find(T.v[2])};
+    if (v[0] == v[1] || v[1] == v[2] || v[0] == v[2]) continue;  // collapsed away
+    next.push_back(Tri{v, T.normal, T.originalID});
+  }
+  m.tris = std::move(next);
 }
 
 // The dominant blend construction. Fields captured once so the per-edge and
@@ -3897,7 +3979,7 @@ std::shared_ptr<const Geometry> buildBlend(
   // its profile instead of tapering to the corner-distorted ends. The same set says
   // which face vertices the blend swallows, dissolved off both meshes before either
   // build so the raw fallback carries the fix too.
-  MergedMesh mSub;
+  MergedMesh mSub, mRaw;
   {
     const std::map<EdgeKey, std::vector<int>> adj0 = buildEdgeAdjacency(m0.tris);
     const CreaseSelection sel0 =
@@ -3906,10 +3988,18 @@ std::shared_ptr<const Geometry> buildBlend(
     for (const auto& key : sel0.eligible)
       if (sel0.crease.at(key).concave ? node.concave : node.convex) toSplit.insert(key);
     dissolveSwallowedVertices(m0, sel0.crease, toSplit, node.size, isChamfer);
+    // The sliver weld is a tier of its own, and the mesh it was applied to is kept:
+    // it removes a blade the tessellation put there, but putting the turn it carried
+    // on one vertex can leave a corner sharper than the patches can close, and then
+    // the whole blend would be refused for a fault that was two lapped triangles.
+    // Keep the unwelded mesh so that case falls back to it rather than to nothing.
+    mRaw = m0;
+    weldSliverCreaseEdges(m0, toSplit, kSliverCreaseFrac * node.size);
     mSub = m0;
     subdivideLongCreaseEdges(mSub, toSplit, kAlongSweep * node.size);
   }
   const bool didSubdivide = mSub.tris.size() != m0.tris.size();
+  const bool didWeld = mRaw.tris.size() != m0.tris.size();
 
   // Prefer the tight pulled-in seating (round-overs flow into the corner); if it
   // leaves the mesh open on an oblique or crowded corner it cannot weld, fall back
@@ -3943,6 +4033,44 @@ std::shared_ptr<const Geometry> buildBlend(
     Attempt b3 = buildOn(m0, kDefaultSurfaceThresholdDeg, false, 1.0, /*sub=*/false);
     if (better(b3, a)) a = std::move(b3);
   }
+  // The sliver weld is judged, not assumed. Removing a blade the tessellation put
+  // there usually removes the fold it caused, but putting the turn that blade
+  // carried onto one vertex can leave a corner the patches close worse than they
+  // closed around the sliver -- or cannot close at all, in which case the ladder
+  // above has already refused the whole blend for two lapped triangles. So the
+  // unwelded mesh is built too and the better of the two is kept, where better is
+  // first "it built" and then "it has fewer folds". A fold is invisible to every
+  // other check here (closed, edge-manifold, same genus, and still wrong), so
+  // counting them is the only way this choice can be made at all; ties go to the
+  // unwelded mesh, which is the one that moved no geometry.
+  if (didWeld) {
+    MergedMesh mRawSub = mRaw;
+    const std::map<EdgeKey, std::vector<int>> adjR = buildEdgeAdjacency(mRaw.tris);
+    const CreaseSelection selR =
+      selectCreaseEdges(mRaw, adjR, thresholdDeg, kDefaultSurfaceThresholdDeg);
+    std::set<EdgeKey> split;
+    for (const auto& key : selR.eligible)
+      if (selR.crease.at(key).concave ? node.concave : node.convex) split.insert(key);
+    subdivideLongCreaseEdges(mRawSub, split, kAlongSweep * node.size);
+    Attempt r = buildOn(mRawSub, kDefaultSurfaceThresholdDeg, true, kPullStationFrac);
+    if (r.status != Status::Ok || r.folds > 0) {
+      Attempt r1 = buildOn(mRawSub, kDefaultSurfaceThresholdDeg, true, 1.0);
+      if (better(r1, r)) r = std::move(r1);
+    }
+    if (r.status != Status::Ok || r.folds > 0) {
+      Attempt r2 = buildOn(mRawSub, kDefaultSurfaceThresholdDeg, false, 1.0);
+      if (better(r2, r)) r = std::move(r2);
+    }
+    if (r.status != Status::Ok || r.folds > 0) {
+      Attempt r3 = buildOn(mRaw, kDefaultSurfaceThresholdDeg, false, 1.0, /*sub=*/false);
+      if (better(r3, r)) r = std::move(r3);
+    }
+    // Ties go to the unwelded mesh: it is the one that moved no geometry.
+    if (r.status == Status::Ok &&
+        (a.status != Status::Ok || (r.sub == a.sub && r.folds <= a.folds) || (r.sub && !a.sub)))
+      a = std::move(r);
+  }
+
   switch (a.status) {
     case Status::Empty:
       return target;
