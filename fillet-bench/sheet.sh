@@ -127,12 +127,18 @@ for s in $(seq 1 $nsheets); do
   print "sheets/sheet-$s.png"
 done
 
-# The corner-dispatch page is one more sheet, numbered after these, and it
-# appends its own rows to the index this run just rewrote -- so it has to run
-# after the loop above and before the PDF, which it is told to skip.
+# The corner-dispatch and gate-boundary pages are two more sheets, numbered after
+# these. A full run rewrites the index from scratch above, so both have to run
+# after the loop or their sections would be missing -- each rewrites only its own
+# section, so between themselves the order does not matter. The PDF is skipped in
+# both and bundled once below.
 if [[ -z $ONLY && -z $MODEL_FILTER && -x ./corner-sheet.sh ]]; then
   print ""
   BIN=$BIN FLAGS=$FLAGS ./corner-sheet.sh --no-pdf || print -u2 "corner-sheet.sh failed -- sheets 1-$nsheets are still current"
+fi
+if [[ -z $ONLY && -z $MODEL_FILTER && -x ./corner-sheet6.sh ]]; then
+  print ""
+  BIN=$BIN FLAGS=$FLAGS ./corner-sheet6.sh --no-pdf || print -u2 "corner-sheet6.sh failed -- sheets 1-5 are still current"
 fi
 
 # Bundle the freshly montaged sheets into the A4 PDF. Non-fatal: a machine
