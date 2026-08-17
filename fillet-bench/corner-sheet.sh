@@ -84,7 +84,7 @@ tiles=(
   "pocket|pocket floor corner (12,12,-2)|torus + tri-cap tube=4 capTri=12|12,12,-2|-1,-1,2.2|42"
   "shallow_crease|fold end face, ridge x=60 (60,0,16..36)|stock tube=0; min_angle 25 tube=2|60,0,26|0.4,-1,0.45|140"
   "tee|cylinder junction (5,0,10)|flat ear-clip flat=2|4,0,10.5|0.5,-1,0.5|44"
-  "cross|three-axis star (0,0,0)|tri-cap valleys capTri=8|0,0,0|1,-1,1|58"
+  "cross|three-axis star (0,0,0)|tri-cap valleys capTri=8, flat=3|0,0,0|1,-1,1|58"
   "tee_oblique|oblique junction (5,0,11.5)|flat ear-clip flat=4|4,0,11.5|0.5,-1,0.5|44"
   "refused_neighbour|refused crease (7.5,4,7.44) + built bead|saddle saddle=6|7.5,0,7.45|1,-0.6,0.8|40"
   "mixed_fn|48/10-facet junction (6,0,10)|centroid fan fan=4|5,0,10.5|0.5,-1,0.5|50"
