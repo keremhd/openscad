@@ -98,6 +98,12 @@ inline constexpr double kAlongSweep = 4.0;
 // baseline, if the tighter seat cannot weld.
 inline constexpr double kPullStationFrac = 0.7;
 
+// How far a corner cap's ring must stand off the pole ray for the polar fan to have
+// any width there. A degree is well under the angle any real ring point subtends at
+// the cap centre (the coarsest cap layers turn several degrees) and well over the
+// ulp noise in a direction read off a millimetre-scale offset point.
+inline constexpr double kCapPoleClearDeg = 1.0;
+
 // ---------------------------------------------------------------------------
 // Output mesh: a triangle soup with position-welded vertices, an orientation
 // pass to make winding consistent, and a per-component volume-sign fix so the
@@ -1176,11 +1182,20 @@ struct Blender
   // strips stay welded); interior layers are slerped onto the sphere and the last
   // collapses to the pole. Winding is left to orient(). arcSegs layers match the
   // arc resolution the strips were built at.
-  void emitCap(const std::vector<int>& ring, const Vector3d& C, double r,
+  //
+  // Concentric layers only tile the ring when the ring, seen from C, winds once
+  // around the pole and never reaches it — the fan is a polar parameterisation and
+  // that is its domain. A ring that touches the pole ray or doubles back in azimuth
+  // (a sector whose mitre landed back on the vertex, an arc lying in a plane through
+  // the pole) makes every layer slide over the one before it, and the cap covers
+  // itself instead of the corner. Refuse there and let the caller close the ring
+  // flat: a plane the corner does not round is worse to look at than a sphere, and
+  // better than a surface folded inside out. Returns false when it emitted nothing.
+  bool emitCap(const std::vector<int>& ring, const Vector3d& C, double r,
                const Vector3d& poleUnit)
   {
     const int n = static_cast<int>(ring.size());
-    if (n < 3) return;
+    if (n < 3) return false;
     const int L = std::max(1, arcSegs);
     std::vector<Vector3d> u(n);
     for (int i = 0; i < n; ++i) {
@@ -1188,6 +1203,7 @@ struct Blender
       const double len = d.norm();
       u[i] = len > 1e-12 ? Vector3d(d / len) : poleUnit;
     }
+    if (!windsAboutPole(u, poleUnit)) return false;
     std::vector<std::vector<int>> layer(L + 1);
     layer[0] = ring;
     for (int k = 1; k < L; ++k) {
@@ -1208,6 +1224,36 @@ struct Blender
           out.tri(a, b, pole);
         }
       }
+    return true;
+  }
+
+  // Whether the ring directions `u` (unit, seen from the cap centre) go once round
+  // `poleUnit` without ever reaching it: every azimuth step turns the same way and
+  // they sum to a full turn. This is exactly what emitCap's concentric layers need
+  // and nothing more, so a ring that merely bulges unevenly still fans.
+  static bool windsAboutPole(const std::vector<Vector3d>& u, const Vector3d& poleUnit)
+  {
+    const int n = static_cast<int>(u.size());
+    const Vector3d e1 = poleUnit.unitOrthogonal(), e2 = poleUnit.cross(e1);
+    std::vector<double> az(n);
+    for (int i = 0; i < n; ++i) {
+      // A point on the pole ray has no azimuth, so the fan has no width there.
+      if (std::abs(u[i].dot(poleUnit)) > std::cos(kCapPoleClearDeg * M_PI / 180.0)) return false;
+      az[i] = std::atan2(u[i].dot(e2), u[i].dot(e1));
+    }
+    double total = 0.0;
+    int sign = 0;
+    for (int i = 0; i < n; ++i) {
+      double d = az[(i + 1) % n] - az[i];
+      while (d > M_PI) d -= 2 * M_PI;
+      while (d < -M_PI) d += 2 * M_PI;
+      const int s = d > 0 ? 1 : (d < 0 ? -1 : 0);
+      if (s == 0) return false;
+      if (sign == 0) sign = s;
+      else if (s != sign) return false;
+      total += d;
+    }
+    return std::abs(std::abs(total) - 2 * M_PI) < 1e-6;
   }
 
   // Tessellate a trihedral corner as a subdivided spherical triangle rather
@@ -2726,9 +2772,7 @@ struct Blender
           centroid /= static_cast<double>(ring.size());
           poleUnit = (centroid - *C).normalized();
         }
-        emitCap(ring, *C, size, poleUnit);
-        ++cornerCounts.cap;
-        return;
+        if (emitCap(ring, *C, size, poleUnit)) { ++cornerCounts.cap; return; }
       }
     }
 
