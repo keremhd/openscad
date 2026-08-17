@@ -988,14 +988,21 @@ struct Blender
   // At a mixed corner the two feet are seated at one pulled-in station (stripFoot)
   // so the section is a clean perpendicular slice instead of a twisted blade.
   // The rolling-ball centre of edge (u)'s fillet arc for side triangles t0/t1 —
-  // the point crossSectionEdge sweeps its arc about. One radius off the canonical
-  // side along its sector normal (the plain rolling-ball construction, so a planar
-  // crease builds the same arc a surface-based inset would); the canonical side is
-  // the sector with the numerically smaller averaged normal, chosen so the result
-  // is independent of which incident triangle adj happened to list first. Exposed
-  // so the mixed-corner saddle can read each ring point's fillet-surface normal
-  // as (p - C): that normal is what lets the patch continue the roll's own tangent
-  // instead of relaxing to a caving minimal surface.
+  // the point crossSectionEdge sweeps its arc about. Each side offers one: its
+  // foot pushed one radius along its own sector normal (the plain rolling-ball
+  // construction, so a planar crease builds the same arc a surface-based inset
+  // would). Both feet sit on their side's offset line of the edge — exactly the
+  // setback out from it — so the two candidates share their whole cross-sectional
+  // position and differ only in how far along the edge each side's mitre carried
+  // them. The centre is therefore one point at a choice of station, and the only
+  // choice that reads the same on a crease and its mirror is the midpoint: it
+  // seats the ball halfway between the two mitres. On a straight stretch the two
+  // stations coincide and it is the one classical centre; at a corner it is the
+  // one both sides agree on, and both feet come off it at the same distance, so
+  // the section below is a circular arc rather than a radius-interpolating
+  // spiral. Exposed so the mixed-corner saddle can read each ring point's
+  // fillet-surface normal as (p - C): that normal is what lets the patch continue
+  // the roll's own tangent instead of relaxing to a caving minimal surface.
   std::optional<Vector3d> filletCenter(int u, int t0, int t1, bool concave) const
   {
     const int x = mixedVerts.count(u) ? farOf(u, t0, t1) : -1;
@@ -1007,12 +1014,8 @@ struct Blender
     Vector3d nA = sa->navg, nB = sb->navg;
     if (const auto it = normalOverride.find({u, t0}); it != normalOverride.end()) nA = it->second;
     if (const auto it = normalOverride.find({u, t1}); it != normalOverride.end()) nB = it->second;
-    const bool aFirst = std::make_tuple(nA.x(), nA.y(), nA.z()) <=
-                        std::make_tuple(nB.x(), nB.y(), nB.z());
-    const Vector3d nCen = aFirst ? nA : nB;
-    const Vector3d Tcen = aFirst ? Ta : Tb;
     const double sgn = concave ? size : -size;
-    return Vector3d(Tcen + sgn * nCen);
+    return Vector3d(0.5 * ((Ta + sgn * nA) + (Tb + sgn * nB)));
   }
 
   std::vector<Vector3d> crossSectionEdge(int u, int t0, int t1, bool concave) const
@@ -2698,18 +2701,18 @@ struct Blender
     // Each ring point carries the blend surface's own normal there (ringNrm),
     // parallel to ring: a connector (inset) point takes its face normal; an arc
     // point takes (p - C) off its fillet centre. The mixed-sign saddle reads these
-    // to leave every boundary point along the fillet's tangent. pushRing keeps the
-    // two arrays in lockstep through the same adjacent-duplicate dedup.
+    // to leave every boundary point along the fillet's tangent. pushRing keeps all
+    // the arrays in lockstep through the same adjacent-duplicate dedup.
     std::vector<int> ring;
     std::vector<Vector3d> ringNrm;
     std::vector<int> ringSign;    // +1 convex arc, -1 concave arc, 0 connector (inset)
-    std::vector<int> cornerPos;  // ring indices of the sector-inset corners (the arc joins)
+    std::vector<char> ringCorner;  // the sector-inset corners (the arc joins)
     auto pushRing = [&](int idx, const Vector3d& nrm, bool corner, int sign) {
       if (!ring.empty() && ring.back() == idx) return;
-      if (corner) cornerPos.push_back(static_cast<int>(ring.size()));
       ring.push_back(idx);
       ringNrm.push_back(nrm);
       ringSign.push_back(sign);
+      ringCorner.push_back(corner ? 1 : 0);
     };
     for (int off = 0; off < n; ++off) {
       const int i = (start + off) % n;
@@ -2740,8 +2743,43 @@ struct Blender
         }
       }
     }
-    if (ring.size() >= 2 && ring.front() == ring.back()) { ring.pop_back(); ringNrm.pop_back(); ringSign.pop_back(); }
-    while (!cornerPos.empty() && cornerPos.back() >= static_cast<int>(ring.size())) cornerPos.pop_back();
+    if (ring.size() >= 2 && ring.front() == ring.back()) {
+      ring.pop_back();
+      ringNrm.pop_back();
+      ringSign.pop_back();
+      ringCorner.pop_back();
+    }
+
+    // The walk can come back to a point it has already used: two sections at a
+    // crowded corner land on the same place, which is exactly what a mirror-symmetric
+    // pair of sections does on its own mirror plane. The ring is then not one loop
+    // but several pinched together there, and triangulating it as one loop covers the
+    // join twice — a doubled edge where the pinch is a slit, a bow-tie vertex where it
+    // is a figure eight. Cut it into its loops instead: each inner loop is closed off
+    // on its own here, and the rest carries on to the dispatch below as the corner's
+    // ring. A two-point loop is a slit whose one edge the two strips meeting on it
+    // already sew, so it closes with nothing.
+    for (bool again = true; again;) {
+      again = false;
+      std::map<int, int> firstAt;
+      for (size_t j = 0; j < ring.size(); ++j) {
+        const auto [it, ins] = firstAt.try_emplace(ring[j], static_cast<int>(j));
+        if (ins) continue;
+        const size_t i = static_cast<size_t>(it->second);
+        std::vector<int> loop(ring.begin() + i, ring.begin() + j);
+        ring.erase(ring.begin() + i, ring.begin() + j);
+        ringNrm.erase(ringNrm.begin() + i, ringNrm.begin() + j);
+        ringSign.erase(ringSign.begin() + i, ringSign.begin() + j);
+        ringCorner.erase(ringCorner.begin() + i, ringCorner.begin() + j);
+        if (loop.size() >= 3 && !ringSaddle(loop)) out.fan(loop);
+        again = true;
+        break;
+      }
+    }
+
+    std::vector<int> cornerPos;  // ring indices of the sector-inset corners
+    for (size_t i = 0; i < ring.size(); ++i)
+      if (ringCorner[i]) cornerPos.push_back(static_cast<int>(i));
 
     // Sign of the selected edges here.
     bool anyConcave = false, anyConvex = false;
