@@ -64,6 +64,15 @@ namespace {
 // a right angle, a crease dying into a corner), not the same one continuing.
 inline constexpr double kCreaseFollowMaxTurnDeg = 40.0;
 
+// How near to a straight line two edges at a vertex must run for the second to be
+// the first one CONTINUING rather than a crease turning off it. The follow walk
+// uses this to recognise a tessellation seam grazing the crease and refuse it (see
+// straightThrough). Raise it and a seam that leaves at a slight angle reads as
+// straight and the walk stops following genuine creases through their own
+// vertices; lower it and the walk runs off down cylinder seams at tangent
+// junctions.
+inline constexpr double kCreaseStraightDeg = 20.0;
+
 // A crease passes THROUGH a vertex — rather than turning a corner or branching a
 // junction — when its two edges leave nearly opposite, within this bound. It is
 // the same angle the follow walk uses, and the shared cross-section that welds
@@ -104,6 +113,157 @@ inline constexpr double kPullStationFrac = 0.7;
 // ulp noise in a direction read off a millimetre-scale offset point.
 inline constexpr double kCapPoleClearDeg = 1.0;
 
+// --- station clamps --------------------------------------------------------
+
+// The along-sweep clamp on a pull-in station, as a fraction of the edge's length:
+// a corner may never seat its cross-section further than this along its own edge,
+// so a short corner-to-corner edge keeps a straight middle between its two ends.
+// Push it toward 0.5 and the two ends meet and the strip has no middle left;
+// pull it down and a crowded corner seats short of the mitre it needs.
+inline constexpr double kStationLenFrac = 0.45;
+
+// The same guard for a corner-station OVERRIDE, which is exempt from the clamp
+// above (it is the exact seat the corner's own surface is built on) but must still
+// stop short of whatever the far end of the edge takes: this fraction of the room
+// the far station leaves. At 1.0 the two seats touch and the strip folds; well
+// below it the strip seats short of the corner surface and the corner refuses.
+inline constexpr double kStationFarClearFrac = 0.9;
+
+// --- offset-fold repair ----------------------------------------------------
+
+// A collapsed fold's survivor must be a real seat, not a near-parallel mitre that
+// raced off down the boundary: nothing further than this many setbacks from its
+// own vertex is accepted. Raise it and a runaway crossing teleports a strip across
+// the solid; lower it and a legitimately deep mitre stops trimming its spike.
+inline constexpr double kFoldSurvivorSetbacks = 2.0;
+
+// How many times each repair sweeps its whole edge set: one collapse can expose
+// the next, and one flip can expose the next. Both converge in far fewer than this
+// on the bench; the cap is only there so a pathological mesh cannot loop.
+inline constexpr int kFoldRepairSweeps = 8;
+inline constexpr int kInsetFlipPasses = 8;
+
+// --- corner-roll reconstruction --------------------------------------------
+
+// How tightly a ring arc's reconstructed rolling-ball centres must cluster for the
+// arc to be read as one cross-section of one roll, as a fraction of the blend size.
+// Widen it and a clamped or twisted arc is mistaken for a roll and the corner is
+// drawn onto a surface that is not there; tighten it and a legitimately coarse arc
+// is refused and the corner keeps its plain lofted field.
+inline constexpr double kRollArcScatterFrac = 0.15;
+
+// How far off the exact two-radii tube distance the concave section's own centre
+// may sit and still be accepted as a ball of the transition family, as a fraction
+// of the blend size. This is the gate on "is this the canonical corner at all".
+inline constexpr double kRollTubeTolFrac = 0.05;
+
+// The march along the transition's centre curve: step length as a fraction of the
+// blend size, and the cap on the number of steps. A longer step overshoots the
+// pinch the march must stop at; a shorter one wastes work and the cap then ends
+// the chain before the pinch, leaving the corner short of the face.
+inline constexpr double kRollMarchStepFrac = 0.12;
+inline constexpr int kRollMarchMaxSteps = 256;
+
+// Newton iterations pulling each marched centre back onto both tubes. It converges
+// quadratically from a step this short, so this is a cap and not a schedule.
+inline constexpr int kRollNewtonIters = 8;
+
+// Drawing the lofted field onto the reconstructed rolls: how many relax-and-redraw
+// rounds, how far each relaxation moves a sample toward its four neighbours, and
+// the pull guard's two terms (a sample moves onto the roll only if the projection
+// is nearer than (base + span * weight) * size). Fewer rounds or a smaller rate
+// leave the field bunched and pleated where the merge fans rows off one point;
+// a looser guard lets a rollProject that picked the wrong side of a degenerate
+// configuration drag the patch off the weld it has to reach.
+inline constexpr int kRollRelaxPasses = 48;
+inline constexpr double kRollRelaxRate = 0.85;
+inline constexpr double kRollPullGuardBase = 0.25;
+inline constexpr double kRollPullGuardSpan = 1.25;
+
+// --- exact-corner fit ------------------------------------------------------
+
+// How exactly the ring must match the tube the corner hands over to, as a fraction
+// of the blend size — the tolerance on every check in emitCornerTube/cornerCloses.
+// This is a fit gate, not a shape knob: loosen it and a ring that is NOT the
+// canonical corner passes and the emitted tube tears away from the strips; tighten
+// it past the arc construction's own rounding and no corner ever fits.
+inline constexpr double kTubeFitTolFrac = 1e-3;
+
+// The two round-overs (or the swing's two ends) must genuinely turn apart rather
+// than lie back-to-back on one line: their directions' |cos| must stay under this.
+// Nearer 1 and a degenerate near-straight ring is fitted as a corner.
+inline constexpr double kMinSwingTurnCos = 0.95;
+
+// --- miscellaneous ---------------------------------------------------------
+
+// The largest number of pieces one long crease edge may be split into by the
+// along-sweep floor. A backstop against a pathological length/size ratio, not a
+// resolution choice: it only binds when the edge is 256 caps long.
+inline constexpr int kMaxEdgeSplitParts = 256;
+
+// The pole-free saddle's control-arm length, as a fraction of the chord from a
+// boundary point to the patch centre. It sets how far the radial curve bulges
+// before turning in. A full-chord arm carries the curve clear across the patch and
+// stands proud of the opposite-sign valley as a needle flap; too short and the
+// patch dives straight for the centre and loses tangency with the strips.
+inline constexpr double kSaddleArmFrac = 0.55;
+
+// Two face normals count as the same direction (a duplicate, for the corner ball's
+// normal set) above this cosine, and three normals are independent enough to pin a
+// centre when their pairwise cross / triple product clears this floor. Loosen
+// either and a near-degenerate triple inverts into a wild ball centre.
+inline constexpr double kNormalDuplicateCos = 0.999;
+inline constexpr double kBasisIndependenceMin = 0.1;
+
+// Two triangles are the SAME flat face — the one face both of a corner's
+// round-overs run along — only this close to parallel. It gates the exact-corner
+// reseat, so a looser value would reseat strips against a face that is really two,
+// and the corner they hand over to would not close.
+inline constexpr double kSharedFaceCos = 0.999999;
+
+// --- corner-patch sampling -------------------------------------------------
+
+// The Coons saddle's tangent control arm, as a fraction of the chord to the patch
+// centre — the same role kSaddleArmFrac plays for the concentric saddle, but for
+// the cross curves that run concave boundary to convex boundary. Longer and the
+// cross curve overshoots into the opposite-sign side; shorter and it leaves the
+// boundary off the fillet tangent and the patch creases against the strips.
+inline constexpr double kCoonsArmFrac = 0.42;
+
+// Interior sampling floor for a corner whose real rolls are known: at least this
+// many layers across a cross curve, and enough inserted rows to match. At stock
+// settings a small radius earns only a handful of fragments, and a field with
+// nothing to move cannot shape anything — the corner keeps the coarse pinwheel the
+// raw loft folds into. Only the INTERIOR densifies, so the ring keeps its exact
+// vertices either way, and the floor goes inactive as soon as the tessellation
+// earns more than it. Raising it costs triangles on every such corner.
+inline constexpr int kCornerInteriorFloor = 16;
+
+// The outer fraction of a cross curve held flush to the strip it leaves, at each
+// end. Wider and the flush clamp reaches the middle of the patch and flattens the
+// saddle; narrower and the patch bulges proud of the strip right at the seam.
+inline constexpr double kCoonsFlushBand = 0.35;
+
+// How far the roll-projection pull is ramped in from the patch's edges: in rows
+// from either end, and in the cross-curve parameter from either boundary layer.
+// The ramp is what stops a row dropping onto the roll while the connector chord it
+// fans onto — which carries no interior layer and cannot follow — stays put.
+inline constexpr double kRollPullRowMargin = 3.0;
+inline constexpr double kRollPullSMargin = 0.15;
+
+// The concentric saddle's sliver weld, as a fraction of the blend size: interior
+// columns nearer than this to each other collapse together. Larger and the weld
+// fuses columns that are not a collapsible neighbour pair, which the manifold
+// check then rejects and the whole weld is dropped; smaller and the needle
+// triangles it exists to remove survive.
+inline constexpr double kSaddleWeldFrac = 0.06;
+
+// The weld tolerance two cross-sections are compared at, in mm — the same distance
+// OutMesh's positional weld quantises to, so two sections that pass here are
+// exactly the sections OutMesh has already fused. Moving one without the other
+// would let emitCorner skip a vertex the mesh did not actually sew.
+inline constexpr double kWeldTolMm = 1e-6;
+
 // ---------------------------------------------------------------------------
 // Output mesh: a triangle soup with position-welded vertices, an orientation
 // pass to make winding consistent, and a per-component volume-sign fix so the
@@ -116,7 +276,7 @@ struct OutMesh
   std::vector<Vector3d> V;
   std::vector<std::array<int, 3>> F;
   std::map<std::array<int64_t, 3>, int> weld;
-  double q = 1e6;  // weld quantum: 1e-6 mm (the stated weld tolerance)
+  double q = 1e6;  // weld quantum: the reciprocal of kWeldTolMm, the stated weld tolerance
 
   int add(const Vector3d& p)
   {
@@ -386,7 +546,6 @@ CreaseSelection selectCreaseEdges(const MergedMesh& m,
   // continuation has no opposite partner other than the edge we arrived on.) This
   // is what stops the follow from running down a cylinder's vertical seam where
   // the intersection curve dives steeply past it at a tangent junction.
-  constexpr double kCreaseStraightDeg = 20.0;
   const double cosStraight = std::cos(kCreaseStraightDeg * M_PI / 180.0);
   auto straightThrough = [&](int u, int v, int w) {
     const Vector3d dw = (m.pos[w] - m.pos[v]).normalized();
@@ -452,7 +611,7 @@ void subdivideLongCreaseEdges(MergedMesh& m, const std::set<EdgeKey>& edges, dou
     const double len = (m.pos[key.second] - m.pos[key.first]).norm();
     if (len <= cap) continue;
     int parts = static_cast<int>(std::ceil(len / cap));
-    parts = std::min(parts, 256);  // backstop against a pathological count
+    parts = std::min(parts, kMaxEdgeSplitParts);  // backstop against a pathological count
     todo.push_back({key.first, key.second, parts});
   }
   // Vertex ids are only ever appended, so the endpoints collected above stay
@@ -953,7 +1112,8 @@ struct Blender
       smax = std::max(smax, d);
       smin = std::min(smin, d);
     }
-    return std::min(smin + stationFrac * (smax - smin), 0.45 * (m.pos[x] - m.pos[u]).norm());
+    return std::min(smin + stationFrac * (smax - smin),
+                    kStationLenFrac * (m.pos[x] - m.pos[u]).norm());
   }
 
   double pullStation(int u, int x) const
@@ -966,7 +1126,7 @@ struct Blender
     // of what the far end takes, or the strip folds; on a raked corner the crease can be
     // split by a mesh vertex a couple of radii along, which is exactly that case.
     return std::min(it->second,
-                    0.9 * ((m.pos[x] - m.pos[u]).norm() - rawStation(x, u)));
+                    kStationFarClearFrac * ((m.pos[x] - m.pos[u]).norm() - rawStation(x, u)));
   }
 
   // Where edge (u,x)'s cross-section touches face t at u — the perpendicular foot
@@ -1151,7 +1311,7 @@ struct Blender
       const Vector3d n = m.tris[t].normal;
       bool dup = false;
       for (const auto& e : normals)
-        if (e.dot(n) > 0.999) dup = true;
+        if (e.dot(n) > kNormalDuplicateCos) dup = true;
       if (!dup) normals.push_back(n);
     }
     // Greedily pick three mutually independent normals.
@@ -1159,10 +1319,13 @@ struct Blender
     for (const auto& n : normals) {
       if (basis.empty()) { basis.push_back(n); continue; }
       if (basis.size() == 1) {
-        if (basis[0].cross(n).norm() > 0.1) basis.push_back(n);
+        if (basis[0].cross(n).norm() > kBasisIndependenceMin) basis.push_back(n);
         continue;
       }
-      if (std::abs(basis[0].cross(basis[1]).dot(n)) > 0.1) { basis.push_back(n); break; }
+      if (std::abs(basis[0].cross(basis[1]).dot(n)) > kBasisIndependenceMin) {
+        basis.push_back(n);
+        break;
+      }
     }
     if (basis.size() < 3) return std::nullopt;
     Matrix3d N;
@@ -1580,7 +1743,7 @@ struct Blender
         return (at.at(f[1]) - at.at(f[0])).cross(at.at(f[2]) - at.at(f[0])).dot(nrm);
       };
       bool any = false;
-      for (int pass = 0; pass < 8; ++pass) {
+      for (int pass = 0; pass < kInsetFlipPasses; ++pass) {
         std::map<EdgeKey, std::vector<int>> use;
         for (const auto& [t, f] : cur)
           for (int i = 0; i < 3; ++i)
@@ -1649,7 +1812,7 @@ struct Blender
     for (size_t t = 0; t < m.tris.size(); ++t)
       for (const int u : m.tris[t].v) vTris[u].push_back(static_cast<int>(t));
 
-    for (int sweep = 0; sweep < 8; ++sweep) {
+    for (int sweep = 0; sweep < kFoldRepairSweeps; ++sweep) {
       bool collapsed = false;
       for (const auto& [e, ts] : adj) {
         // Only a surface boundary is a chain of the offset; an interior seam moves
@@ -1685,7 +1848,7 @@ struct Blender
           // it belongs to is a survivor.
           const int win = keepA ? e.first : e.second;
           if ((keep - m.pos[win]).norm() >
-              2.0 * (selected.count(e) ? setback(e) : size))
+              kFoldSurvivorSetbacks * (selected.count(e) ? setback(e) : size))
             continue;
           // Only a plain link in a chain may be trimmed. A vertex where more than two
           // surface boundaries meet is a junction — a crowded corner, a tangent
@@ -1818,7 +1981,7 @@ struct Blender
       // is meaningless (a clamped or twisted arc scatters its centres).
       double spread = 0;
       for (int k = lo; k < hi; ++k) spread = std::max(spread, (cvC[k] - cen).norm());
-      if (spread > 0.15 * size) return {};
+      if (spread > kRollArcScatterFrac * size) return {};
       R.axP[r] = cen;
     }
     const std::array<Vector3d, 2>& axP = R.axP;
@@ -1838,14 +2001,14 @@ struct Blender
     // The concave arc's own centre must already be a ball of the family, or this is
     // not the canonical two-round-overs-closing-one-crease corner.
     Vector3d g0a, g0b;
-    if (std::abs(tube(C0, 0, g0a) - 2 * size) > 0.05 * size) return {};
-    if (std::abs(tube(C0, 1, g0b) - 2 * size) > 0.05 * size) return {};
+    if (std::abs(tube(C0, 0, g0a) - 2 * size) > kRollTubeTolFrac * size) return {};
+    if (std::abs(tube(C0, 1, g0b) - 2 * size) > kRollTubeTolFrac * size) return {};
 
     std::vector<Vector3d> chain{C0};
     Vector3d c = C0, prevT = Vector3d::Zero();
     double prevAng = std::numeric_limits<double>::max();
-    const double h = 0.12 * size;
-    for (int step = 0; step < 256; ++step) {
+    const double h = kRollMarchStepFrac * size;
+    for (int step = 0; step < kRollMarchMaxSteps; ++step) {
       Vector3d ga, gb;
       tube(c, 0, ga);
       tube(c, 1, gb);
@@ -1861,7 +2024,7 @@ struct Blender
       if (orient < 0) t = -t;
       prevT = t;
       Vector3d cn = c + h * t;
-      for (int it = 0; it < 8; ++it) {  // Newton back onto both tubes
+      for (int it = 0; it < kRollNewtonIters; ++it) {  // Newton back onto both tubes
         Vector3d na, nb;
         const double fa = tube(cn, 0, na) - 2 * size, fb = tube(cn, 1, nb) - 2 * size;
         if (std::abs(fa) < 1e-12 * size && std::abs(fb) < 1e-12 * size) break;
@@ -2025,7 +2188,7 @@ struct Blender
     if (k < 2 || n < 3 * k + 2 || n > 3 * k + 6) return false;
     if (static_cast<int>(ringNrm.size()) != n || static_cast<int>(ringSign.size()) != n)
       return false;
-    const double tol = 1e-3 * size;
+    const double tol = kTubeFitTolFrac * size;
 
     // The shared face's normal is a connector's own face normal — but which connector is
     // the shared face's is not known ahead of the fit, so every distinct one is tried.
@@ -2069,7 +2232,7 @@ struct Blender
         if (std::abs(w.norm() - size) > tol || std::abs(w.dot(np)) > tol) return false;
         uc[i] = w.normalized();
       }
-      return std::abs(uc[0].dot(uc[k])) < 0.95;  // the swing must really turn
+      return std::abs(uc[0].dot(uc[k])) < kMinSwingTurnCos;  // the swing must really turn
     };
 
     auto fits = [&](const Vector3d& mc) {
@@ -2234,7 +2397,6 @@ struct Blender
     // is the outward radius of that surface, ringNrm[i] = unit(P - C), and every arc
     // boundary point lies one radius off its centre, so C = P - size * ringNrm[i]
     // reconstructs the centre the near-seam clamp (below) projects onto.
-    const double arm = 0.42;
     auto build = [&](const std::vector<int>& idx, std::vector<Vector3d>& P,
                      std::vector<Vector3d>& M, std::vector<double>& t, std::vector<Vector3d>& C) {
       const int m = static_cast<int>(idx.size());
@@ -2244,7 +2406,7 @@ struct Blender
       for (int i = 1; i < m; ++i) { acc += (P[i] - P[i - 1]).norm(); t[i] = acc; }
       for (int i = 1; i < m; ++i) t[i] = acc > 1e-12 ? t[i] / acc : static_cast<double>(i) / (m - 1);
       for (int i = 0; i < m; ++i) {
-        M[i] = tangentCtrl(P[i], ringNrm[idx[i]], Q, arm);
+        M[i] = tangentCtrl(P[i], ringNrm[idx[i]], Q, kCoonsArmFrac);
         C[i] = P[i] - size * ringNrm[idx[i]].normalized();
       }
     };
@@ -2263,7 +2425,7 @@ struct Blender
       for (const auto& p : ccC) C0 += p;
       C0 /= static_cast<double>(ccC.size());
       bool tight = true;
-      for (const auto& p : ccC) tight = tight && (p - C0).norm() <= 0.15 * size;
+      for (const auto& p : ccC) tight = tight && (p - C0).norm() <= kRollArcScatterFrac * size;
       if (tight) roll = cornerRoll(ring, ringSign, cc, cv, cvC, C0, Q);
     }
 
@@ -2277,8 +2439,7 @@ struct Blender
     // exact vertex count and positions and the extra layers land strictly between them:
     // no new boundary vertex, no T-junction against a strip. The floor is inactive as
     // soon as the tessellation earns more than it, so nothing changes at higher $fn.
-    const int kFloor = 16;
-    const int K = roll.ok() ? std::max(kFloor, arcSegs) : std::max(2, arcSegs);
+    const int K = roll.ok() ? std::max(kCornerInteriorFloor, arcSegs) : std::max(2, arcSegs);
 
     // Push a proud sample back onto the rolling-ball fillet surface it stands over.
     // The surface at centre C is the sphere of radius size; convex fillet material is
@@ -2299,11 +2460,10 @@ struct Blender
     // (s=0 on the concave boundary, s=1 on the convex boundary); a connector edge is
     // the same curve at just its two endpoints. Returns the layer positions, which the
     // caller places once the whole field is laid out. The interior layers within the
-    // outer band of each end are
-    // clamped flush onto that end's fillet surface (weight smoothstepped to zero across
-    // the band) so the patch continues the strip near the seam instead of bulging proud;
-    // the boundary layers (s=0, s=1) are left untouched so they stay welded to the ring.
-    const double band = 0.35;  // outer fraction of the cross curve kept flush to the strip
+    // outer band of each end (kCoonsFlushBand) are clamped flush onto that end's fillet
+    // surface, the weight smoothstepped to zero across the band, so the patch continues
+    // the strip near the seam instead of bulging proud; the boundary layers (s=0, s=1)
+    // are left untouched so they stay welded to the ring.
     auto crossCurve = [&](int i, int j, bool edge, std::vector<Vector3d>& lay) {
       lay.clear();
       const int steps = edge ? 1 : K;
@@ -2313,8 +2473,9 @@ struct Blender
         Vector3d p = u * u * u * ccP[i] + 3 * u * u * s * ccM[i] +
                      3 * u * s * s * cvM[j] + s * s * s * cvP[j];
         if (l > 0 && l < steps) {  // never move the welded boundary layers
-          const double ec = std::clamp((band - s) / band, 0.0, 1.0);
-          const double ev = std::clamp((band - (1 - s)) / band, 0.0, 1.0);
+          const double ec = std::clamp((kCoonsFlushBand - s) / kCoonsFlushBand, 0.0, 1.0);
+          const double ev =
+            std::clamp((kCoonsFlushBand - (1 - s)) / kCoonsFlushBand, 0.0, 1.0);
           p = flush(p, ccC[i], /*concave=*/true, ec * ec * (3 - 2 * ec));
           p = flush(p, cvC[j], /*concave=*/false, ev * ev * (3 - 2 * ev));
         }
@@ -2376,7 +2537,7 @@ struct Blender
     // (out.tri drops the degenerate triangles the weld leaves). Each ring edge still
     // carries exactly the one triangle the unrefined merge gave it.
     if (roll.ok() && R >= 2) {
-      const int M = std::max(1, (kFloor + R - 2) / (R - 1));
+      const int M = std::max(1, (kCornerInteriorFloor + R - 2) / (R - 1));
       if (M > 1) {
         std::vector<std::vector<Vector3d>> fine;
         fine.reserve(static_cast<size_t>(R - 1) * M + 1);
@@ -2415,16 +2576,15 @@ struct Blender
     // redraw undoes the caving it would otherwise leave, and after a few rounds the
     // patch is an evenly sampled piece of the real surface.
     if (roll.ok() && R > 4 && K >= 2) {
-      const double rowMargin = 3, sMargin = 0.15;
       std::vector<double> rw(R);
       for (int r = 0; r < R; ++r) {
-        const double d = std::clamp(std::min(r, R - 1 - r) / rowMargin, 0.0, 1.0);
+        const double d = std::clamp(std::min(r, R - 1 - r) / kRollPullRowMargin, 0.0, 1.0);
         rw[r] = d * d * (3 - 2 * d);
       }
       std::vector<double> sw(K + 1);
       for (int l = 0; l <= K; ++l) {
         const double s = static_cast<double>(l) / K;
-        const double d = std::clamp(std::min(s, 1 - s) / sMargin, 0.0, 1.0);
+        const double d = std::clamp(std::min(s, 1 - s) / kRollPullSMargin, 0.0, 1.0);
         sw[l] = d * d * (3 - 2 * d);
       }
       auto at = [&](int r, int l) { return rowAt(grid[r], l); };
@@ -2438,21 +2598,22 @@ struct Blender
       auto draw = [&](int r, int l, Vector3d p) {
         const double w = rw[r] * sw[l];
         const Vector3d q = rollProject(roll, p);
-        if ((q - p).norm() < (0.25 + 1.25 * w) * size) p += w * (q - p);
+        if ((q - p).norm() < (kRollPullGuardBase + kRollPullGuardSpan * w) * size)
+          p += w * (q - p);
         return p;
       };
       for (int r = 1; r + 1 < R; ++r)
         if (static_cast<int>(grid[r].size()) == K + 1)
           for (int l = 1; l < K; ++l) grid[r][l] = draw(r, l, grid[r][l]);
       // enough rounds for the relaxation to reach across the fan
-      for (int pass = 0; pass < 48; ++pass) {
+      for (int pass = 0; pass < kRollRelaxPasses; ++pass) {
         std::vector<std::vector<Vector3d>> next = grid;
         for (int r = 1; r + 1 < R; ++r) {
           if (static_cast<int>(grid[r].size()) != K + 1) continue;
           for (int l = 1; l < K; ++l) {
             const Vector3d avg =
                 0.25 * (at(r - 1, l) + at(r + 1, l) + grid[r][l - 1] + grid[r][l + 1]);
-            next[r][l] = draw(r, l, grid[r][l] + 0.85 * (avg - grid[r][l]));
+            next[r][l] = draw(r, l, grid[r][l] + kRollRelaxRate * (avg - grid[r][l]));
           }
         }
         grid.swap(next);
@@ -2541,7 +2702,7 @@ struct Blender
       // corner, stands proud of the opposite-sign valley as a needle flap. Half the
       // chord keeps the fillet tangent at the boundary (G1) and a gentle bulge while
       // staying on this foot's own side of the patch.
-      M[i] = B[i] + 0.55 * d.norm() * t;
+      M[i] = B[i] + kSaddleArmFrac * d.norm() * t;
     }
 
     // Pole-free concentric-ring topology: k layers from the boundary ring inward,
@@ -2582,7 +2743,7 @@ struct Blender
     // the exact ring points the strips weld to, so the patch perimeter is untouched
     // and only interior columns collapse. Collapsed triangles become degenerate and
     // out.tri drops them.
-    const double weldTol = 0.06 * size;
+    const double weldTol = kSaddleWeldFrac * size;
     std::vector<int> rep(V.size());
     for (int i = 0; i < static_cast<int>(V.size()); ++i) rep[i] = i;
     auto find = [&](int x) { while (rep[x] != x) x = rep[x]; return x; };
@@ -2655,7 +2816,7 @@ struct Blender
   {
     if (a.size() != b.size() || a.empty()) return false;
     const int n = static_cast<int>(a.size());
-    auto same = [](const Vector3d& p, const Vector3d& q) { return (p - q).norm() < 1e-6; };
+    auto same = [](const Vector3d& p, const Vector3d& q) { return (p - q).norm() < kWeldTolMm; };
     bool fwd = true, rev = true;
     for (int i = 0; i < n; ++i) {
       if (!same(a[i], b[i])) fwd = false;
@@ -2891,7 +3052,7 @@ struct Blender
   bool cornerCloses(int u, const std::array<int, 2>& cvx, int y, int sharedSurf,
                     const Vector3d& nf) const
   {
-    const double tol = 1e-3 * size;
+    const double tol = kTubeFitTolFrac * size;
     const auto& tsy = adj.at(EdgeKey{std::min(u, y), std::max(u, y)});
     const auto C0 = filletCenter(u, tsy[0], tsy[1], /*concave=*/true);
     if (!C0) return false;
@@ -2943,7 +3104,7 @@ struct Blender
         if ((q - cs[head ? j : arcSegs - j]).norm() > tol) return false;
       }
     }
-    return std::abs(s0.dot(s1)) < 0.95;  // the two round-overs must genuinely turn apart
+    return std::abs(s0.dot(s1)) < kMinSwingTurnCos;  // the two round-overs must genuinely turn apart
   }
 
   // Seat the two convex strips of such a corner at their full mitre.
@@ -2974,7 +3135,7 @@ struct Blender
       for (const int a : adj.at(EdgeKey{std::min(u, cvx[0]), std::max(u, cvx[0])}))
         for (const int b : adj.at(EdgeKey{std::min(u, cvx[1]), std::max(u, cvx[1])}))
           if (a != b && surfaceOf[a] == surfaceOf[b] && fx < 0) { fx = a; fz = b; }
-      if (fx < 0 || m.tris[fx].normal.dot(m.tris[fz].normal) < 0.999999) continue;
+      if (fx < 0 || m.tris[fx].normal.dot(m.tris[fz].normal) < kSharedFaceCos) continue;
 
       auto seatFull = [&](int x) {
         const Vector3d eh = (m.pos[x] - m.pos[u]).normalized();
