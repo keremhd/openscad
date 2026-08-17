@@ -1131,7 +1131,20 @@ struct Blender
   // so single-sign caps and pass-through welds are untouched.
   std::set<int> mixedVerts;
 
-  bool pulled(int u) const { return mixedVerts.count(u) > 0; }
+  // Same-sign vertices seated at the same pulled-in station, populated beside
+  // mixedVerts when turnPull is on. Everything that asks "is this vertex seated at a
+  // station" asks pulled() and sees both; only the exact-torus reseat in
+  // computeCornerStations stays on mixedVerts, the corner it reseats being a mixed
+  // one by definition.
+  std::set<int> turnVerts;
+
+  // Whether same-sign turning corners take the pull-in too. Off by default: it is
+  // the right seat where two strips lap on the inside of a turn and the wrong one
+  // where they were welding happily, so the driver turns it on only for a mesh that
+  // came out folded and keeps the result only if fewer folds came with it.
+  bool turnPull = false;
+
+  bool pulled(int u) const { return mixedVerts.count(u) || turnVerts.count(u); }
 
   // Whether to seat mixed corners with the pulled-in cross-section (the blade fix)
   // or the baseline mitre. The driver runs the pulled build first and, only if it
@@ -1182,6 +1195,37 @@ struct Blender
       if (!selected.count(e)) { partial.insert(e.first); partial.insert(e.second); }
     for (const auto& [v, s] : sign)
       if (s.first && s.second && !partial.count(v)) mixedVerts.insert(v);
+    if (!turnPull) return;
+
+    // The blade is not exclusive to a mixed corner.
+    //
+    // A cross-section is spanned between its two feet, and each foot sits at its own
+    // face's mitre -- its own distance along the edge. Where the two faces mitre to
+    // very different depths the section is not a slice across the edge but a blade
+    // twisted along it, and two blades meeting at a turning vertex sweep through
+    // each other: the strips lap on the inside of the turn and come back as a fold.
+    // Mixed signs make that happen dramatically, but they are not what causes it -- a
+    // crease running off a plate and up a boss turns the same way with one sign
+    // throughout. The same seat answers it: both feet at one station, which
+    // un-twists the blade and leaves the wedge to the corner patch already built
+    // there.
+    //
+    // It is not free, which is why it is a tier and not the default: a corner whose
+    // strips were not lapping is pulled back for nothing and the bead necks.
+    for (int u = 0; u < static_cast<int>(m.pos.size()); ++u) {
+      if (mixedVerts.count(u) || partial.count(u)) continue;
+      std::vector<int> via;
+      for (const auto& [key, ts] : adj)
+        if ((key.first == u || key.second == u) && selected.count(key))
+          via.push_back(key.first == u ? key.second : key.first);
+      if (via.size() < 2) continue;
+      // Two sections that already weld are one crease passing through, and moving
+      // one side of a weld the other side does not see would open it.
+      if (via.size() == 2 &&
+          sectionsWeld(edgeCrossSection(u, via[0]), edgeCrossSection(u, via[1])))
+        continue;
+      turnVerts.insert(u);
+    }
   }
 
   bool isSelected(int a, int b) const
@@ -3899,7 +3943,7 @@ std::shared_ptr<const Geometry> buildBlend(
     Blender::CornerCounts corners;
   };
   auto buildOn = [&](const MergedMesh& m, double surfaceThresholdDeg, bool pullIn,
-                     double stationFrac, bool sub = true) -> Attempt {
+                     double stationFrac, bool turnPull = false, bool sub = true) -> Attempt {
     const std::map<EdgeKey, std::vector<int>> adj = buildEdgeAdjacency(m.tris);
     // Group surfaces by near-tangency, not by the feature threshold: a sub-crease
     // seam that is not near-tangent (a tee's tangent gap) must stay a surface
@@ -3910,6 +3954,7 @@ std::shared_ptr<const Geometry> buildBlend(
               thresholdDeg, node.discretizer};
     b.pullIn = pullIn;
     b.stationFrac = stationFrac;
+    b.turnPull = turnPull;
     // Uniform arc tessellation: a quarter-turn's worth of segments from the
     // discretizer, applied to every cross-section regardless of its subtended
     // angle. A fillet crease whose dihedral varies (an oblique elliptical seam)
@@ -4029,8 +4074,12 @@ std::shared_ptr<const Geometry> buildBlend(
     Attempt b2 = buildOn(mSub, kDefaultSurfaceThresholdDeg, false, 1.0);
     if (better(b2, a)) a = std::move(b2);
   }
+  if (a.status != Status::Ok || a.folds > 0) {
+    Attempt bt = buildOn(mSub, kDefaultSurfaceThresholdDeg, true, kPullStationFrac, true);
+    if (better(bt, a)) a = std::move(bt);
+  }
   if (didSubdivide && (a.status != Status::Ok || a.folds > 0)) {
-    Attempt b3 = buildOn(m0, kDefaultSurfaceThresholdDeg, false, 1.0, /*sub=*/false);
+    Attempt b3 = buildOn(m0, kDefaultSurfaceThresholdDeg, false, 1.0, false, /*sub=*/false);
     if (better(b3, a)) a = std::move(b3);
   }
   // The sliver weld is judged, not assumed. Removing a blade the tessellation put
@@ -4062,7 +4111,11 @@ std::shared_ptr<const Geometry> buildBlend(
       if (better(r2, r)) r = std::move(r2);
     }
     if (r.status != Status::Ok || r.folds > 0) {
-      Attempt r3 = buildOn(mRaw, kDefaultSurfaceThresholdDeg, false, 1.0, /*sub=*/false);
+      Attempt rt = buildOn(mRawSub, kDefaultSurfaceThresholdDeg, true, kPullStationFrac, true);
+      if (better(rt, r)) r = std::move(rt);
+    }
+    if (r.status != Status::Ok || r.folds > 0) {
+      Attempt r3 = buildOn(mRaw, kDefaultSurfaceThresholdDeg, false, 1.0, false, /*sub=*/false);
       if (better(r3, r)) r = std::move(r3);
     }
     // Ties go to the unwelded mesh: it is the one that moved no geometry.
