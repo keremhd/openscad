@@ -77,7 +77,7 @@ tiles=(
   "elbow_curved_wall|cylindrical trough wall, arc crease|saddle=2 at stock, tube=2 at fn 16/64|7.91,0,6|1,-1,0.7|55"
   "elbow_facet_endface|end face kinks 10deg exactly at the crease|one of each: tube=1 coons=1|6,0,6|1,-1,0.7|55"
   "elbow_crowded|arms 6 thick against 2R=5.8|torus tube=2, not crowded out|6,0,6|1,-1,0.7|40"
-  "elbow_thin_arm|arm 3 thick against 2R=4|torus tube=2, no refusal|3,0,6|1,-1,0.7|45"
+  "elbow_thin_arm|arm 3 thick against 2R=4|saddle+fan, turn seat (was torus tube=2)|3,0,6|1,-1,0.7|45"
   "step_notch|inverse elbow: 2 concave + 1 convex|torus + tri-cap tube=3 capTri=11|20,10,20|1,1,1|55"
   "elbow_rot30|control: square elbow rotated 30deg about z|torus tube=2|2.598,1.5,3|1.366,-0.366,0.7|28"
   "elbow_big|control: lbracket at 3x size and 3x radius|torus tube=2|18,0,18|1,-1,0.7|165"
