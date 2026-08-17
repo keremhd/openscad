@@ -264,6 +264,36 @@ inline constexpr double kSaddleWeldFrac = 0.06;
 // would let emitCorner skip a vertex the mesh did not actually sew.
 inline constexpr double kWeldTolMm = 1e-6;
 
+// --- face footprint --------------------------------------------------------
+
+// The in-plane distance below which a footprint's own geometry is degenerate, as a
+// fraction of the blend size: a link this short is no direction, a crossing this
+// shallow is rounding, an ear this thin is not one. It is deliberately far coarser
+// than the mesh weld -- it decides whether a construction is meaningful, not
+// whether two points are the same point, and that second question is settled at
+// the weld itself (kFootprintSeatTol below). Raise it and a real crossing is
+// dismissed as rounding, leaving the spike it would have trimmed; lower it and the
+// ear clip starts cutting slivers whose normals are noise.
+inline constexpr double kFootprintEpsFrac = 1e-4;
+
+// Two consecutive points of a retreated boundary are ONE SEAT below this distance,
+// in mm. They arrive coincident whenever a trim has collapsed a link away, and a
+// zero-length link is an ear clipper's one unrecoverable input. It is the mesh's
+// own weld and not a fraction of anything: below it the two are the same vertex to
+// everything downstream, and above it they are two, and a strip welds to each.
+// Raise it and a seat a strip still welds to is dropped from under it -- measured,
+// at 1e-4 of the size it takes elbow_facet_endface's corner off the exact-torus
+// branch by moving a boundary point the corner is fitted against.
+inline constexpr double kFootprintSeatTol = kWeldTolMm;
+
+// How exactly a finished footprint triangulation must reproduce its own polygon's
+// area, as a fraction of that area. It is the check that the hole bridges did not
+// cross anything: a bridge that did produces a triangulation that laps over itself
+// and misses by far more than any rounding. Loosen it and a folded bridge ships;
+// tighten it past the ear clip's own rounding and every holed face falls back to
+// the untrimmed emission.
+inline constexpr double kFootprintAreaTol = 1e-6;
+
 // ---------------------------------------------------------------------------
 // Output mesh: a triangle soup with position-welded vertices, an orientation
 // pass to make winding consistent, and a per-component volume-sign fix so the
@@ -784,6 +814,148 @@ void dissolveSwallowedVertices(MergedMesh& m, const std::map<EdgeKey, EdgeClass>
       next.push_back(Tri{{ring[t[0]], ring[t[1]], ring[t[2]]}, nrm, id});
     m.tris = std::move(next);
   }
+}
+
+// --- the face footprint, in the face's own plane ---------------------------
+//
+// A planar face's footprint is what is left of it once every round-over along its
+// boundary has retreated: one outer loop, plus one inner loop per hole the face
+// carries. It is a 2-D object and the faults it has are 2-D faults — a boundary
+// that crosses itself, a triangulation whose diagonals no longer fit the region
+// their vertices moved to — so it is worked in the face plane rather than read off
+// the moved triangles one at a time.
+
+struct Basis2
+{
+  Vector3d o, ex, ey;
+};
+
+Basis2 planeBasis(const Vector3d& o, const Vector3d& nrm)
+{
+  Vector3d ex = (std::abs(nrm.x()) < 0.9 ? Vector3d::UnitX() : Vector3d::UnitY());
+  ex = (ex - ex.dot(nrm) * nrm).normalized();
+  return {o, ex, nrm.cross(ex)};
+}
+
+Vector2d project2(const Basis2& b, const Vector3d& p)
+{
+  const Vector3d d = p - b.o;
+  return {d.dot(b.ex), d.dot(b.ey)};
+}
+
+Vector3d unproject2(const Basis2& b, const Vector2d& p)
+{
+  return b.o + p.x() * b.ex + p.y() * b.ey;
+}
+
+double cross2(const Vector2d& a, const Vector2d& b, const Vector2d& c)
+{
+  return (b.x() - a.x()) * (c.y() - a.y()) - (b.y() - a.y()) * (c.x() - a.x());
+}
+
+// Twice the signed area of a closed 2-D loop; positive is counter-clockwise, which
+// is the winding a face's outer loop carries about its own normal.
+double loopArea2(const std::vector<Vector2d>& p)
+{
+  double a = 0;
+  for (size_t i = 0; i < p.size(); ++i) {
+    const Vector2d& q = p[(i + 1) % p.size()];
+    a += p[i].x() * q.y() - q.x() * p[i].y();
+  }
+  return a;
+}
+
+// Where two segments cross each other properly — strictly inside both, so segments
+// that merely share an endpoint (every adjacent pair of links does) are not
+// crossings. eps is a length, in the units the points are in.
+bool segCross2(const Vector2d& a, const Vector2d& b, const Vector2d& c, const Vector2d& d,
+               double eps, Vector2d& x)
+{
+  const Vector2d r = b - a, s = d - c;
+  const double den = r.x() * s.y() - r.y() * s.x();
+  const double rl = r.norm(), sl = s.norm();
+  if (rl < eps || sl < eps) return false;
+  if (std::abs(den) < eps * eps * 1e-6) return false;  // parallel, or as good as
+  const Vector2d ac = c - a;
+  const double t = (ac.x() * s.y() - ac.y() * s.x()) / den;
+  const double u = (ac.x() * r.y() - ac.y() * r.x()) / den;
+  const double te = eps / rl, ue = eps / sl;
+  if (t <= te || t >= 1 - te || u <= ue || u >= 1 - ue) return false;
+  x = a + t * r;
+  return true;
+}
+
+// Ear-clip a 2-D ring given as indices into p, counter-clockwise. Unlike
+// earClipPlanar this one is fed rings that deliberately visit one position twice —
+// the two ends of a hole bridge — so a point coincident with one of the ear's own
+// corners is not treated as blocking it. Returns false if no ear is found, which
+// is the caller's signal that the ring is not simple and the patch must be refused.
+bool earClip2(const std::vector<Vector2d>& p, std::vector<int> ring,
+              std::vector<std::array<int, 3>>& tris, double eps)
+{
+  const int n = static_cast<int>(ring.size());
+  if (n < 3) return false;
+  tris.clear();
+  int guard = 0;
+  while (ring.size() > 3 && guard++ < 4 * n) {
+    const int k = static_cast<int>(ring.size());
+    bool clipped = false;
+    for (int i = 0; i < k; ++i) {
+      const int ia = ring[(i + k - 1) % k], ib = ring[i], ic = ring[(i + 1) % k];
+      const Vector2d &A = p[ia], &B = p[ib], &C = p[ic];
+      if (cross2(A, B, C) <= eps * eps) continue;  // reflex, or too thin to be an ear
+      bool ear = true;
+      for (int j = 0; j < k && ear; ++j) {
+        const int q = ring[j];
+        if (q == ia || q == ib || q == ic) continue;
+        const Vector2d& P = p[q];
+        if ((P - A).norm() < eps || (P - B).norm() < eps || (P - C).norm() < eps) continue;
+        if (cross2(A, B, P) >= 0 && cross2(B, C, P) >= 0 && cross2(C, A, P) >= 0) ear = false;
+      }
+      if (!ear) continue;
+      tris.push_back({ia, ib, ic});
+      ring.erase(ring.begin() + i);
+      clipped = true;
+      break;
+    }
+    if (!clipped) return false;
+  }
+  if (ring.size() == 3) tris.push_back({ring[0], ring[1], ring[2]});
+  return true;
+}
+
+// Splice a hole loop into the outer ring along a bridge — the classical way to hand
+// a polygon with holes to an ear clipper. The bridge is the shortest ring/hole
+// vertex pair whose segment crosses no edge of either loop; a heuristic, which is
+// why the caller checks the finished triangulation's area against the polygon's own
+// rather than trusting it.
+bool bridgeHole(std::vector<int>& ring, const std::vector<int>& hole,
+                const std::vector<Vector2d>& p, double eps)
+{
+  auto blocked = [&](const Vector2d& a, const Vector2d& b, const std::vector<int>& loop) {
+    Vector2d x;
+    for (size_t i = 0; i < loop.size(); ++i)
+      if (segCross2(a, b, p[loop[i]], p[loop[(i + 1) % loop.size()]], eps, x)) return true;
+    return false;
+  };
+  int bi = -1, bj = -1;
+  double best = std::numeric_limits<double>::max();
+  for (size_t i = 0; i < ring.size(); ++i)
+    for (size_t j = 0; j < hole.size(); ++j) {
+      const double d = (p[ring[i]] - p[hole[j]]).squaredNorm();
+      if (d >= best) continue;
+      if (blocked(p[ring[i]], p[hole[j]], ring) || blocked(p[ring[i]], p[hole[j]], hole)) continue;
+      best = d;
+      bi = static_cast<int>(i);
+      bj = static_cast<int>(j);
+    }
+  if (bi < 0) return false;
+  std::vector<int> next(ring.begin(), ring.begin() + bi + 1);
+  for (size_t k = 0; k < hole.size(); ++k) next.push_back(hole[(bj + k) % hole.size()]);
+  next.push_back(hole[bj]);
+  next.insert(next.end(), ring.begin() + bi, ring.end());
+  ring = std::move(next);
+  return true;
 }
 
 // The dominant blend construction. Fields captured once so the per-edge and
@@ -1627,6 +1799,26 @@ struct Blender
   // hole. Each such foot goes on the inset edge between the corner's mitre and x's
   // inset, in order from the corner outward — but only where it actually falls
   // inside that edge, see below.
+  // The pulled-in strip foot edge (a,b) leaves on face ti, where that foot belongs
+  // to the face at all. It only does where it falls strictly inside the inset edge
+  // it is being inserted into: on the furthest-mitre face it lands on the mitre and
+  // adds nothing; where the pull-in station outruns the inset edge it lands at or
+  // beyond one of its ends, and inserting it there would spike the ring back on
+  // itself — a self-overlapping polygon no triangulation can save. Both the
+  // per-triangle pass and the whole-face footprint read it, so the two agree on the
+  // face boundary vertex for vertex, whichever emits.
+  std::optional<Vector3d> footOn(int a, int b, int ti) const
+  {
+    if (!mixedVerts.count(a) || !isSelected(a, b)) return std::nullopt;
+    const Vector3d f = stripFoot(a, b, ti);
+    const Vector3d A = insetForTri(a, ti), d = insetForTri(b, ti) - A;
+    const double dd = d.squaredNorm();
+    if (dd < 1e-18) return std::nullopt;
+    const double s = (f - A).dot(d) / dd;
+    if (s < 1e-9 || s > 1.0 - 1e-9) return std::nullopt;
+    return f;
+  }
+
   std::vector<Vector3d> surfacePolygon(int ti) const
   {
     const auto& v = m.tris[ti].v;
@@ -1639,21 +1831,7 @@ struct Blender
     // Walk the three directed edges, emitting each tail vertex's inset then any
     // strip feet that fall on that edge — near-tail first, near-head second.
     std::vector<Vector3d> poly;
-    auto footOn = [&](int a, int b) -> std::optional<Vector3d> {
-      if (!mixedVerts.count(a) || !isSelected(a, b)) return std::nullopt;
-      const Vector3d f = stripFoot(a, b, ti);
-      // The foot only belongs to this face where it falls strictly inside the inset
-      // edge it is being inserted into. On the furthest-mitre face it lands on the
-      // mitre and adds nothing; where the pull-in station outruns the inset edge it
-      // lands at or beyond one of its ends, and inserting it there would spike the
-      // ring back on itself — a self-overlapping polygon no triangulation can save.
-      const Vector3d A = insetForTri(a, ti), d = insetForTri(b, ti) - A;
-      const double dd = d.squaredNorm();
-      if (dd < 1e-18) return std::nullopt;
-      const double s = (f - A).dot(d) / dd;
-      if (s < 1e-9 || s > 1.0 - 1e-9) return std::nullopt;
-      return f;
-    };
+    auto footOn = [&](int a, int b) { return this->footOn(a, b, ti); };
     for (int i = 0; i < 3; ++i) {
       const int a = v[i], b = v[(i + 1) % 3];
       poly.push_back(P[i]);
@@ -1703,6 +1881,276 @@ struct Blender
     return true;
   }
 
+  // --- the face footprint ---------------------------------------------------
+
+  // One directed boundary link of a surface: the edge a->b as triangle t carries it,
+  // t being the surface's own side of it. Chained, these are the loops that bound
+  // the face, wound the way t is wound — so the outer loop turns counter-clockwise
+  // about the face normal and every hole turns the other way, which is what lets a
+  // signed area tell the two apart.
+  struct BLink
+  {
+    int a, b, t;
+  };
+
+  // The boundary loops of one surface, in order. Empty if the boundary is not a
+  // disjoint set of simple cycles — a vertex the surface reaches twice, an edge the
+  // mesh does not carry with exactly two triangles — because then "the region this
+  // face covers" is not one polygon and the footprint pass has nothing to trim.
+  std::vector<std::vector<BLink>> surfaceLoops(const std::vector<int>& tris) const
+  {
+    const std::set<int> inS(tris.begin(), tris.end());
+    std::map<int, BLink> next;
+    for (const int t : tris)
+      for (int i = 0; i < 3; ++i) {
+        const int a = m.tris[t].v[i], b = m.tris[t].v[(i + 1) % 3];
+        const auto it = adj.find({std::min(a, b), std::max(a, b)});
+        if (it == adj.end() || it->second.size() != 2) return {};
+        const int other = it->second[0] == t ? it->second[1] : it->second[0];
+        if (inS.count(other)) continue;  // an interior seam, not a boundary of the face
+        if (!next.emplace(a, BLink{a, b, t}).second) return {};
+      }
+    if (next.empty()) return {};
+    std::vector<std::vector<BLink>> loops;
+    std::set<int> used;
+    for (const auto& [start, first] : next) {
+      if (used.count(start)) continue;
+      std::vector<BLink> loop;
+      int at = start;
+      while (true) {
+        const auto it = next.find(at);
+        if (it == next.end()) return {};
+        if (!used.insert(at).second) return {};
+        loop.push_back(it->second);
+        at = it->second.b;
+        if (at == start) break;
+        if (loop.size() > next.size()) return {};
+      }
+      if (loop.size() < 3) return {};
+      loops.push_back(std::move(loop));
+    }
+    return used.size() == next.size() ? loops : std::vector<std::vector<BLink>>{};
+  }
+
+  // A boundary loop's seats: one point per link, where the link's tail vertex lands
+  // on this face. This is the polygon the trim looks for crossings in — the strip
+  // feet are deliberately left out of it, because a foot is not a seat of its own
+  // (it is carried by the two seats it sits between) and a trim that collapses those
+  // two drops the foot with them.
+  std::vector<Vector3d> loopSeats(const std::vector<BLink>& loop) const
+  {
+    std::vector<Vector3d> p;
+    p.reserve(loop.size());
+    for (const BLink& l : loop) p.push_back(insetForTri(l.a, l.t));
+    return p;
+  }
+
+  // The same loop as the face actually carries it: seats, plus the pulled-in strip
+  // feet that fall on each link, in the order the per-triangle pass inserts them.
+  // Consecutive points closer than the weld are one seat and are emitted once.
+  std::vector<Vector3d> loopFootprint(const std::vector<BLink>& loop) const
+  {
+    std::vector<Vector3d> p;
+    const double weld = kFootprintSeatTol;
+    auto push = [&](const Vector3d& q) {
+      if (!p.empty() && (p.back() - q).norm() < weld) return;
+      p.push_back(q);
+    };
+    for (const BLink& l : loop) {
+      push(insetForTri(l.a, l.t));
+      if (const auto fa = footOn(l.a, l.b, l.t)) push(*fa);
+      if (const auto fb = footOn(l.b, l.a, l.t)) push(*fb);
+    }
+    while (p.size() > 1 && (p.front() - p.back()).norm() < weld) p.pop_back();
+    return p;
+  }
+
+  // Trim a face's boundary where the retreat has turned it back on itself.
+  //
+  // Every round-over along a face's boundary pulls that boundary in by its own
+  // setback. Where two of them are closer together than the room between them — the
+  // waist of two merged bosses, the notch of a peanut-shaped hole, a shallow corner
+  // whose mitre outruns its own link — the retreated boundary crosses itself, and
+  // the piece beyond the crossing is a region the face does not cover: it is walked
+  // the wrong way round, so it is emitted inside-out, lying in the face plane on top
+  // of its neighbours as an exact 180 deg fold pair. That stays edge-manifold and so
+  // passes every gate while shading as a bright dart.
+  //
+  // The trim is to seat the whole swallowed run on the crossing point. Which run is
+  // swallowed needs no threshold to decide: a crossing splits the loop in two, the
+  // two signed areas sum to the loop's own, and exactly one of them can therefore
+  // turn against it. That one is the fold-back. Collapsing it moves seats rather
+  // than dropping points, so the strips, kept seams and corner patches that read
+  // those seats follow the face instead of being left behind by it — and only the
+  // seats on THIS face move, so each face is trimmed to its own footprint while the
+  // same vertex keeps its own seat on every other face it belongs to.
+  //
+  // One crossing can expose the next, so the sweep repeats.
+  void trimFootprintSpikes()
+  {
+    std::vector<std::vector<int>> vTris(m.pos.size());
+    for (size_t t = 0; t < m.tris.size(); ++t)
+      for (const int u : m.tris[t].v) vTris[u].push_back(static_cast<int>(t));
+
+    for (int sweep = 0; sweep < kFoldRepairSweeps; ++sweep) {
+      bool cut = false;
+      for (const auto& [S, tris] : surfaceGroups()) {
+        Vector3d nrm;
+        if (tris.size() < 2 || !surfacePlanar(tris, nrm)) continue;
+        for (const auto& loop : surfaceLoops(tris)) {
+          const std::vector<Vector3d> seat = loopSeats(loop);
+          const int n = static_cast<int>(seat.size());
+          if (n < 4) continue;
+          const Basis2 B = planeBasis(seat[0], nrm);
+          std::vector<Vector2d> p(n);
+          for (int i = 0; i < n; ++i) p[i] = project2(B, seat[i]);
+          const double eps = kFootprintEpsFrac * size;
+          const double whole = loopArea2(p);
+          if (std::abs(whole) < eps * eps) continue;
+
+          bool done = false;
+          for (int i = 0; i < n && !done; ++i)
+            for (int j = i + 2; j < n && !done; ++j) {
+              if (i == 0 && j == n - 1) continue;  // adjacent across the seam
+              Vector2d X;
+              if (!segCross2(p[i], p[(i + 1) % n], p[j], p[(j + 1) % n], eps, X)) continue;
+              // The run i+1..j, closed through the crossing. Against it stands the
+              // rest of the loop, also closed through the crossing; their areas sum
+              // to the loop's, so at most one turns the other way.
+              std::vector<Vector2d> run{X};
+              for (int k = i + 1; k <= j; ++k) run.push_back(p[k]);
+              const double a = loopArea2(run);
+              if (a * whole >= 0) continue;  // this run is not the fold-back
+              // Every seat the run gives up has to be near the crossing that
+              // swallows it, and the same few setbacks the link repair allows its
+              // survivor is the bound. It is two tests in one. A crossing that has
+              // raced off down the boundary is an artefact of two near-parallel
+              // offset lines rather than a seat, and collapsing onto it would
+              // teleport a strip across the solid. And a run that reaches far from
+              // its crossing is not a spike at all but a whole region the retreat
+              // has turned over — an arm end face narrower than its two round-overs
+              // — which has no single point to collapse to: seating it on one
+              // sweeps every strip along it into the same point and makes a worse
+              // fold than the one it set out to trim. That case is the size regime,
+              // not this trim, and it is left for the strips to answer for.
+              const Vector3d X3 = unproject2(B, X);
+              bool spike = true;
+              for (int k = i + 1; k <= j && spike; ++k)
+                spike = (X3 - seat[k]).norm() <= kFoldSurvivorSetbacks * size;
+              if (!spike) continue;
+              for (int k = i + 1; k <= j; ++k) {
+                const int u = loop[k].a;
+                const Vector3d at = seat[k];
+                if ((X3 - at).squaredNorm() < 1e-24) continue;
+                for (const int tt : vTris[u])
+                  if (surfaceOf[tt] == S && (insetForTri(u, tt) - at).squaredNorm() < 1e-18)
+                    insetCollapse[{u, tt}] = X3;
+              }
+              cut = done = true;
+            }
+        }
+      }
+      if (!cut) return;
+    }
+  }
+
+  // Emit one planar face as its whole footprint rather than triangle by triangle.
+  //
+  // The per-triangle pass moves each vertex to its own seat and keeps the source
+  // triangulation. That is only faithful while the seats move little enough for the
+  // old diagonals to still fit the region they now bound: a face whose boundary
+  // retreats unevenly — an L whose reflex corner mitres inward while its far side
+  // stays put — carries diagonals that end up on the wrong side of their own quad,
+  // and those triangles come back inside-out, again as a fold lying in the face.
+  // The footprint owes nothing to the source triangulation: the boundary is the
+  // face's own retreated loops and the interior is re-cut to fit them.
+  //
+  // The boundary vertices are exactly the ones the per-triangle pass would have
+  // emitted, in the same order, so every strip, kept seam and corner patch welds to
+  // this face exactly as before — only the interior diagonals differ. Anything the
+  // pass cannot vouch for is refused (returns false) and the caller emits the face
+  // the old way: a face whose loops will not chain, a boundary still crossing itself
+  // after the trim, an ear clip that finds no ear, a triangulation whose area does
+  // not match its own polygon's.
+  bool emitSurfacePatch(const std::vector<int>& tris)
+  {
+    Vector3d nrm;
+    if (tris.size() < 2 || !surfacePlanar(tris, nrm)) return false;
+    const auto loops = surfaceLoops(tris);
+    if (loops.empty()) return false;
+
+    std::vector<std::vector<Vector3d>> ring3;
+    for (const auto& loop : loops) {
+      std::vector<Vector3d> f = loopFootprint(loop);
+      if (f.size() >= 3) ring3.push_back(std::move(f));
+    }
+    if (ring3.empty()) return false;
+
+    const Basis2 B = planeBasis(ring3.front().front(), nrm);
+    const double eps = kFootprintEpsFrac * size;
+    std::vector<Vector3d> P3;
+    std::vector<Vector2d> P2;
+    std::vector<std::vector<int>> ring;
+    for (const auto& f : ring3) {
+      std::vector<int> idx;
+      for (const Vector3d& q : f) {
+        idx.push_back(static_cast<int>(P3.size()));
+        P3.push_back(q);
+        P2.push_back(project2(B, q));
+      }
+      ring.push_back(std::move(idx));
+    }
+
+    // No loop may cross itself or any other, or the region they bound is not the
+    // one they enclose and no triangulation of it means anything.
+    for (size_t la = 0; la < ring.size(); ++la)
+      for (size_t lb = la; lb < ring.size(); ++lb)
+        for (size_t i = 0; i < ring[la].size(); ++i)
+          for (size_t j = (la == lb ? i + 1 : 0); j < ring[lb].size(); ++j) {
+            Vector2d X;
+            if (segCross2(P2[ring[la][i]], P2[ring[la][(i + 1) % ring[la].size()]],
+                          P2[ring[lb][j]], P2[ring[lb][(j + 1) % ring[lb].size()]], eps, X))
+              return false;
+          }
+
+    // The outer loop is the one that turns with the face; every other is a hole and
+    // must turn against it. A face whose largest loop turns the wrong way is not a
+    // footprint this pass understands.
+    std::vector<double> area(ring.size());
+    size_t outer = 0;
+    for (size_t k = 0; k < ring.size(); ++k) {
+      std::vector<Vector2d> q;
+      for (const int i : ring[k]) q.push_back(P2[i]);
+      area[k] = loopArea2(q);
+      if (std::abs(area[k]) > std::abs(area[outer])) outer = k;
+    }
+    if (area[outer] <= 0) return false;
+    double want = area[outer];
+    for (size_t k = 0; k < ring.size(); ++k)
+      if (k != outer) {
+        if (area[k] >= 0) return false;
+        want += area[k];
+      }
+    if (want <= eps * eps) return false;
+
+    std::vector<int> merged = ring[outer];
+    for (size_t k = 0; k < ring.size(); ++k)
+      if (k != outer && !bridgeHole(merged, ring[k], P2, eps)) return false;
+
+    std::vector<std::array<int, 3>> tri2;
+    if (!earClip2(P2, merged, tri2, eps)) return false;
+    double got = 0;
+    for (const auto& t : tri2) {
+      const double a = cross2(P2[t[0]], P2[t[1]], P2[t[2]]);
+      if (a <= 0) return false;  // a bridge crossed something: the patch laps over itself
+      got += a;
+    }
+    if (std::abs(got - want) > kFootprintAreaTol * want) return false;
+
+    for (const auto& t : tri2) out.tri(P3[t[0]], P3[t[1]], P3[t[2]]);
+    return true;
+  }
+
   // Where the inset turns a face triangle inside out and the surface's boundary is
   // not what crossed, the fault is in the diagonal rather than in the points: two
   // triangles sharing an interior seam of the source triangulation have been
@@ -1717,6 +2165,12 @@ struct Blender
   // face or does nothing to it. A boundary link that has reversed is a different
   // fault, in the offset itself rather than in the triangulation, and this does not
   // touch it.
+  //
+  // Its reach is now the faces emitSurfacePatch declines — a face re-cut from its
+  // own footprint has no source diagonal left to get wrong. Those are the crowded
+  // ones, where a whole region of the face has turned over rather than one quad,
+  // and there it still repairs what it can: dropping this pass leaves the corpus
+  // unchanged but costs two of the collision probes their clean count.
   void flipInvertedInsets()
   {
     for (const auto& [S, tris] : surfaceGroups()) {
@@ -3241,13 +3695,19 @@ struct Blender
     prepareShared();
     computeCornerStations();
     repairInsetFolds();
+    trimFootprintSpikes();
     flipInvertedInsets();
-    for (size_t t = 0; t < m.tris.size(); ++t) {
-      // Inset each vertex on the side triangle t sits on — sector-local, so a
-      // facet of a split wall sets back along its own sector rather than mitring
-      // across a surface it is no longer grouped with. Where the triangle meets a
-      // mixed corner it is re-triangulated to carry the pulled-in strip feet.
-      emitSurfaceTri(static_cast<int>(t));
+    // Each planar face is emitted as one footprint — its own retreated boundary,
+    // re-triangulated to fit it. Where that cannot be vouched for, and on every
+    // curved surface (whose facets are surfaces of their own and carry no interior
+    // diagonal to get wrong), the face falls back to the per-triangle inset: each
+    // vertex on the side triangle t sits on, sector-local, so a facet of a split
+    // wall sets back along its own sector rather than mitring across a surface it is
+    // no longer grouped with, and re-triangulated at a mixed corner to carry the
+    // pulled-in strip feet.
+    for (const auto& [S, tris] : surfaceGroups()) {
+      if (emitSurfacePatch(tris)) continue;
+      for (const int t : tris) emitSurfaceTri(t);
     }
     for (const auto& e : selected) emitEdge(e);
     for (const auto& e : feature)
