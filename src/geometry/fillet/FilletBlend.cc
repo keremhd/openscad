@@ -681,7 +681,8 @@ CreaseSelection selectCreaseEdges(const MergedMesh& m,
 // carried into the selection by crease-following is densified too, not only the
 // edges that independently clear the feature threshold. Splitting only ever
 // shortens; it never turns a seam into a feature, so one pass is complete.
-void subdivideLongCreaseEdges(MergedMesh& m, const std::set<EdgeKey>& edges, double cap)
+void subdivideLongCreaseEdges(MergedMesh& m, const std::set<EdgeKey>& edges, double cap,
+                              std::map<int, EdgeKey>* stationOf = nullptr)
 {
   if (!(cap > 0) || edges.empty()) return;
   struct Split { int a, b, parts; };
@@ -696,7 +697,17 @@ void subdivideLongCreaseEdges(MergedMesh& m, const std::set<EdgeKey>& edges, dou
   // Vertex ids are only ever appended, so the endpoints collected above stay
   // valid; splitEdge rescans the current triangle list, so shared triangles
   // split by an earlier edge are handled correctly.
-  for (const Split& s : todo) splitEdge(m, s.a, s.b, s.parts);
+  for (const Split& s : todo) {
+    const int first = static_cast<int>(m.pos.size());
+    splitEdge(m, s.a, s.b, s.parts);
+    // Which crease each new station came off. The brush is a statement about the
+    // model's own edges, and the stations are this pass's private business, so the
+    // selection has to be able to ask the question of the edge rather than of the
+    // piece it was cut into.
+    if (stationOf)
+      for (int v = first; v < static_cast<int>(m.pos.size()); ++v)
+        (*stationOf)[v] = EdgeKey{std::min(s.a, s.b), std::max(s.a, s.b)};
+  }
 }
 
 // Ear-clip a planar polygon given by position, in the plane of `nrm`, into index
@@ -3942,8 +3953,11 @@ std::shared_ptr<const Geometry> buildBlend(
     bool sub = false;
     Blender::CornerCounts corners;
   };
+  std::map<int, EdgeKey> stationOfSub, stationOfRawSub;
+  const std::map<int, EdgeKey> stationOfNone;
   auto buildOn = [&](const MergedMesh& m, double surfaceThresholdDeg, bool pullIn,
-                     double stationFrac, bool turnPull = false, bool sub = true) -> Attempt {
+                     double stationFrac, bool turnPull = false, bool sub = true,
+                     const std::map<int, EdgeKey>& stationOf = {}) -> Attempt {
     const std::map<EdgeKey, std::vector<int>> adj = buildEdgeAdjacency(m.tris);
     // Group surfaces by near-tangency, not by the feature threshold: a sub-crease
     // seam that is not near-tangent (a tee's tangent gap) must stay a surface
@@ -3986,7 +4000,25 @@ std::shared_ptr<const Geometry> buildBlend(
       // blend volume ($fn-invariant): an edge is blended where its midpoint lies
       // inside the brush. Edges the brush excludes stay sharp and are sewn by the
       // kept-seam ribbon and the strip-end cap, exactly like the sign filter's.
-      if (brushVol && !brushVol->contains(0.5 * (m.pos[key.first] + m.pos[key.second]))) continue;
+      //
+      // The question is asked of the model's own edge, not of the station it was cut
+      // into. The along-sweep floor splits a long crease into pieces whose count
+      // comes from the blend size, and asking each piece separately hands the brush
+      // a resolution nobody chose: a brush that covers a few millimetres at the end
+      // of an edge it was never aimed at takes the whole station containing them, so
+      // a corner the brush merely reaches past acquires a round-over running a
+      // station deep into two edges that were meant to stay sharp -- and the depth
+      // moves if the station spacing does. Resolving the piece back to the crease it
+      // was cut from makes the brush mean what it says and makes it station-
+      // independent, which is the same argument that keeps it off the blend volume.
+      if (brushVol) {
+        EdgeKey ask = key;
+        for (const int v : {key.first, key.second}) {
+          const auto it = stationOf.find(v);
+          if (it != stationOf.end()) { ask = it->second; break; }
+        }
+        if (!brushVol->contains(0.5 * (m.pos[ask.first] + m.pos[ask.second]))) continue;
+      }
       b.selected.insert(key);
       b.concaveOf[key] = ce.concave;
       if (ce.concave) ++a.nConcave; else ++a.nConvex;
@@ -4041,7 +4073,7 @@ std::shared_ptr<const Geometry> buildBlend(
     mRaw = m0;
     weldSliverCreaseEdges(m0, toSplit, kSliverCreaseFrac * node.size);
     mSub = m0;
-    subdivideLongCreaseEdges(mSub, toSplit, kAlongSweep * node.size);
+    subdivideLongCreaseEdges(mSub, toSplit, kAlongSweep * node.size, &stationOfSub);
   }
   const bool didSubdivide = mSub.tris.size() != m0.tris.size();
   const bool didWeld = mRaw.tris.size() != m0.tris.size();
@@ -4065,17 +4097,17 @@ std::shared_ptr<const Geometry> buildBlend(
     if (x.sub != y.sub) return x.sub;  // never trade the along-sweep stations for folds
     return x.folds < y.folds;
   };
-  Attempt a = buildOn(mSub, kDefaultSurfaceThresholdDeg, /*pullIn=*/true, kPullStationFrac);
+  Attempt a = buildOn(mSub, kDefaultSurfaceThresholdDeg, /*pullIn=*/true, kPullStationFrac, false, true, stationOfSub);
   if (a.status != Status::Ok || a.folds > 0) {
-    Attempt b1 = buildOn(mSub, kDefaultSurfaceThresholdDeg, true, 1.0);
+    Attempt b1 = buildOn(mSub, kDefaultSurfaceThresholdDeg, true, 1.0, false, true, stationOfSub);
     if (better(b1, a)) a = std::move(b1);
   }
   if (a.status != Status::Ok || a.folds > 0) {
-    Attempt b2 = buildOn(mSub, kDefaultSurfaceThresholdDeg, false, 1.0);
+    Attempt b2 = buildOn(mSub, kDefaultSurfaceThresholdDeg, false, 1.0, false, true, stationOfSub);
     if (better(b2, a)) a = std::move(b2);
   }
   if (a.status != Status::Ok || a.folds > 0) {
-    Attempt bt = buildOn(mSub, kDefaultSurfaceThresholdDeg, true, kPullStationFrac, true);
+    Attempt bt = buildOn(mSub, kDefaultSurfaceThresholdDeg, true, kPullStationFrac, true, true, stationOfSub);
     if (better(bt, a)) a = std::move(bt);
   }
   if (didSubdivide && (a.status != Status::Ok || a.folds > 0)) {
@@ -4100,18 +4132,18 @@ std::shared_ptr<const Geometry> buildBlend(
     std::set<EdgeKey> split;
     for (const auto& key : selR.eligible)
       if (selR.crease.at(key).concave ? node.concave : node.convex) split.insert(key);
-    subdivideLongCreaseEdges(mRawSub, split, kAlongSweep * node.size);
-    Attempt r = buildOn(mRawSub, kDefaultSurfaceThresholdDeg, true, kPullStationFrac);
+    subdivideLongCreaseEdges(mRawSub, split, kAlongSweep * node.size, &stationOfRawSub);
+    Attempt r = buildOn(mRawSub, kDefaultSurfaceThresholdDeg, true, kPullStationFrac, false, true, stationOfRawSub);
     if (r.status != Status::Ok || r.folds > 0) {
-      Attempt r1 = buildOn(mRawSub, kDefaultSurfaceThresholdDeg, true, 1.0);
+      Attempt r1 = buildOn(mRawSub, kDefaultSurfaceThresholdDeg, true, 1.0, false, true, stationOfRawSub);
       if (better(r1, r)) r = std::move(r1);
     }
     if (r.status != Status::Ok || r.folds > 0) {
-      Attempt r2 = buildOn(mRawSub, kDefaultSurfaceThresholdDeg, false, 1.0);
+      Attempt r2 = buildOn(mRawSub, kDefaultSurfaceThresholdDeg, false, 1.0, false, true, stationOfRawSub);
       if (better(r2, r)) r = std::move(r2);
     }
     if (r.status != Status::Ok || r.folds > 0) {
-      Attempt rt = buildOn(mRawSub, kDefaultSurfaceThresholdDeg, true, kPullStationFrac, true);
+      Attempt rt = buildOn(mRawSub, kDefaultSurfaceThresholdDeg, true, kPullStationFrac, true, true, stationOfRawSub);
       if (better(rt, r)) r = std::move(rt);
     }
     if (r.status != Status::Ok || r.folds > 0) {
