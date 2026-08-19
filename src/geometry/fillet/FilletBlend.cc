@@ -358,6 +358,91 @@ struct OutMesh
   }
   void tri(const Vector3d& a, const Vector3d& b, const Vector3d& c) { tri(add(a), add(b), add(c)); }
 
+  // --- the lap index --------------------------------------------------------
+  //
+  // foldPairs() is the verdict on a finished mesh: it needs consistent winding, so
+  // it can only be asked once orient() has run and the whole blend is built. A
+  // patch being chosen mid-build cannot wait for that, so the same defect is asked
+  // for here in a winding-free form. Two triangles sharing an edge lap when they
+  // are coplanar AND their two far corners fall on the SAME side of the shared
+  // edge: the surface has doubled back. A flat pair puts them on opposite sides, a
+  // crease puts them at an angle, and neither reads as a lap. Measured against the
+  // same kFoldDihedralDeg as foldPairs, so a patch this accepts is one the census
+  // accepts.
+  std::map<std::pair<int, int>, std::vector<int>> lapIdx;
+
+  static std::pair<int, int> ekey2(int a, int b) { return {std::min(a, b), std::max(a, b)}; }
+
+  double faceArea(int f) const
+  {
+    return 0.5 * (V[F[f][1]] - V[F[f][0]]).cross(V[F[f][2]] - V[F[f][0]]).norm();
+  }
+
+  // Index every face not yet indexed, so later queries see them. Incremental, so
+  // walking the corners costs one pass over the mesh in total rather than one per
+  // corner.
+  std::size_t lapIndexed = 0;
+  void lapIndex()
+  {
+    for (; lapIndexed < F.size(); ++lapIndexed)
+      for (int k = 0; k < 3; ++k)
+        lapIdx[ekey2(F[lapIndexed][k], F[lapIndexed][(k + 1) % 3])]
+          .push_back(static_cast<int>(lapIndexed));
+  }
+
+  // Do faces f and g lap along their shared edge (a,b)?
+  bool lapsOn(int f, int g, int a, int b) const
+  {
+    if (faceArea(f) < kWeldTolMm * kWeldTolMm || faceArea(g) < kWeldTolMm * kWeldTolMm) return false;
+    const Vector3d eh = (V[b] - V[a]);
+    const double el = eh.norm();
+    if (el < kWeldTolMm) return false;
+    const Vector3d e = eh / el;
+    auto perp = [&](int t) {
+      for (int k = 0; k < 3; ++k) {
+        const int x = F[t][k];
+        if (x == a || x == b) continue;
+        const Vector3d d = V[x] - V[a];
+        return Vector3d(d - d.dot(e) * e);
+      }
+      return Vector3d(Vector3d::Zero());
+    };
+    const Vector3d pf = perp(f), pg = perp(g);
+    const double lf = pf.norm(), lg = pg.norm();
+    if (lf < kWeldTolMm || lg < kWeldTolMm) return false;
+    // The interior angle between the two half-planes; -cos(kFoldDihedralDeg) is
+    // cos of the small angle a fold leaves between them.
+    return pf.dot(pg) / (lf * lg) > -std::cos(kFoldDihedralDeg * M_PI / 180.0);
+  }
+
+  // Lapped pairs involving the faces [from, F.size()): against each other and
+  // against everything already in lapIdx. Each pair counted once.
+  int lapsSince(std::size_t from) const
+  {
+    std::map<std::pair<int, int>, std::vector<int>> local;
+    for (std::size_t f = from; f < F.size(); ++f)
+      for (int k = 0; k < 3; ++k)
+        local[ekey2(F[f][k], F[f][(k + 1) % 3])].push_back(static_cast<int>(f));
+    int n = 0;
+    for (const auto& [e, fs] : local) {
+      std::vector<int> all = fs;
+      if (const auto it = lapIdx.find(e); it != lapIdx.end())
+        all.insert(all.end(), it->second.begin(), it->second.end());
+      for (std::size_t i = 0; i < all.size(); ++i)
+        for (std::size_t j = i + 1; j < all.size(); ++j) {
+          if (all[i] < static_cast<int>(from) && all[j] < static_cast<int>(from)) continue;
+          if (lapsOn(all[i], all[j], e.first, e.second)) ++n;
+        }
+    }
+    return n;
+  }
+
+  // Drop the faces added since `n` (an abandoned candidate patch). Vertices added
+  // alongside them stay: they are unreferenced, build() walks faces only, and the
+  // weld map must keep its entries so a later candidate that lands on the same
+  // point gets the same index.
+  void dropFacesSince(std::size_t n) { F.resize(n); }
+
   // Fan-triangulate a ring (already ordered) from its centroid.
   void fan(const std::vector<int>& ring)
   {
@@ -3844,6 +3929,40 @@ struct Blender
     const bool mixed = anyConcave && anyConvex;
     const bool junction = selVia.size() >= 2;  // (the weld pass-through already returned)
 
+    // The dispatch, in preference order. Every candidate below closes the SAME ring,
+    // so which one is taken is a question of quality alone and never of closure:
+    // swapping one for another leaves the corner watertight either way. The order is
+    // the standing preference (the exact surface first, the crude fan last) and the
+    // first candidate that both builds and lays no flap is taken, so a corner that
+    // was already clean costs exactly one construction, as before.
+    //
+    // Where the preferred construction laps -- itself, or a strip already emitted --
+    // the next is tried and the fewest-lapping is kept. That is the ladder's own rule
+    // (`better`) brought down to one corner: a patch is only replaced by one measured
+    // to be no worse, so no corner can regress, and the whole-mesh census stays the
+    // arbiter of the build.
+    out.lapIndex();
+    const std::size_t mark = out.F.size();
+    int bestLaps = std::numeric_limits<int>::max();
+    std::vector<std::array<int, 3>> bestF;
+    int *bestTally = nullptr;
+    auto judge = [&](bool built, int *tally) {
+      if (!built) { out.dropFacesSince(mark); return false; }
+      const int laps = out.lapsSince(mark);
+      if (laps < bestLaps) {
+        bestLaps = laps;
+        bestF.assign(out.F.begin() + mark, out.F.end());
+        bestTally = tally;
+      }
+      out.dropFacesSince(mark);
+      return laps == 0;
+    };
+    auto settle = [&]() {
+      for (const auto& f : bestF) out.tri(f[0], f[1], f[2]);
+      out.lapIndex();
+      if (bestTally) ++*bestTally;
+    };
+
     // Genuine single-signed junction: tessellate the corner-ball sphere as a
     // rounded cap so it rounds a convex vertex off / fills a concave one — the
     // pole is the sphere point toward the original sharp vertex (its outermost
@@ -3856,7 +3975,7 @@ struct Blender
         // it does not read as a beaded knuckle. Convex round-over and concave valley
         // are the same construction on the same ball; rings that are not three equal
         // arcs fall through to the pole-fan below.
-        if (emitCapTri(ring, cornerPos, *C)) { ++cornerCounts.capTri; return; }
+        if (judge(emitCapTri(ring, cornerPos, *C), &cornerCounts.capTri)) { settle(); return; }
         Vector3d poleUnit = (m.pos[u] - *C).normalized();
         if (poleUnit.squaredNorm() < 0.5) {  // u sits on the centre: fall back to the ring
           Vector3d centroid = Vector3d::Zero();
@@ -3864,7 +3983,7 @@ struct Blender
           centroid /= static_cast<double>(ring.size());
           poleUnit = (centroid - *C).normalized();
         }
-        if (emitCap(ring, *C, size, poleUnit)) { ++cornerCounts.cap; return; }
+        if (judge(emitCap(ring, *C, size, poleUnit), &cornerCounts.cap)) { settle(); return; }
       }
     }
 
@@ -3875,9 +3994,9 @@ struct Blender
     // Where the two round-overs and the crease close over the vertex as one exact
     // piece of surface, build that piece instead of any membrane.
     if (!isChamfer && junction && mixed && ring.size() >= 4) {
-      if (emitCornerTube(ring, ringNrm, ringSign)) { ++cornerCounts.tube; return; }
-      if (emitCoonsSaddle(ring, ringNrm, ringSign)) { ++cornerCounts.coons; return; }
-      if (emitSaddle(ring, ringNrm)) { ++cornerCounts.saddle; return; }
+      if (judge(emitCornerTube(ring, ringNrm, ringSign), &cornerCounts.tube)) { settle(); return; }
+      if (judge(emitCoonsSaddle(ring, ringNrm, ringSign), &cornerCounts.coons)) { settle(); return; }
+      if (judge(emitSaddle(ring, ringNrm), &cornerCounts.saddle)) { settle(); return; }
     }
 
     // Strip end (a fillet ending against a kept-sharp boundary): close the ring
@@ -3885,9 +4004,10 @@ struct Blender
     // seals the volume and leaves the kept edges sharp. Falls back to the crude
     // centroid fan if the ring is too tangled to triangulate cleanly (orient()
     // then refuses if that left a hole).
-    if (ring.size() >= 4 && ringSaddle(ring)) { ++cornerCounts.flat; return; }
+    if (ring.size() >= 4 && judge(ringSaddle(ring), &cornerCounts.flat)) { settle(); return; }
     out.fan(ring);
-    ++cornerCounts.fan;
+    judge(true, &cornerCounts.fan);
+    settle();
   }
 
   // Triangulate a (non-planar) ring directly, no central vertex, by ear-clipping
