@@ -827,10 +827,18 @@ std::vector<int> ringAround(const MergedMesh& m, const std::vector<int>& tris, i
 // so re-triangulating the ring it leaves behind reproduces the same face, with the
 // same boundary, out of vertices the inset can all seat. Geometry-exact, like
 // splitEdge — the solid, its dihedrals and its surface grouping are unchanged.
-void dissolveSwallowedVertices(MergedMesh& m, const std::map<EdgeKey, EdgeClass>& crease,
-                               const std::set<EdgeKey>& blended, double size, bool isChamfer)
+//
+// `curvedFans` extends the same surgery to a swallowed vertex whose fan is one
+// smooth wall rather than one flat face. There the cut is an approximation, not an
+// identity, so it is offered rather than taken: the caller builds with it and
+// without it and keeps whichever folds less. Returns whether any such fan was cut,
+// so a model where the offer is empty is not built twice for nothing.
+bool dissolveSwallowedVertices(MergedMesh& m, const std::map<EdgeKey, EdgeClass>& crease,
+                               const std::set<EdgeKey>& blended, double size, bool isChamfer,
+                               bool curvedFans)
 {
-  if (blended.empty()) return;
+  bool cutCurved = false;
+  if (blended.empty()) return cutCurved;
   std::set<int> onCrease;
   for (const auto& [key, ec] : crease) {
     onCrease.insert(key.first);
@@ -844,6 +852,11 @@ void dissolveSwallowedVertices(MergedMesh& m, const std::map<EdgeKey, EdgeClass>
     band.emplace_back(key, isChamfer ? size
                                      : size * std::tan(0.5 * it->second.dihedralDeg * M_PI / 180.0));
   }
+
+  // A fan is one smooth wall when every triangle in it is within this of the fan's
+  // own averaged normal — the same near-tangency that groups facets into one
+  // surface, asked of a fan instead of an edge.
+  const double cosGroup = std::cos(kDefaultSurfaceThresholdDeg * M_PI / 180.0);
 
   for (int u = 0; u < static_cast<int>(m.pos.size()); ++u) {
     if (onCrease.count(u)) continue;  // it has a boundary of its own to mitre against
@@ -867,10 +880,32 @@ void dissolveSwallowedVertices(MergedMesh& m, const std::map<EdgeKey, EdgeClass>
       for (const int w : m.tris[t].v)
         if (w == u) { tris.push_back(static_cast<int>(t)); break; }
     if (tris.size() < 3) continue;
-    const Vector3d nrm = m.tris[tris.front()].normal;
+    Vector3d nrm = m.tris[tris.front()].normal;
     bool flat = true;
     for (const int t : tris) flat = flat && m.tris[t].normal.dot(nrm) > 1 - 1e-12;
-    if (!flat) continue;  // not one flat fan: dropping it would move the surface
+    if (!flat) {
+      // Not one flat fan. Dropping it moves the surface, so it is only offered
+      // where the fan is one smooth wall — every triangle within the grouping
+      // threshold of the fan's own averaged normal, which is the same test that
+      // decides these facets are approximating one wall in the first place. The
+      // re-cut then replaces a facet corner with the chord across it, a change of
+      // the tessellation's own order and made entirely inside the band the blend
+      // is about to cover.
+      //
+      // WITHOUT THIS a curved wall keeps every vertex the retreat swallows. The
+      // wall's face triangles then reach back from the retreated seat over the
+      // ring below it, come out turned over, and lie on the wall as a fold — one
+      // per crease vertex, so the count scales with $fn. It is the flat fan's
+      // fault exactly, on a wall too finely faceted for the fan to be flat.
+      if (!curvedFans) continue;
+      Vector3d nsum = Vector3d::Zero();
+      for (const int t : tris) nsum += m.tris[t].normal;
+      if (nsum.norm() < 1e-12) continue;
+      nrm = nsum.normalized();
+      bool smooth = true;
+      for (const int t : tris) smooth = smooth && m.tris[t].normal.dot(nrm) > cosGroup;
+      if (!smooth) continue;
+    }
 
     const std::vector<int> ring = ringAround(m, tris, u);
     if (ring.size() < 3) continue;
@@ -880,16 +915,44 @@ void dissolveSwallowedVertices(MergedMesh& m, const std::map<EdgeKey, EdgeClass>
     std::vector<std::array<int, 3>> flatTris;
     if (!earClipPlanar(poly, nrm, flatTris)) continue;
 
+    // On a curved fan the re-cut is an approximation, and one ear can be a long
+    // chord across the whole ring — a triangle that is nowhere near the wall it
+    // replaced. Read the cut back before taking it: every new triangle has to sit
+    // within the same grouping threshold of the fan's normal that let the fan be
+    // dissolved at all. Without the read-back a fine tessellation dissolves ring
+    // after ring, each cut widening the next one's ring, and the wall ends up
+    // coarser than the blend that covers it — measurably more folded, not fewer.
+    std::vector<Vector3d> newNrm;
+    if (!flat) {
+      newNrm.reserve(flatTris.size());
+      bool faithful = true;
+      for (const auto& t : flatTris) {
+        const Vector3d a = m.pos[ring[t[0]]], b = m.pos[ring[t[1]]], c = m.pos[ring[t[2]]];
+        const Vector3d n = (b - a).cross(c - a);
+        if (n.norm() < 1e-18) { faithful = false; break; }
+        newNrm.push_back(n.normalized());
+        if (newNrm.back().dot(nrm) <= cosGroup) { faithful = false; break; }
+      }
+      if (!faithful) continue;
+      cutCurved = true;
+    }
+
     const uint32_t id = m.tris[tris.front()].originalID;
     const std::set<int> drop(tris.begin(), tris.end());
     std::vector<Tri> next;
     next.reserve(m.tris.size() - tris.size() + flatTris.size());
     for (size_t t = 0; t < m.tris.size(); ++t)
       if (!drop.count(static_cast<int>(t))) next.push_back(m.tris[t]);
-    for (const auto& t : flatTris)
-      next.push_back(Tri{{ring[t[0]], ring[t[1]], ring[t[2]]}, nrm, id});
+    // A flat fan keeps the plane it always had; a curved one carries each new
+    // triangle's own normal, because the classification downstream reads this
+    // field and a fan-wide average would tell it the cut is flatter than it is.
+    for (size_t k = 0; k < flatTris.size(); ++k) {
+      const auto& t = flatTris[k];
+      next.push_back(Tri{{ring[t[0]], ring[t[1]], ring[t[2]]}, flat ? nrm : newNrm[k], id});
+    }
     m.tris = std::move(next);
   }
+  return cutCurved;
 }
 
 // --- the face footprint, in the face's own plane ---------------------------
@@ -4152,7 +4215,7 @@ std::shared_ptr<const Geometry> buildBlend(
     return target;
   }
 
-  MergedMesh m0 = mergeMesh(target->getManifold().GetMeshGL64());
+  const MergedMesh m0base = mergeMesh(target->getManifold().GetMeshGL64());
   const double thresholdDeg = node.min_angle >= 0 ? node.min_angle : kDefaultCreaseThresholdDeg;
 
   // The selection brush (the union of the node's brush children), as the solid a
@@ -4188,7 +4251,6 @@ std::shared_ptr<const Geometry> buildBlend(
     if (x.folds != y.folds) return x.folds < y.folds;
     return x.refused < y.refused;  // at equal quality, blend the most creases
   };
-  std::map<int, EdgeKey> stationOfSub, stationOfRawSub;
   const std::map<int, EdgeKey> stationOfNone;
   // One pass of one attempt: `refuse` are the creases an earlier pass of the same
   // attempt found over-round, left sharp here; `overRound`, when given, receives the
@@ -4315,42 +4377,6 @@ std::shared_ptr<const Geometry> buildBlend(
     }
   };
 
-  // Along-sweep station floor (cap kAlongSweep * size, named at file scope with
-  // the angle caps): split long selected creases so a straight fillet holds a
-  // constant profile instead of tapering. Where subdivision densifies a
-  // degenerate region (two fillets colliding along an exact tangency line) it can
-  // turn a marginally-valid over-size case non-manifold; there, fall back to the
-  // un-subdivided build, which is never worse than before this floor existed.
-  // The edges to densify are exactly the ones buildOn will blend: the eligible
-  // set computed on the raw mesh at the same two thresholds, tool-sign filtered.
-  // Taking it from selectCreaseEdges (rather than the feature key alone) means a
-  // shallow tangent stretch carried into the selection by crease-following — a
-  // tee's tangent sides — is given stations too, so a straight fillet there holds
-  // its profile instead of tapering to the corner-distorted ends. The same set says
-  // which face vertices the blend swallows, dissolved off both meshes before either
-  // build so the raw fallback carries the fix too.
-  MergedMesh mSub, mRaw;
-  {
-    const std::map<EdgeKey, std::vector<int>> adj0 = buildEdgeAdjacency(m0.tris);
-    const CreaseSelection sel0 =
-      selectCreaseEdges(m0, adj0, thresholdDeg, kDefaultSurfaceThresholdDeg);
-    std::set<EdgeKey> toSplit;
-    for (const auto& key : sel0.eligible)
-      if (sel0.crease.at(key).concave ? node.concave : node.convex) toSplit.insert(key);
-    dissolveSwallowedVertices(m0, sel0.crease, toSplit, node.size, isChamfer);
-    // The sliver weld is a tier of its own, and the mesh it was applied to is kept:
-    // it removes a blade the tessellation put there, but putting the turn it carried
-    // on one vertex can leave a corner sharper than the patches can close, and then
-    // the whole blend would be refused for a fault that was two lapped triangles.
-    // Keep the unwelded mesh so that case falls back to it rather than to nothing.
-    mRaw = m0;
-    weldSliverCreaseEdges(m0, toSplit, kSliverCreaseFrac * node.size);
-    mSub = m0;
-    subdivideLongCreaseEdges(mSub, toSplit, kAlongSweep * node.size, &stationOfSub);
-  }
-  const bool didSubdivide = mSub.tris.size() != m0.tris.size();
-  const bool didWeld = mRaw.tris.size() != m0.tris.size();
-
   // Prefer the tight pulled-in seating (round-overs flow into the corner); if it
   // leaves the mesh open on an oblique or crowded corner it cannot weld, fall back
   // to the full-mitre pull-in (the un-blade seat that only ever shrinks the patch),
@@ -4389,49 +4415,110 @@ std::shared_ptr<const Geometry> buildBlend(
     return r;
   };
 
-  // The sliver weld is judged, not assumed. Removing a blade the tessellation put
-  // there usually removes the fold it caused, but putting the turn that blade
-  // carried onto one vertex can leave a corner the patches close worse than they
-  // closed around the sliver -- or cannot close at all, in which case the ladder
-  // above has already refused the whole blend for two lapped triangles. So the
-  // unwelded mesh is built too and the better of the two is kept, where better is
-  // first "it built" and then "it has fewer folds". A fold is invisible to every
-  // other check here (closed, edge-manifold, same genus, and still wrong), so
-  // counting them is the only way this choice can be made at all; ties go to the
-  // unwelded mesh, which is the one that moved no geometry.
-  MergedMesh mRawSub;
-  if (didWeld) {
-    mRawSub = mRaw;
-    const std::map<EdgeKey, std::vector<int>> adjR = buildEdgeAdjacency(mRaw.tris);
-    const CreaseSelection selR =
-      selectCreaseEdges(mRaw, adjR, thresholdDeg, kDefaultSurfaceThresholdDeg);
-    std::set<EdgeKey> split;
-    for (const auto& key : selR.eligible)
-      if (selR.crease.at(key).concave ? node.concave : node.convex) split.insert(key);
-    subdivideLongCreaseEdges(mRawSub, split, kAlongSweep * node.size, &stationOfRawSub);
-  }
-  auto walk = [&](bool gate) -> Attempt {
-    Attempt r = ladder(mSub, stationOfSub, m0, didSubdivide, gate);
-    if (!didWeld) return r;
-    Attempt u = ladder(mRawSub, stationOfRawSub, mRaw, true, gate);
-    // Ties go to the unwelded mesh: it is the one that moved no geometry.
-    if (u.status == Status::Ok &&
-        (r.status != Status::Ok || (u.sub == r.sub && u.folds <= r.folds) || (u.sub && !r.sub)))
-      return u;
-    return r;
+  // One whole search, from one reading of the swallowed vertices. `curvedFans` is
+  // the offer dissolveSwallowedVertices makes on a smooth wall: it is an
+  // approximation of the wall inside the band the blend covers, so it is judged
+  // rather than assumed -- the caller below runs this again without it and keeps
+  // whichever folded less, exactly as the sliver weld is judged.
+  bool cutCurvedFans = false;
+  auto searchFrom = [&](bool curvedFans) -> Attempt {
+    MergedMesh m0 = m0base;
+    std::map<int, EdgeKey> stationOfSub, stationOfRawSub;
+    // Along-sweep station floor (cap kAlongSweep * size, named at file scope with
+    // the angle caps): split long selected creases so a straight fillet holds a
+    // constant profile instead of tapering. Where subdivision densifies a
+    // degenerate region (two fillets colliding along an exact tangency line) it can
+    // turn a marginally-valid over-size case non-manifold; there, fall back to the
+    // un-subdivided build, which is never worse than before this floor existed.
+    // The edges to densify are exactly the ones buildOn will blend: the eligible
+    // set computed on the raw mesh at the same two thresholds, tool-sign filtered.
+    // Taking it from selectCreaseEdges (rather than the feature key alone) means a
+    // shallow tangent stretch carried into the selection by crease-following — a
+    // tee's tangent sides — is given stations too, so a straight fillet there holds
+    // its profile instead of tapering to the corner-distorted ends. The same set says
+    // which face vertices the blend swallows, dissolved off both meshes before either
+    // build so the raw fallback carries the fix too.
+    MergedMesh mSub, mRaw;
+    {
+      const std::map<EdgeKey, std::vector<int>> adj0 = buildEdgeAdjacency(m0.tris);
+      const CreaseSelection sel0 =
+        selectCreaseEdges(m0, adj0, thresholdDeg, kDefaultSurfaceThresholdDeg);
+      std::set<EdgeKey> toSplit;
+      for (const auto& key : sel0.eligible)
+        if (sel0.crease.at(key).concave ? node.concave : node.convex) toSplit.insert(key);
+      cutCurvedFans |=
+        dissolveSwallowedVertices(m0, sel0.crease, toSplit, node.size, isChamfer, curvedFans);
+      // The sliver weld is a tier of its own, and the mesh it was applied to is kept:
+      // it removes a blade the tessellation put there, but putting the turn it carried
+      // on one vertex can leave a corner sharper than the patches can close, and then
+      // the whole blend would be refused for a fault that was two lapped triangles.
+      // Keep the unwelded mesh so that case falls back to it rather than to nothing.
+      mRaw = m0;
+      weldSliverCreaseEdges(m0, toSplit, kSliverCreaseFrac * node.size);
+      mSub = m0;
+      subdivideLongCreaseEdges(mSub, toSplit, kAlongSweep * node.size, &stationOfSub);
+    }
+    const bool didSubdivide = mSub.tris.size() != m0.tris.size();
+    const bool didWeld = mRaw.tris.size() != m0.tris.size();
+
+    // The sliver weld is judged, not assumed. Removing a blade the tessellation put
+    // there usually removes the fold it caused, but putting the turn that blade
+    // carried onto one vertex can leave a corner the patches close worse than they
+    // closed around the sliver -- or cannot close at all, in which case the ladder
+    // above has already refused the whole blend for two lapped triangles. So the
+    // unwelded mesh is built too and the better of the two is kept, where better is
+    // first "it built" and then "it has fewer folds". A fold is invisible to every
+    // other check here (closed, edge-manifold, same genus, and still wrong), so
+    // counting them is the only way this choice can be made at all; ties go to the
+    // unwelded mesh, which is the one that moved no geometry.
+    MergedMesh mRawSub;
+    if (didWeld) {
+      mRawSub = mRaw;
+      const std::map<EdgeKey, std::vector<int>> adjR = buildEdgeAdjacency(mRaw.tris);
+      const CreaseSelection selR =
+        selectCreaseEdges(mRaw, adjR, thresholdDeg, kDefaultSurfaceThresholdDeg);
+      std::set<EdgeKey> split;
+      for (const auto& key : selR.eligible)
+        if (selR.crease.at(key).concave ? node.concave : node.convex) split.insert(key);
+      subdivideLongCreaseEdges(mRawSub, split, kAlongSweep * node.size, &stationOfRawSub);
+    }
+    auto walk = [&](bool gate) -> Attempt {
+      Attempt r = ladder(mSub, stationOfSub, m0, didSubdivide, gate);
+      if (!didWeld) return r;
+      Attempt u = ladder(mRawSub, stationOfRawSub, mRaw, true, gate);
+      // Ties go to the unwelded mesh: it is the one that moved no geometry.
+      if (u.status == Status::Ok &&
+          (r.status != Status::Ok || (u.sub == r.sub && u.folds <= r.folds) || (u.sub && !r.sub)))
+        return u;
+      return r;
+    };
+
+    Attempt a = walk(/*gate=*/false);
+    // The size gate is the last tier of all, for the same reason the seats above are
+    // tiered: leaving a crease sharp is a real loss, and it is only worth taking where
+    // the blend it replaces was folded (or would not close at all). A model that came
+    // out clean never reaches this and is untouched by the gate; one that did not is
+    // built again with the over-round creases refused, and the refusal is kept only if
+    // it laid fewer flaps than the blend it replaced. `better` breaks a fold tie by
+    // refusing less, so a refusal that bought nothing is dropped.
+    if (a.status != Status::Ok || a.folds > 0) {
+      Attempt g = walk(/*gate=*/true);
+      if (better(g, a)) a = std::move(g);
+    }
+    return a;
   };
 
-  Attempt a = walk(/*gate=*/false);
-  // The size gate is the last tier of all, for the same reason the seats above are
-  // tiered: leaving a crease sharp is a real loss, and it is only worth taking where
-  // the blend it replaces was folded (or would not close at all). A model that came
-  // out clean never reaches this and is untouched by the gate; one that did not is
-  // built again with the over-round creases refused, and the refusal is kept only if
-  // it laid fewer flaps than the blend it replaced. `better` breaks a fold tie by
-  // refusing less, so a refusal that bought nothing is dropped.
-  if (a.status != Status::Ok || a.folds > 0) {
-    Attempt g = walk(/*gate=*/true);
-    if (better(g, a)) a = std::move(g);
+  Attempt a = searchFrom(/*curvedFans=*/true);
+  // The smooth-wall cut, judged. It removes the wall vertices a curved retreat
+  // swallows and cannot leave -- their fans are not flat, so the exact dissolve
+  // declines them and the face triangles around them come back turned over. The
+  // cut is not exact, though: on a fine tessellation it can run ring after ring
+  // and hand the blend a coarser wall than it started with. So the search is made
+  // again on the wall nobody cut, and the fewer-folds build wins; a model where no
+  // smooth fan was cut at all never pays for the second search.
+  if (cutCurvedFans && (a.status != Status::Ok || a.folds > 0)) {
+    Attempt k = searchFrom(/*curvedFans=*/false);
+    if (better(k, a)) a = std::move(k);
   }
 
   switch (a.status) {
