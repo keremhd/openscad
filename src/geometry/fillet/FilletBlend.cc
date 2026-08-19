@@ -2083,6 +2083,30 @@ struct Blender
     return true;
   }
 
+  // The maximal coplanar runs of one surface, each with its own normal, in the
+  // triangles' own order (so the split is deterministic). A surface is grouped by
+  // near-tangency, so where a cylinder runs tangentially into another face the two
+  // walls join one surface that is not planar as a whole while each wall still is.
+  // Everything that reasons about a face plane wants those pieces, not a verdict on
+  // the union: on a planar surface this is one run and the caller is unchanged.
+  std::vector<std::pair<Vector3d, std::vector<int>>> coplanarRuns(
+      const std::vector<int>& tris) const
+  {
+    std::vector<std::pair<Vector3d, std::vector<int>>> runs;
+    for (const int t : tris) {
+      const Vector3d n = m.tris[t].normal;
+      bool placed = false;
+      for (auto& [rn, rt] : runs)
+        if (rn.dot(n) >= 1 - 1e-12) {
+          rt.push_back(t);
+          placed = true;
+          break;
+        }
+      if (!placed) runs.push_back({n, {t}});
+    }
+    return runs;
+  }
+
   // --- the face footprint ---------------------------------------------------
 
   // One directed boundary link of a surface: the edge a->b as triangle t carries it,
@@ -2188,6 +2212,11 @@ struct Blender
   // same vertex keeps its own seat on every other face it belongs to.
   //
   // One crossing can expose the next, so the sweep repeats.
+  //
+  // A WHOLE SURFACE, not a coplanar run of one: the trim moves seats, and a seat on
+  // the seam between two runs of one surface is carried by both. Moving it for one
+  // run only tears the seam open; moving it for both puts one run's seat off its own
+  // plane. So the trim stays where every seat it touches is the surface's own.
   void trimFootprintSpikes()
   {
     std::vector<std::vector<int>> vTris(m.pos.size());
@@ -2466,11 +2495,18 @@ struct Blender
   // seats exactly where it did and the surface keeps the same boundary edges — and
   // it takes both triangles the right way round again.
   //
-  // Only a seam interior to one planar surface is eligible, and only a flip that
-  // leaves fewer triangles turned over is taken, so the pass either improves the
-  // face or does nothing to it. A boundary link that has reversed is a different
-  // fault, in the offset itself rather than in the triangulation, and this does not
-  // touch it.
+  // Only a seam interior to one coplanar run of a surface is eligible, and only a
+  // flip that leaves fewer triangles turned over is taken, so the pass either
+  // improves the face or does nothing to it. A boundary link that has reversed is a
+  // different fault, in the offset itself rather than in the triangulation, and this
+  // does not touch it.
+  //
+  // A RUN, NOT THE WHOLE SURFACE. Where a cylinder meets a face tangentially the two
+  // walls group into one surface that is not planar, and gating on the surface left
+  // exactly those faces unrepaired. That is where the repair is needed most: with no
+  // model vertex on the tangency line — an odd $fn puts it mid-facet — the union
+  // leaves razor needles along the facet whose corners then set back a whole radius,
+  // which turns them over and laps the retreated face over itself.
   //
   // Its reach is now the faces emitSurfacePatch declines — a face re-cut from its
   // own footprint has no source diagonal left to get wrong. Those are the crowded
@@ -2479,9 +2515,11 @@ struct Blender
   // unchanged but costs two of the collision probes their clean count.
   void flipInvertedInsets()
   {
-    for (const auto& [S, tris] : surfaceGroups()) {
-      Vector3d nrm;
-      if (tris.size() < 2 || !surfacePlanar(tris, nrm)) continue;
+    for (const auto& [S, all] : surfaceGroups())
+     for (const auto& run : coplanarRuns(all)) {
+      const Vector3d& nrm = run.first;
+      const std::vector<int>& tris = run.second;
+      if (tris.size() < 2) continue;
 
       // One inset per vertex of this surface. A vertex the surface reaches through
       // two separate fans has two, and no single answer to seat a flipped triangle
@@ -2542,7 +2580,7 @@ struct Blender
       for (const int t : tris)
         if (cur[t] != m.tris[t].v)
           surfaceOverride[t] = {at.at(cur[t][0]), at.at(cur[t][1]), at.at(cur[t][2])};
-    }
+     }
   }
 
   // Trim the folds out of the inset map before anything is emitted.
@@ -3519,21 +3557,53 @@ struct Blender
       }
     }
 
-    // Verify the weld left an edge-manifold patch. A proximity weld can merge two
-    // vertices that are not a collapsible neighbour pair, fusing separate columns so
-    // an interior edge ends up shared by three or more surviving triangles — the
-    // manifold surgery then rejects the whole blend and returns the model unchanged.
-    // Count each surviving triangle's undirected edges; if any is used more than
-    // twice the weld is unsafe for this ring, so drop it and emit the plain fan.
-    // (The saddle is still a valid, if slightly slivered, patch without the weld.)
-    std::map<std::pair<int, int>, int> edgeUse;
+    // Verify the weld left a manifold patch, at its edges AND at its vertices.
+    //
+    // A proximity weld can merge two vertices that are not a collapsible neighbour
+    // pair, fusing separate columns so an interior edge ends up shared by three or
+    // more surviving triangles — the manifold surgery then rejects the whole blend
+    // and returns the model unchanged. Count each surviving triangle's undirected
+    // edges; if any is used more than twice the weld is unsafe for this ring.
+    //
+    // The same fusion can also leave every edge used exactly twice and still be
+    // wrong. Where the ring is reentrant its interior layers fold back past
+    // themselves, and welding one column's interior onto a point clear across the
+    // ring joins two otherwise disjoint sheets of the patch at that point alone: the
+    // vertex carries two separate fans. Nothing downstream can see it — the solid is
+    // closed, edge-manifold and of the genus it should be, and invalid — so count the
+    // fans here too. How far in a column reaches is s = l/k with k = arcSegs, so
+    // whether two far-apart columns land inside the fixed tolerance moves with $fn:
+    // the same ring pinches at one arc-segment count and is clean at the next.
+    //
+    // Either failure drops the weld and emits the plain fan. (The saddle is still a
+    // valid, if slightly slivered, patch without it.)
+    std::map<std::pair<int, int>, std::vector<int>> edgeUse;
+    std::map<int, std::vector<int>> incident;
     bool manifold = true;
-    for (const auto& t : F) {
-      const int a = find(t[0]), b = find(t[1]), c = find(t[2]);
+    for (int f = 0; f < static_cast<int>(F.size()) && manifold; ++f) {
+      const int a = find(F[f][0]), b = find(F[f][1]), c = find(F[f][2]);
       if (a == b || b == c || a == c) continue;  // degenerate, dropped by out.tri too
       for (const auto& e : {std::minmax(a, b), std::minmax(b, c), std::minmax(a, c)})
-        if (++edgeUse[e] > 2) { manifold = false; break; }
-      if (!manifold) break;
+        if (edgeUse[e].push_back(f), edgeUse[e].size() > 2) { manifold = false; break; }
+      for (const int v : {a, b, c}) incident[v].push_back(f);
+    }
+    // One edge-connected fan per vertex: union the triangles at the vertex across the
+    // edges that touch it, and require a single component.
+    for (auto it = incident.begin(); it != incident.end() && manifold; ++it) {
+      std::map<int, int> par;
+      for (const int f : it->second) par[f] = f;
+      std::function<int(int)> root = [&](int x) {
+        while (par[x] != x) x = par[x] = par[par[x]];
+        return x;
+      };
+      for (const auto& [e, fl] : edgeUse) {
+        if (e.first != it->first && e.second != it->first) continue;
+        for (size_t q = 1; q < fl.size(); ++q)
+          if (par.count(fl[0]) && par.count(fl[q])) par[root(fl[0])] = root(fl[q]);
+      }
+      std::set<int> roots;
+      for (const int f : it->second) roots.insert(root(f));
+      if (roots.size() > 1) manifold = false;
     }
     if (!manifold)
       for (int i = 0; i < static_cast<int>(V.size()); ++i) rep[i] = i;
@@ -4019,8 +4089,29 @@ struct Blender
     // wall sets back along its own sector rather than mitring across a surface it is
     // no longer grouped with, and re-triangulated at a mixed corner to carry the
     // pulled-in strip feet.
+    //
+    // A surface that is not planar as a whole is tried again run by coplanar run
+    // before the per-triangle fallback. A tangent junction groups the cylinder's
+    // wall with the face it runs into, so the surface has two planes and the
+    // footprint declined the pair outright — leaving the per-triangle path to set
+    // back the razor needles the union leaves along the tangency line when no model
+    // vertex lands on it. Each needle's corners then retreat a whole radius in
+    // directions that bear no relation to its own width, and the retreated face laps
+    // over itself. Re-cutting each run from its own footprint drops the source
+    // triangulation, needles and all. The runs meet along a seam that is not a
+    // crease, so both sides seat it on the same sector-local insets and weld.
     for (const auto& [S, tris] : surfaceGroups()) {
       if (emitSurfacePatch(tris)) continue;
+      const auto runs = coplanarRuns(tris);
+      if (runs.size() > 1) {
+        std::vector<int> left;
+        for (const auto& run : runs)
+          if (!emitSurfacePatch(run.second))
+            left.insert(left.end(), run.second.begin(), run.second.end());
+        if (left.empty()) continue;
+        for (const int t : left) emitSurfaceTri(t);
+        continue;
+      }
       for (const int t : tris) emitSurfaceTri(t);
     }
     for (const auto& e : selected) emitEdge(e);
