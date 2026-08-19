@@ -303,6 +303,22 @@ inline constexpr double kSliverCreaseFrac = 0.05;
 // branch by moving a boundary point the corner is fitted against.
 inline constexpr double kFootprintSeatTol = kWeldTolMm;
 
+// How near a straight line two selected edges at a vertex must run for the size
+// gate to treat them as one crease cut into stations rather than two creases
+// meeting. It is far tighter than any of the crease-walk angles above because it
+// answers a different question: the along-sweep floor cuts a straight crease into
+// pieces that are collinear to rounding, and refusing one piece while keeping the
+// next leaves two parallel offset lines at different depths with no mitre between
+// them. Raise it and a genuine corner is refused along with its neighbour; lower it
+// past the rounding in a normalised direction and a station is left behind.
+inline constexpr double kOverRoundRunDeg = 1.0;
+
+// How many times the size gate may refuse and rebuild. Refusing only ever removes
+// setback, so no refusal can create a new over-round face and the sweep converges;
+// the cap is only there so a pathological mesh cannot loop. A build still over-round
+// at the cap is emitted as it was before the gate existed.
+inline constexpr int kOverRoundPasses = 4;
+
 // How exactly a finished footprint triangulation must reproduce its own polygon's
 // area, as a fraction of that area. It is the check that the hole bridges did not
 // cross anything: a bridge that did produces a triangulation that laps over itself
@@ -1156,6 +1172,13 @@ struct Blender
   bool turnPull = false;
 
   bool pulled(int u) const { return mixedVerts.count(u) || turnVerts.count(u); }
+
+  // The size gate's verdict, filled by run() when gateSize is on: the selected
+  // creases whose faces the setbacks have consumed (overRoundEdges). Non-empty means
+  // nothing was emitted — the caller drops these from the selection, leaving them
+  // sharp for the kept-seam ribbon, and builds again.
+  bool gateSize = true;
+  std::set<EdgeKey> overRound;
 
   // Whether to seat mixed corners with the pulled-in cross-section (the blade fix)
   // or the baseline mitre. The driver runs the pulled build first and, only if it
@@ -2231,6 +2254,110 @@ struct Blender
       }
       if (!cut) return;
     }
+  }
+
+  // --- the size gate --------------------------------------------------------
+
+  // Add one selected crease to the refusal set, together with the rest of the
+  // straight run it was cut from. `inc` is vertex -> selected neighbours.
+  void refuseRun(int a, int b, const std::map<int, std::vector<int>>& inc,
+                 std::set<EdgeKey>& bad) const
+  {
+    const EdgeKey seed{std::min(a, b), std::max(a, b)};
+    if (!selected.count(seed) || !bad.insert(seed).second) return;
+    const double cosRun = std::cos(kOverRoundRunDeg * M_PI / 180.0);
+    for (int back = 0; back < 2; ++back) {
+      int prev = back ? b : a, at = back ? a : b;
+      while (true) {
+        const auto it = inc.find(at);
+        if (it == inc.end()) break;
+        const Vector3d d = (m.pos[at] - m.pos[prev]).normalized();
+        int nxt = -1;
+        double bestDot = cosRun;
+        for (const int w : it->second) {
+          if (w == prev) continue;
+          const double c = (m.pos[w] - m.pos[at]).normalized().dot(d);
+          if (c > bestDot) { bestDot = c; nxt = w; }
+        }
+        if (nxt < 0) break;
+        if (!bad.insert({std::min(at, nxt), std::max(at, nxt)}).second) break;
+        prev = at;
+        at = nxt;
+      }
+    }
+  }
+
+  // The creases the size does not fit, as the faces they stand on report it.
+  //
+  // A boundary link retreats parallel to itself, so the only thing the retreat can
+  // do to it is shorten it: the seats at its two ends walk toward each other by the
+  // setbacks of the creases meeting there. Where those two setbacks are more than
+  // the link is long the seats cross and the link comes back pointing the other way
+  // — no strip of face is left between the two round-overs and both are asking for
+  // the same material. A whole loop can go that way at once, and then its retreated
+  // area has flipped sign or vanished rather than shrunk: the face is gone, not
+  // narrowed. Neither is a shape any blend of this size can carry.
+  //
+  // Neither is a trim, either, which is the line between this and
+  // trimFootprintSpikes: a spike has a crossing point to collapse the swallowed run
+  // onto, while a region that has turned over has no single point to seat on, and
+  // seating it on one sweeps every strip along it together and folds worse than
+  // leaving it. That case is refused here instead.
+  //
+  // What is refused is not the reversed link but the two creases that ate it — the
+  // links either side of it, whose setbacks it stands between — and with each of
+  // them the rest of the straight run it belongs to.
+  //
+  // Both tests are exact: a link either kept its direction or it did not, and a loop
+  // either kept its turn or it did not. The only tolerance is the footprint's own
+  // degeneracy floor, which decides when a length or an area is rounding rather than
+  // geometry.
+  std::set<EdgeKey> overRoundEdges() const
+  {
+    const double eps = kFootprintEpsFrac * size;
+    std::map<int, std::vector<int>> inc;
+    for (const auto& e : selected) {
+      inc[e.first].push_back(e.second);
+      inc[e.second].push_back(e.first);
+    }
+    std::set<EdgeKey> bad;
+    for (const auto& [S, tris] : surfaceGroups()) {
+      Vector3d nrm;
+      if (tris.size() < 2 || !surfacePlanar(tris, nrm)) continue;
+      for (const auto& loop : surfaceLoops(tris)) {
+        const int n = static_cast<int>(loop.size());
+        if (n < 3) continue;
+        const Basis2 B = planeBasis(m.pos[loop[0].a], nrm);
+        std::vector<Vector2d> src(n), ret(n);
+        std::vector<Vector3d> seat(n);
+        for (int i = 0; i < n; ++i) {
+          seat[i] = insetForTri(loop[i].a, loop[i].t);
+          src[i] = project2(B, m.pos[loop[i].a]);
+          ret[i] = project2(B, seat[i]);
+        }
+        const double a0 = loopArea2(src);
+        if (std::abs(a0) < eps * eps) continue;  // no source loop to speak of
+        // The loop turns with the face (outer) or against it (a hole); either way
+        // the retreat may only shrink it, never turn it the other way.
+        const double a1 = (a0 > 0 ? 1.0 : -1.0) * loopArea2(ret);
+        const bool gone = a1 <= eps * eps;  // the face has no interior left at all
+        for (int i = 0; i < n; ++i) {
+          const Vector3d d = m.pos[loop[i].b] - m.pos[loop[i].a];
+          if (d.norm() < eps) continue;
+          const double kept = (seat[(i + 1) % n] - seat[i]).dot(d.normalized());
+          // A link the retreat has merely closed, on a face that still has an
+          // interior, is a trim's business rather than the gate's: a collapsed spike
+          // seats both ends of a link on one crossing point without consuming the
+          // face. A link that has turned right round has no such reading.
+          if (!(kept < -eps || (gone && kept <= eps))) continue;
+          const auto& p = loop[(i - 1 + n) % n];
+          const auto& q = loop[(i + 1) % n];
+          refuseRun(p.a, p.b, inc, bad);
+          refuseRun(q.a, q.b, inc, bad);
+        }
+      }
+    }
+    return bad;
   }
 
   // Emit one planar face as its whole footprint rather than triangle by triangle.
@@ -3875,6 +4002,14 @@ struct Blender
     computeCornerStations();
     repairInsetFolds();
     trimFootprintSpikes();
+    // The size gate is read at the seats the trim has settled on, so a spike it has
+    // already collapsed is not mistaken for a face the setbacks have consumed. A
+    // face that is over-round is not emitted at all: the caller refuses those creases
+    // and builds again without them.
+    if (gateSize) {
+      overRound = overRoundEdges();
+      if (!overRound.empty()) return;
+    }
     flipInvertedInsets();
     // Each planar face is emitted as one footprint — its own retreated boundary,
     // re-triangulated to fit it. Where that cannot be vouched for, and on every
@@ -3938,12 +4073,12 @@ std::shared_ptr<const Geometry> buildBlend(
   // One blend attempt on a given mesh. The whole build is mesh-dependent, so it
   // is factored out to be runnable twice: once on the subdivided mesh, once on
   // the raw one if subdivision produced a non-manifold result (below).
-  enum class Status { Ok, Empty, NoSelection, Holed };
+  enum class Status { Ok, Empty, NoSelection, Holed, OverRound };
   struct Attempt
   {
     Status status = Status::Empty;
     std::unique_ptr<PolySet> geom;
-    std::size_t selected = 0, nConcave = 0, nConvex = 0;
+    std::size_t selected = 0, nConcave = 0, nConvex = 0, refused = 0;
     std::size_t verts = 0, tris = 0;
     int boundary = 0, nonman = 0, folds = 0;
     // Whether this attempt was built on a mesh whose long creases were split. Two
@@ -3953,11 +4088,25 @@ std::shared_ptr<const Geometry> buildBlend(
     bool sub = false;
     Blender::CornerCounts corners;
   };
+  // Is x a better attempt than y: first that it built at all, then the along-sweep
+  // stations, then the fold census, then how many creases it managed to blend.
+  auto better = [](const Attempt& x, const Attempt& y) {
+    if (x.status != Status::Ok) return false;
+    if (y.status != Status::Ok) return true;
+    if (x.sub != y.sub) return x.sub;  // never trade the along-sweep stations for folds
+    if (x.folds != y.folds) return x.folds < y.folds;
+    return x.refused < y.refused;  // at equal quality, blend the most creases
+  };
   std::map<int, EdgeKey> stationOfSub, stationOfRawSub;
   const std::map<int, EdgeKey> stationOfNone;
-  auto buildOn = [&](const MergedMesh& m, double surfaceThresholdDeg, bool pullIn,
-                     double stationFrac, bool turnPull = false, bool sub = true,
-                     const std::map<int, EdgeKey>& stationOf = {}) -> Attempt {
+  // One pass of one attempt: `refuse` are the creases an earlier pass of the same
+  // attempt found over-round, left sharp here; `overRound`, when given, receives the
+  // ones this pass found (and then nothing was emitted).
+  auto buildPass = [&](const MergedMesh& m, double surfaceThresholdDeg, bool pullIn,
+                       double stationFrac, bool turnPull, bool sub,
+                       const std::map<int, EdgeKey>& stationOf,
+                       const std::set<EdgeKey>& refuse,
+                       std::set<EdgeKey>* overRound) -> Attempt {
     const std::map<EdgeKey, std::vector<int>> adj = buildEdgeAdjacency(m.tris);
     // Group surfaces by near-tangency, not by the feature threshold: a sub-crease
     // seam that is not near-tangent (a tee's tangent gap) must stay a surface
@@ -3969,6 +4118,7 @@ std::shared_ptr<const Geometry> buildBlend(
     b.pullIn = pullIn;
     b.stationFrac = stationFrac;
     b.turnPull = turnPull;
+    b.gateSize = overRound != nullptr;
     // Uniform arc tessellation: a quarter-turn's worth of segments from the
     // discretizer, applied to every cross-section regardless of its subtended
     // angle. A fillet crease whose dihedral varies (an oblique elliptical seam)
@@ -4019,13 +4169,26 @@ std::shared_ptr<const Geometry> buildBlend(
         }
         if (!brushVol->contains(0.5 * (m.pos[ask.first] + m.pos[ask.second]))) continue;
       }
+      // A crease the size gate refused on an earlier pass stays sharp: it is still a
+      // feature edge, so the kept-seam ribbon sews it exactly as a brush-excluded or
+      // sign-filtered one.
+      if (refuse.count(key)) continue;
       b.selected.insert(key);
       b.concaveOf[key] = ce.concave;
       if (ce.concave) ++a.nConcave; else ++a.nConvex;
     }
     a.selected = b.selected.size();
-    if (b.selected.empty()) { a.status = Status::NoSelection; return a; }
+    a.refused = refuse.size();
+    if (b.selected.empty()) {
+      a.status = refuse.empty() ? Status::NoSelection : Status::OverRound;
+      return a;
+    }
     b.run();
+    if (overRound && !b.overRound.empty()) {
+      *overRound = b.overRound;
+      a.status = Status::OverRound;
+      return a;
+    }
     a.corners = b.cornerCounts;
     a.boundary = b.out.orient();
     a.nonman = b.out.nonManifoldEdges();
@@ -4040,6 +4203,25 @@ std::shared_ptr<const Geometry> buildBlend(
     a.tris = b.out.F.size();
     a.geom = b.out.build();
     return a;
+  };
+
+  // One build, with or without the size gate. Gated, a pass that finds over-round
+  // creases has emitted nothing: they are dropped from the selection and the build is
+  // made again without them. Refusing only ever removes setback, so each pass has
+  // strictly less to consume than the last and the sweep converges; the final pass
+  // runs ungated so a mesh still over-round at the cap is emitted rather than lost.
+  auto buildOn = [&](const MergedMesh& m, double surfaceThresholdDeg, bool pullIn,
+                     double stationFrac, bool turnPull, bool sub,
+                     const std::map<int, EdgeKey>& stationOf, bool gate) -> Attempt {
+    std::set<EdgeKey> refuse;
+    for (int pass = 0;; ++pass) {
+      std::set<EdgeKey> more;
+      const bool last = !gate || pass + 1 >= kOverRoundPasses;
+      Attempt a = buildPass(m, surfaceThresholdDeg, pullIn, stationFrac, turnPull, sub, stationOf,
+                            refuse, last ? nullptr : &more);
+      if (more.empty()) return a;
+      refuse.insert(more.begin(), more.end());
+    }
   };
 
   // Along-sweep station floor (cap kAlongSweep * size, named at file scope with
@@ -4091,29 +4273,31 @@ std::shared_ptr<const Geometry> buildBlend(
   // So the tiers are also walked when the first one closes but folds, and the best
   // is kept. A clean first build ends the search immediately, which is every model
   // that has no crowded corner in it, so the common case still costs one build.
-  auto better = [](const Attempt& x, const Attempt& y) {  // is x better than y
-    if (x.status != Status::Ok) return false;
-    if (y.status != Status::Ok) return true;
-    if (x.sub != y.sub) return x.sub;  // never trade the along-sweep stations for folds
-    return x.folds < y.folds;
+  auto ladder = [&](const MergedMesh& mm, const std::map<int, EdgeKey>& stationOf,
+                    const MergedMesh& unsplit, bool splitFallback, bool gate) -> Attempt {
+    Attempt r = buildOn(mm, kDefaultSurfaceThresholdDeg, /*pullIn=*/true, kPullStationFrac, false,
+                        true, stationOf, gate);
+    if (r.status != Status::Ok || r.folds > 0) {
+      Attempt t = buildOn(mm, kDefaultSurfaceThresholdDeg, true, 1.0, false, true, stationOf, gate);
+      if (better(t, r)) r = std::move(t);
+    }
+    if (r.status != Status::Ok || r.folds > 0) {
+      Attempt t = buildOn(mm, kDefaultSurfaceThresholdDeg, false, 1.0, false, true, stationOf, gate);
+      if (better(t, r)) r = std::move(t);
+    }
+    if (r.status != Status::Ok || r.folds > 0) {
+      Attempt t =
+        buildOn(mm, kDefaultSurfaceThresholdDeg, true, kPullStationFrac, true, true, stationOf, gate);
+      if (better(t, r)) r = std::move(t);
+    }
+    if (splitFallback && (r.status != Status::Ok || r.folds > 0)) {
+      Attempt t =
+        buildOn(unsplit, kDefaultSurfaceThresholdDeg, false, 1.0, false, /*sub=*/false, {}, gate);
+      if (better(t, r)) r = std::move(t);
+    }
+    return r;
   };
-  Attempt a = buildOn(mSub, kDefaultSurfaceThresholdDeg, /*pullIn=*/true, kPullStationFrac, false, true, stationOfSub);
-  if (a.status != Status::Ok || a.folds > 0) {
-    Attempt b1 = buildOn(mSub, kDefaultSurfaceThresholdDeg, true, 1.0, false, true, stationOfSub);
-    if (better(b1, a)) a = std::move(b1);
-  }
-  if (a.status != Status::Ok || a.folds > 0) {
-    Attempt b2 = buildOn(mSub, kDefaultSurfaceThresholdDeg, false, 1.0, false, true, stationOfSub);
-    if (better(b2, a)) a = std::move(b2);
-  }
-  if (a.status != Status::Ok || a.folds > 0) {
-    Attempt bt = buildOn(mSub, kDefaultSurfaceThresholdDeg, true, kPullStationFrac, true, true, stationOfSub);
-    if (better(bt, a)) a = std::move(bt);
-  }
-  if (didSubdivide && (a.status != Status::Ok || a.folds > 0)) {
-    Attempt b3 = buildOn(m0, kDefaultSurfaceThresholdDeg, false, 1.0, false, /*sub=*/false);
-    if (better(b3, a)) a = std::move(b3);
-  }
+
   // The sliver weld is judged, not assumed. Removing a blade the tessellation put
   // there usually removes the fold it caused, but putting the turn that blade
   // carried onto one vertex can leave a corner the patches close worse than they
@@ -4124,8 +4308,9 @@ std::shared_ptr<const Geometry> buildBlend(
   // other check here (closed, edge-manifold, same genus, and still wrong), so
   // counting them is the only way this choice can be made at all; ties go to the
   // unwelded mesh, which is the one that moved no geometry.
+  MergedMesh mRawSub;
   if (didWeld) {
-    MergedMesh mRawSub = mRaw;
+    mRawSub = mRaw;
     const std::map<EdgeKey, std::vector<int>> adjR = buildEdgeAdjacency(mRaw.tris);
     const CreaseSelection selR =
       selectCreaseEdges(mRaw, adjR, thresholdDeg, kDefaultSurfaceThresholdDeg);
@@ -4133,27 +4318,29 @@ std::shared_ptr<const Geometry> buildBlend(
     for (const auto& key : selR.eligible)
       if (selR.crease.at(key).concave ? node.concave : node.convex) split.insert(key);
     subdivideLongCreaseEdges(mRawSub, split, kAlongSweep * node.size, &stationOfRawSub);
-    Attempt r = buildOn(mRawSub, kDefaultSurfaceThresholdDeg, true, kPullStationFrac, false, true, stationOfRawSub);
-    if (r.status != Status::Ok || r.folds > 0) {
-      Attempt r1 = buildOn(mRawSub, kDefaultSurfaceThresholdDeg, true, 1.0, false, true, stationOfRawSub);
-      if (better(r1, r)) r = std::move(r1);
-    }
-    if (r.status != Status::Ok || r.folds > 0) {
-      Attempt r2 = buildOn(mRawSub, kDefaultSurfaceThresholdDeg, false, 1.0, false, true, stationOfRawSub);
-      if (better(r2, r)) r = std::move(r2);
-    }
-    if (r.status != Status::Ok || r.folds > 0) {
-      Attempt rt = buildOn(mRawSub, kDefaultSurfaceThresholdDeg, true, kPullStationFrac, true, true, stationOfRawSub);
-      if (better(rt, r)) r = std::move(rt);
-    }
-    if (r.status != Status::Ok || r.folds > 0) {
-      Attempt r3 = buildOn(mRaw, kDefaultSurfaceThresholdDeg, false, 1.0, false, /*sub=*/false);
-      if (better(r3, r)) r = std::move(r3);
-    }
+  }
+  auto walk = [&](bool gate) -> Attempt {
+    Attempt r = ladder(mSub, stationOfSub, m0, didSubdivide, gate);
+    if (!didWeld) return r;
+    Attempt u = ladder(mRawSub, stationOfRawSub, mRaw, true, gate);
     // Ties go to the unwelded mesh: it is the one that moved no geometry.
-    if (r.status == Status::Ok &&
-        (a.status != Status::Ok || (r.sub == a.sub && r.folds <= a.folds) || (r.sub && !a.sub)))
-      a = std::move(r);
+    if (u.status == Status::Ok &&
+        (r.status != Status::Ok || (u.sub == r.sub && u.folds <= r.folds) || (u.sub && !r.sub)))
+      return u;
+    return r;
+  };
+
+  Attempt a = walk(/*gate=*/false);
+  // The size gate is the last tier of all, for the same reason the seats above are
+  // tiered: leaving a crease sharp is a real loss, and it is only worth taking where
+  // the blend it replaces was folded (or would not close at all). A model that came
+  // out clean never reaches this and is untouched by the gate; one that did not is
+  // built again with the over-round creases refused, and the refusal is kept only if
+  // it laid fewer flaps than the blend it replaced. `better` breaks a fold tie by
+  // refusing less, so a refusal that bought nothing is dropped.
+  if (a.status != Status::Ok || a.folds > 0) {
+    Attempt g = walk(/*gate=*/true);
+    if (better(g, a)) a = std::move(g);
   }
 
   switch (a.status) {
@@ -4173,9 +4360,23 @@ std::shared_ptr<const Geometry> buildBlend(
           "returned unchanged",
           node.name(), a.boundary, a.nonman);
       return target;
+    case Status::OverRound:
+      // Every selected crease stands on a face narrower than the setbacks marching
+      // in from its two sides. There is no blend of this size to build.
+      LOG(message_group::Warning, node.modinst->location(), "",
+          "%1$s: %2$s %3$g does not fit the geometry — the faces it retreats across are "
+          "narrower than the setback it asks of them; the model is returned unchanged",
+          node.name(), sizeName, node.size);
+      return target;
     case Status::Ok:
       break;
   }
+  if (a.refused > 0)
+    LOG(message_group::Warning, node.modinst->location(), "",
+        "%1$s: %2$s %3$g does not fit the local geometry at %4$d crease edge(s) — the face "
+        "between their round-overs is narrower than the two setbacks; those edges are left "
+        "sharp and the rest of the model is blended",
+        node.name(), sizeName, node.size, static_cast<int>(a.refused));
 
   LOG(message_group::Echo, node.modinst->location(), "",
       "%1$s: %2$s %3$g blended %4$d edge(s) (%5$d concave, %6$d convex); %7$d verts, %8$d tris",
