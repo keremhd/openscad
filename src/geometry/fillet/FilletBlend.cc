@@ -4310,24 +4310,6 @@ struct Blender
     out.tri(Va, Wb, Vb);
   }
 
-  // Build the shared per-vertex cross-section for the pass-through vertices of a
-  // smooth crease — the coordinated fix for the junction facet dent. A vertex u
-  // qualifies when exactly two selected edges of the same sign meet there and
-  // continue nearly straight through it (a crease passing on, not a corner
-  // turning or a junction branching). At such a u the fan splits into two runs,
-  // one per side of the crease, each bounded by the two crease edges; the run may
-  // cross interior tessellation seams (the facets of a curved wall), which is
-  // exactly where the per-edge sectors diverge and dent. For each run we compute
-  // ONE inset point (mitre of the two bounding crease edges) and ONE averaged
-  // seat normal, and stamp them onto every triangle in the run. insetForTri and
-  // crossSectionEdge then hand both strips — and the surface pass and any kept
-  // seam meeting u — the identical answer, so the strips weld.
-  //
-  // Corner, junction and mixed-sign vertices are intentionally skipped: they keep
-  // the surface-bounded sector seating, whose per-side stop at a sub-feature gap
-  // is what closes a genuine junction (spanning it there reopens closure at
-  // higher $fn). The near-straight test is what separates the two: a crease
-  // continuing straight is safe to span; a corner or a junction branch is not.
   // Whether the corner at u really closes the way emitCornerTube needs it to, read at
   // whatever seat the strips currently carry: the concave section's rolling-ball centre
   // and the two round-overs' centres one ball-diameter apart, all square to the face the
@@ -4443,6 +4425,24 @@ struct Blender
     }
   }
 
+  // Build the shared per-vertex cross-section for the pass-through vertices of a
+  // smooth crease — the coordinated fix for the junction facet dent. A vertex u
+  // qualifies when exactly two selected edges of the same sign meet there and
+  // continue nearly straight through it (a crease passing on, not a corner
+  // turning or a junction branching). At such a u the fan splits into two runs,
+  // one per side of the crease, each bounded by the two crease edges; the run may
+  // cross interior tessellation seams (the facets of a curved wall), which is
+  // exactly where the per-edge sectors diverge and dent. For each run we compute
+  // ONE inset point (mitre of the two bounding crease edges) and ONE averaged
+  // seat normal, and stamp them onto every triangle in the run. insetForTri and
+  // crossSectionEdge then hand both strips — and the surface pass and any kept
+  // seam meeting u — the identical answer, so the strips weld.
+  //
+  // Corner, junction and mixed-sign vertices are intentionally skipped: they keep
+  // the surface-bounded sector seating, whose per-side stop at a sub-feature gap
+  // is what closes a genuine junction (spanning it there reopens closure at
+  // higher $fn). The near-straight test is what separates the two: a crease
+  // continuing straight is safe to span; a corner or a junction branch is not.
   void prepareShared()
   {
     // A crease continues through u when its two edges leave nearly opposite —
@@ -4727,6 +4727,11 @@ std::shared_ptr<const Geometry> buildBlend(
     // carries a fraction of the stations and so a fraction of the chances to fold,
     // and would win a fold comparison by having less surface rather than better.
     bool sub = false;
+    // Which rung of the search produced this attempt: the seat tier by name, and the
+    // three outer switches the tier was run under. Carried only to be echoed, so a
+    // tier that never wins any model can be seen to never win rather than assumed to.
+    const char *tier = "";
+    bool welded = false, gate = false, curvedFans = false;
     Blender::CornerCounts corners;
   };
   // Is x a better attempt than y: first that it built at all, then the along-sweep
@@ -4738,7 +4743,6 @@ std::shared_ptr<const Geometry> buildBlend(
     if (x.folds != y.folds) return x.folds < y.folds;
     return x.refused < y.refused;  // at equal quality, blend the most creases
   };
-  const std::map<int, EdgeKey> stationOfNone;
   // One pass of one attempt: `refuse` are the creases an earlier pass of the same
   // attempt found over-round, left sharp here; `overRound`, when given, receives the
   // ones this pass found (and then nothing was emitted).
@@ -4882,19 +4886,23 @@ std::shared_ptr<const Geometry> buildBlend(
                     const MergedMesh& unsplit, bool splitFallback, bool gate) -> Attempt {
     Attempt r = buildOn(mm, kDefaultSurfaceThresholdDeg, /*pullIn=*/true, kPullStationFrac, false,
                         /*fuse=*/true, true, stationOf, gate);
+    r.tier = "pullIn";
     if (r.status != Status::Ok || r.folds > 0) {
       Attempt t =
         buildOn(mm, kDefaultSurfaceThresholdDeg, true, 1.0, false, true, true, stationOf, gate);
+      t.tier = "fullMitre";
       if (better(t, r)) r = std::move(t);
     }
     if (r.status != Status::Ok || r.folds > 0) {
       Attempt t =
         buildOn(mm, kDefaultSurfaceThresholdDeg, false, 1.0, false, true, true, stationOf, gate);
+      t.tier = "baseline";
       if (better(t, r)) r = std::move(t);
     }
     if (r.status != Status::Ok || r.folds > 0) {
       Attempt t = buildOn(mm, kDefaultSurfaceThresholdDeg, true, kPullStationFrac, true, true, true,
                           stationOf, gate);
+      t.tier = "turnPull";
       if (better(t, r)) r = std::move(t);
     }
     // Last of the seat tiers: the collapsed-run fusion off. It only ever drops strips
@@ -4905,13 +4913,16 @@ std::shared_ptr<const Geometry> buildBlend(
     if (r.status != Status::Ok || r.folds > 0) {
       Attempt t = buildOn(mm, kDefaultSurfaceThresholdDeg, /*pullIn=*/true, kPullStationFrac, false,
                           /*fuse=*/false, true, stationOf, gate);
+      t.tier = "noFuse";
       if (better(t, r)) r = std::move(t);
     }
     if (splitFallback && (r.status != Status::Ok || r.folds > 0)) {
       Attempt t = buildOn(unsplit, kDefaultSurfaceThresholdDeg, false, 1.0, false, true,
                           /*sub=*/false, {}, gate);
+      t.tier = "unsplit";
       if (better(t, r)) r = std::move(t);
     }
+    r.gate = gate;
     return r;
   };
 
@@ -4984,8 +4995,10 @@ std::shared_ptr<const Geometry> buildBlend(
     }
     auto walk = [&](bool gate) -> Attempt {
       Attempt r = ladder(mSub, stationOfSub, m0, didSubdivide, gate);
+      r.welded = didWeld;
       if (!didWeld) return r;
       Attempt u = ladder(mRawSub, stationOfRawSub, mRaw, true, gate);
+      u.welded = false;
       // Ties go to the unwelded mesh: it is the one that moved no geometry.
       if (u.status == Status::Ok &&
           (r.status != Status::Ok || (u.sub == r.sub && u.folds <= r.folds) || (u.sub && !r.sub)))
@@ -5005,6 +5018,7 @@ std::shared_ptr<const Geometry> buildBlend(
       Attempt g = walk(/*gate=*/true);
       if (better(g, a)) a = std::move(g);
     }
+    a.curvedFans = curvedFans;
     return a;
   };
 
@@ -5067,5 +5081,12 @@ std::shared_ptr<const Geometry> buildBlend(
         "weld=%9$d none=%10$d",
         node.name(), a.corners.tube, a.corners.capTri, a.corners.cap, a.corners.coons,
         a.corners.saddle, a.corners.flat, a.corners.fan, a.corners.weld, a.corners.none);
+  // Which rung of the search this build came off. The ladder keeps the best of up to
+  // six seat tiers under three outer switches, and every tier below the first exists
+  // on the claim that some model needs it; this line is what makes that claim
+  // checkable model by model.
+  LOG(message_group::Echo, node.modinst->location(), "",
+      "%1$s: kept tier=%2$s welded=%3$d gate=%4$d curvedFans=%5$d", node.name(), a.tier,
+      a.welded ? 1 : 0, a.gate ? 1 : 0, a.curvedFans ? 1 : 0);
   return std::move(a.geom);
 }
