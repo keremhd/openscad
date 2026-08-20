@@ -144,6 +144,36 @@ inline constexpr double kFoldSurvivorSetbacks = 2.0;
 inline constexpr int kFoldRepairSweeps = 8;
 inline constexpr int kInsetFlipPasses = 8;
 
+// --- the section's own ball ------------------------------------------------
+
+// The smallest move of a cross-section's centre onto the ball its two feet stand on
+// that is taken to be a move at all, as a fraction of the blend size. It separates a
+// real disagreement between the two sides' ball centres from the last bits of a
+// subtraction that cancels; anywhere near the geometry and a genuine spiral is left
+// uncorrected, anywhere near zero and rounding moves every arc in the bench.
+inline constexpr double kCentreSlideEpsFrac = 1e-9;
+
+// And the largest such move that is still a correction rather than an invention, as
+// a fraction of the blend size: past it the two sides have not named nearly the same
+// ball but two different ones. Raise it and a degenerate seating is re-drawn about a
+// ball no side measured; lower it and a real spiral keeps its interpolated radius.
+inline constexpr double kCentreAgreeFrac = 0.5;
+
+// --- the retreat on a curved wall ------------------------------------------
+
+// How many facets one retreat may be unfolded across before it is given up on. A
+// setback is a couple of blend radii and a wall's facets are chords of the same
+// order, so a handful of crossings is the whole of it; the cap is only there so a
+// direction that grazes a seam cannot circle a closed wall forever. Reaching it
+// means the walk has not landed, and the caller keeps the plain in-plane mitre.
+inline constexpr int kSurfaceWalkMaxFacets = 64;
+
+// How far off its own facet's plane a walked point may drift, as a fraction of the
+// blend size, before the walk is refused. Each crossing re-seats the heading exactly
+// in the next facet's plane, so the only drift is rounding; a walk that has
+// accumulated more than this has left the surface it claims to be measuring on.
+inline constexpr double kSurfaceWalkDriftFrac = 1e-6;
+
 // --- corner-roll reconstruction --------------------------------------------
 
 // How tightly a ring arc's reconstructed rolling-ball centres must cluster for the
@@ -1417,6 +1447,11 @@ struct Blender
   // tier turns it off and keeps that build only if fewer folds came with it.
   bool fuseCollapsed = true;
 
+  // Whether a seat on a curved wall is re-measured along the wall rather than in the
+  // plane of the one facet its mitre was computed in. On by default; see
+  // walkOnSurface. A planar surface is never asked, so this moves nothing there.
+  bool walkCurved = true;
+
   int fusedRootOf(int u) const
   {
     auto it = fusedRun.find(u);
@@ -1671,6 +1706,129 @@ struct Blender
     return s;
   }
 
+  // Whether a surface bends at all: any two of its triangles carrying different
+  // normals. Filled once, on the first question asked of it.
+  mutable std::map<int, bool> curvedSurfCache;
+  bool surfaceCurved(int S) const
+  {
+    if (curvedSurfCache.empty()) {
+      std::map<int, Vector3d> seen;
+      for (size_t t = 0; t < m.tris.size(); ++t) {
+        const int s = surfaceOf[t];
+        const auto it = seen.find(s);
+        if (it == seen.end()) {
+          seen.emplace(s, m.tris[t].normal);
+          curvedSurfCache.emplace(s, false);
+        } else if (m.tris[t].normal.dot(it->second) < 1 - 1e-12) {
+          curvedSurfCache[s] = true;
+        }
+      }
+    }
+    const auto it = curvedSurfCache.find(S);
+    return it != curvedSurfCache.end() && it->second;
+  }
+
+  // Carry a heading across a shared edge: the same component along the edge, and the
+  // same signed component across it, read in the next facet's own plane. This is the
+  // unfolding — the two facets laid flat about their common edge — done without ever
+  // building the flattening.
+  static Vector3d turnAcross(const Vector3d& d, const Vector3d& eh, const Vector3d& nFrom,
+                             const Vector3d& nTo)
+  {
+    const Vector3d wFrom = nFrom.cross(eh), wTo = nTo.cross(eh);
+    if (wFrom.norm() < 1e-12 || wTo.norm() < 1e-12) return d;
+    return Vector3d(d.dot(eh) * eh + d.dot(wFrom.normalized()) * wTo.normalized());
+  }
+
+  // Where a retreat measured in one facet's plane actually lands ON a curved wall.
+  //
+  // insetForTri mitres two offset lines inside the plane of the triangle whose seat
+  // it is computing. On a planar face that plane IS the face, and the crossing is
+  // exact. On a faceted wall it is one chord plane of many, and a setback wider than
+  // the facet it was measured in runs off along that chord's tangent — a secant of
+  // the wall, which leaves the solid: the vertical crease where elbow_curved_endface's
+  // arm meets its 9.5 mm cylinder retreats 3.22 mm at $fn 48 across facets 1.24 mm
+  // wide, and the seat lands 0.44 mm outside the cylinder, dragging every retreated
+  // facet that shares it out with it and lapping the ones it passed over.
+  //
+  // A wall the mesh grouped into one surface is developable to the mesh's own
+  // accuracy, so the honest offset is the one measured after unfolding: keep the
+  // heading and the distance the mitre found, and walk them across the surface's own
+  // facets, turning the heading into each facet as its edge is crossed. On a planar
+  // surface every turn is the identity and the walk lands exactly where the straight
+  // mitre did — which is why this is asked only of a surface that bends.
+  //
+  // Returns nothing where the walk cannot vouch for its answer — the heading leaves
+  // the surface through a boundary, a seam is not carried by two triangles, the facet
+  // budget runs out — and the caller then keeps the plain in-plane mitre it had.
+  std::optional<Vector3d> walkOnSurface(int u, int t, const Vector3d& target) const
+  {
+    Vector3d d = target - m.pos[u];
+    double rem = d.norm();
+    if (rem < 1e-12) return target;
+    d /= rem;
+    int f = t;
+    // Start in the facet whose wedge at u the heading actually points into: the mitre
+    // was measured in t's plane, but at a vertex the fan turns, and a heading that
+    // leaves t across one of u's own edges belongs to the neighbour it enters.
+    bool located = false;
+    for (int step = 0; step < kSurfaceWalkMaxFacets && !located; ++step) {
+      int iu = -1;
+      for (int i = 0; i < 3; ++i)
+        if (m.tris[f].v[i] == u) iu = i;
+      if (iu < 0) return std::nullopt;
+      const int a = m.tris[f].v[(iu + 1) % 3], b = m.tris[f].v[(iu + 2) % 3];
+      const Vector3d n = m.tris[f].normal;
+      const Vector3d ea = (m.pos[a] - m.pos[u]).normalized();
+      const Vector3d eb = (m.pos[b] - m.pos[u]).normalized();
+      const double sa = ea.cross(d).dot(n), sb = d.cross(eb).dot(n);
+      if (sa >= -1e-12 && sb >= -1e-12) {           // inside this wedge; march from here
+        located = true;
+        break;
+      }
+      const int via = sa < sb ? a : b;              // leave across the edge it is furthest past
+      const EdgeKey e{std::min(u, via), std::max(u, via)};
+      const auto it = adj.find(e);
+      if (it == adj.end() || it->second.size() != 2) return std::nullopt;
+      const int g = it->second[0] == f ? it->second[1] : it->second[0];
+      if (g == f || surfaceOf[g] != surfaceOf[f]) return std::nullopt;
+      d = turnAcross(d, (m.pos[via] - m.pos[u]).normalized(), n, m.tris[g].normal);
+      f = g;
+    }
+    if (!located) return std::nullopt;
+    Vector3d P = m.pos[u];
+    for (int step = 0; step < kSurfaceWalkMaxFacets; ++step) {
+      const Vector3d n = m.tris[f].normal;
+      if (std::abs(n.dot(P - m.pos[m.tris[f].v[0]])) > kSurfaceWalkDriftFrac * size)
+        return std::nullopt;
+      double best = rem;
+      int ba = -1, bb = -1;
+      for (int i = 0; i < 3; ++i) {
+        const int A = m.tris[f].v[i], B = m.tris[f].v[(i + 1) % 3];
+        const Vector3d ab = m.pos[B] - m.pos[A];
+        const double den = d.cross(ab).dot(n);
+        if (std::abs(den) < 1e-15) continue;
+        const double s = (m.pos[A] - P).cross(ab).dot(n) / den;
+        const double w = (m.pos[A] - P).cross(d).dot(n) / den;
+        if (s <= 1e-9 || s >= best || w < -1e-9 || w > 1 + 1e-9) continue;
+        best = s;
+        ba = A;
+        bb = B;
+      }
+      if (ba < 0) return Vector3d(P + rem * d);     // the walk ends inside this facet
+      const EdgeKey e{std::min(ba, bb), std::max(ba, bb)};
+      const auto it = adj.find(e);
+      if (it == adj.end() || it->second.size() != 2) return std::nullopt;
+      const int g = it->second[0] == f ? it->second[1] : it->second[0];
+      if (g == f || surfaceOf[g] != surfaceOf[f]) return std::nullopt;
+      P += best * d;
+      rem -= best;
+      d = turnAcross(d, (m.pos[bb] - m.pos[ba]).normalized(), n, m.tris[g].normal);
+      f = g;
+    }
+    return std::nullopt;
+  }
+
   // Where vertex u lands once the crease is set back, on the side triangle t sits
   // on — the sector-local counterpart of insetPoint. Falls back to the
   // surface-based inset where the fan is not a clean manifold sector, so the
@@ -1689,18 +1847,25 @@ struct Blender
       base = m.pos[u] + sb * perpInto(u, x, tside);
       dir = (m.pos[x] - m.pos[u]).normalized();
     };
+    // A seat measured in one facet's plane is the seat only while the surface IS that
+    // plane. On a wall that bends, re-measure it along the wall (walkOnSurface).
+    const auto seat = [&](const Vector3d& p) {
+      if (!walkCurved || !surfaceCurved(surfaceOf[t])) return p;
+      const auto w = walkOnSurface(u, t, p);
+      return w ? *w : p;
+    };
     if (s->xb == s->xf) {
       Vector3d base, dir;
       offsetLine(s->xf, s->tf, base, dir);
-      return base;
+      return seat(base);
     }
     Vector3d b1, d1, b2, d2;
     offsetLine(s->xb, s->tb, b1, d1);
     offsetLine(s->xf, s->tf, b2, d2);
     const EdgeKey eb{std::min(u, s->xb), std::max(u, s->xb)};
     const EdgeKey ef{std::min(u, s->xf), std::max(u, s->xf)};
-    return mitre(m.pos[u], b1, d1, selected.count(eb) ? setback(eb) : 0.0, b2, d2,
-                 selected.count(ef) ? setback(ef) : 0.0);
+    return seat(mitre(m.pos[u], b1, d1, selected.count(eb) ? setback(eb) : 0.0, b2, d2,
+                      selected.count(ef) ? setback(ef) : 0.0));
   }
 
   // The far endpoint of the selected edge whose two incident triangles are t0/t1
@@ -1803,7 +1968,41 @@ struct Blender
     if (const auto it = normalOverride.find({u, t0}); it != normalOverride.end()) nA = it->second;
     if (const auto it = normalOverride.find({u, t1}); it != normalOverride.end()) nB = it->second;
     const double sgn = concave ? size : -size;
-    return Vector3d(0.5 * ((Ta + sgn * nA) + (Tb + sgn * nB)));
+    const Vector3d C0 = 0.5 * ((Ta + sgn * nA) + (Tb + sgn * nB));
+    // The two sides each name a ball centre, and where they name the same one the
+    // average IS it: it stands one radius off both feet, on their perpendicular
+    // bisector, and the section drawn about it is an arc of the rolling ball itself.
+    //
+    // They stop naming the same one where the two seat normals are not the same
+    // wedge's — a wall that bends between the two feet, a mixed corner whose sides
+    // mitre to different depths — and then the average stands off the bisector, the
+    // two radii differ, and the arc between them is a spiral: it is on no ball at all
+    // except at its two ends. On this bench the crest corner of elbow_curved_endface
+    // draws one whose radius runs 2.040 to 2.363 for a 2 mm fillet.
+    //
+    // The section's two feet are where the blend welds to the faces, so they are not
+    // negotiable; the centre is. Slide it onto their perpendicular bisector — the
+    // smallest move that makes the two radii one radius, so the section is an arc of a
+    // single ball seated on both feet instead of a spiral between two. Where the two
+    // candidates agree the slide is exactly zero and the answer is the average again,
+    // unchanged to the last bit, which is every planar crease in the bench.
+    const Vector3d e = Ta - Tb;
+    const double el = e.norm();
+    if (el < 1e-12) return C0;
+    const Vector3d eh = e / el;
+    const double slide = (C0 - 0.5 * (Ta + Tb)).dot(eh);
+    // Two guards, in the same units. Below the first there is no spiral: the dot
+    // products that cancel exactly in exact arithmetic land a few units in the last
+    // place away from it, and taking that would move every arc in the bench by 1e-16
+    // mm — no verdict changed, every byte did. Above the second the two sides have not
+    // named nearly the same ball but two different ones, which is a degenerate seating
+    // (a foot collapsed onto its own vertex, a section spanning a corner) rather than
+    // a spiral to straighten, and the slide would move the arc further than the
+    // disagreement it set out to settle.
+    if (std::abs(slide) < kCentreSlideEpsFrac * size ||
+        std::abs(slide) > kCentreAgreeFrac * size)
+      return C0;
+    return Vector3d(C0 - slide * eh);
   }
 
   std::vector<Vector3d> crossSectionEdge(int u, int t0, int t1, bool concave) const
@@ -4501,9 +4700,17 @@ struct Blender
         Vector3d b1, dd1, b2, dd2;
         offsetLine(viaStart, triStart, b1, dd1);
         offsetLine(viaEnd, triEnd, b2, dd2);
-        const Vector3d T =
+        Vector3d T =
           mitre(m.pos[u], b1, dd1, setback(EdgeKey{std::min(u, viaStart), std::max(u, viaStart)}),
                 b2, dd2, setback(EdgeKey{std::min(u, viaEnd), std::max(u, viaEnd)}));
+        // The run's whole point is that it spans a curved wall's facets, so its one
+        // seat is measured along the wall for the same reason insetForTri's is: the
+        // mitre stands in triStart's plane, which past that facet's own width is a
+        // secant of the wall rather than the wall. One walk for the run, not one per
+        // triangle — the heading is the run's, so every triangle still gets the same
+        // point and the strips still weld.
+        if (walkCurved && surfaceCurved(surfaceOf[triStart]))
+          if (const auto w = walkOnSurface(u, triStart, T)) T = *w;
         for (const int t : tris) {
           insetOverride[{u, t}] = T;
           normalOverride[{u, t}] = nSide;
@@ -4731,7 +4938,7 @@ std::shared_ptr<const Geometry> buildBlend(
     // three outer switches the tier was run under. Carried only to be echoed, so a
     // tier that never wins any model can be seen to never win rather than assumed to.
     const char *tier = "";
-    bool welded = false, gate = false, curvedFans = false;
+    bool welded = false, gate = false, curvedFans = false, walked = false;
     Blender::CornerCounts corners;
   };
   // Is x a better attempt than y: first that it built at all, then the along-sweep
@@ -4743,6 +4950,11 @@ std::shared_ptr<const Geometry> buildBlend(
     if (x.folds != y.folds) return x.folds < y.folds;
     return x.refused < y.refused;  // at equal quality, blend the most creases
   };
+  // Whether seats on a curved wall are measured along the wall (walkOnSurface) or in
+  // the plane of the one facet their mitre was computed in. The outermost switch of
+  // the search: it re-seats a whole curved retreat at once, which is why it is judged
+  // as a whole rather than tier by tier. See the bottom of this function.
+  bool curvedWalk = true;
   // One pass of one attempt: `refuse` are the creases an earlier pass of the same
   // attempt found over-round, left sharp here; `overRound`, when given, receives the
   // ones this pass found (and then nothing was emitted).
@@ -4763,6 +4975,7 @@ std::shared_ptr<const Geometry> buildBlend(
     b.stationFrac = stationFrac;
     b.turnPull = turnPull;
     b.fuseCollapsed = fuse;
+    b.walkCurved = curvedWalk;
     b.gateSize = overRound != nullptr;
     // Uniform arc tessellation: a quarter-turn's worth of segments from the
     // discretizer, applied to every cross-section regardless of its subtended
@@ -5022,7 +5235,6 @@ std::shared_ptr<const Geometry> buildBlend(
     return a;
   };
 
-  Attempt a = searchFrom(/*curvedFans=*/true);
   // The smooth-wall cut, judged. It removes the wall vertices a curved retreat
   // swallows and cannot leave -- their fans are not flat, so the exact dissolve
   // declines them and the face triangles around them come back turned over. The
@@ -5030,9 +5242,29 @@ std::shared_ptr<const Geometry> buildBlend(
   // and hand the blend a coarser wall than it started with. So the search is made
   // again on the wall nobody cut, and the fewer-folds build wins; a model where no
   // smooth fan was cut at all never pays for the second search.
-  if (cutCurvedFans && (a.status != Status::Ok || a.folds > 0)) {
-    Attempt k = searchFrom(/*curvedFans=*/false);
-    if (better(k, a)) a = std::move(k);
+  auto searchBoth = [&]() -> Attempt {
+    Attempt a = searchFrom(/*curvedFans=*/true);
+    if (cutCurvedFans && (a.status != Status::Ok || a.folds > 0)) {
+      Attempt k = searchFrom(/*curvedFans=*/false);
+      if (better(k, a)) a = std::move(k);
+    }
+    a.walked = curvedWalk;
+    return a;
+  };
+
+  Attempt a = searchBoth();
+  // Measuring the retreat along the wall is right where the wall is the surface the
+  // seats are on, and it puts them back on it. It is not free: a run of seats the
+  // collapse machinery had brought onto one point is spread back out along the wall,
+  // and where those seats were what let a whole run of strips fuse into one section,
+  // spreading them apart hands the run its strips back and they lap again -- two
+  // bosses grazing at the waist go from 4 flaps to 32 that way at $fn 64. So the
+  // whole search is made again with the walk off, and the fewer-folds build wins. A
+  // model with no curved surface, or one that came out clean, never pays for it.
+  if (a.status != Status::Ok || a.folds > 0) {
+    curvedWalk = false;
+    Attempt f = searchBoth();
+    if (better(f, a)) a = std::move(f);
   }
 
   switch (a.status) {
@@ -5086,7 +5318,7 @@ std::shared_ptr<const Geometry> buildBlend(
   // on the claim that some model needs it; this line is what makes that claim
   // checkable model by model.
   LOG(message_group::Echo, node.modinst->location(), "",
-      "%1$s: kept tier=%2$s welded=%3$d gate=%4$d curvedFans=%5$d", node.name(), a.tier,
-      a.welded ? 1 : 0, a.gate ? 1 : 0, a.curvedFans ? 1 : 0);
+      "%1$s: kept tier=%2$s welded=%3$d gate=%4$d curvedFans=%5$d wallWalk=%6$d", node.name(),
+      a.tier, a.welded ? 1 : 0, a.gate ? 1 : 0, a.curvedFans ? 1 : 0, a.walked ? 1 : 0);
   return std::move(a.geom);
 }
