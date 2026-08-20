@@ -365,6 +365,20 @@ inline constexpr int kOverRoundPasses = 12;
 // racing mitre is emitted and its strip comes back as a crumple.
 inline constexpr double kSeatEscapeSizes = 1.0;
 
+// How far apart a cross-section's two feet may stand ALONG their crease, in crease
+// lengths, before that crease is refused as a blade. A section is a slice ACROSS the
+// crease; each foot sits at its own face's mitre, so the two stand at slightly
+// different distances along it, and a corner may legitimately pull one back by a
+// setback or so. The crease's own length is what separates that from a section tipped
+// over into the crease's direction: past one length the quad at that end is turned
+// more along the strip than across it, the arc between the feet tilts out of the
+// plane it should sweep, and the strip stands off the surface. It is a plateau and
+// not a knob — measured on elbow_curved_endface at stock, 0.5, 1.0 and 1.5 lengths
+// all refuse the same 50 creases, because an honest section's feet are nowhere near
+// a whole length apart and the blades are two to four. Past the plateau (2.5 there)
+// the blade is emitted again and the fin at the crest comes back.
+inline constexpr double kBladeSpreadLens = 1.0;
+
 // How exactly a finished footprint triangulation must reproduce its own polygon's
 // area, as a fraction of that area. It is the check that the hole bridges did not
 // cross anything: a bridge that did produces a triangulation that laps over itself
@@ -2567,6 +2581,49 @@ struct Blender
     }
   }
 
+  // Refusing a blade moves the blade rather than removing it: the vertex at the far
+  // end of the refused crease now has the same setback mismatch across it, one edge
+  // further along. The walk below refuses the whole chain that mismatch would run
+  // down, in one pass. Its condition is the mismatch itself and not an angle: two
+  // edges leaving a vertex at angle alpha, one offset by its setback s and one not,
+  // cross s/sin(alpha) along the un-offset one, so the crossing runs off the end of
+  // that edge — and blades — exactly when s/sin(alpha) exceeds its length. Where it
+  // does not, the chain stops: that vertex can carry the handover, and the creases
+  // past it are none of this crease's business.
+  void refuseBladeRun(int a, int b, const std::map<int, std::vector<int>>& inc,
+                      std::set<EdgeKey>& bad) const
+  {
+    const EdgeKey seed{std::min(a, b), std::max(a, b)};
+    if (!selected.count(seed) || !bad.insert(seed).second) return;
+    for (int back = 0; back < 2; ++back) {
+      int prev = back ? b : a, at = back ? a : b;
+      while (true) {
+        const auto it = inc.find(at);
+        if (it == inc.end()) break;
+        const EdgeKey here{std::min(prev, at), std::max(prev, at)};
+        const double s = setback(here);
+        const Vector3d e1 = (m.pos[prev] - m.pos[at]).normalized();
+        int nxt = -1;
+        double worst = 0.0;
+        for (const int w : it->second) {
+          if (w == prev) continue;
+          const Vector3d d = m.pos[w] - m.pos[at];
+          const double L = d.norm();
+          if (L < 1e-12) continue;
+          const Vector3d e2 = d / L;
+          const double sina = e1.cross(e2).norm();
+          if (sina < 1e-12) continue;
+          const double reach = s / sina;
+          if (reach > L && reach / L > worst) { worst = reach / L; nxt = w; }
+        }
+        if (nxt < 0) break;
+        if (!bad.insert({std::min(at, nxt), std::max(at, nxt)}).second) break;
+        prev = at;
+        at = nxt;
+      }
+    }
+  }
+
   // The creases the size does not fit, as the faces they stand on report it.
   //
   // A boundary link retreats parallel to itself, so the only thing the retreat can
@@ -2712,6 +2769,41 @@ struct Blender
             if (area > 0) off = off || loopEscape(poly, q) > kSeatEscapeSizes * size;
         }
       if (off) refuseRun(e.first, e.second, inc, bad);
+    }
+    // THE OTHER HALF OF THE SAME SLIDE. The test above asks whether the racing mitre
+    // left the FACE; this one asks whether it left the CREASE. Both feet of a
+    // cross-section sit on the same crease, each at its own face's mitre, and a
+    // section is only a slice across the crease while those two mitres are at
+    // roughly the same distance along it. Where a refused crease hands over to a
+    // selected one at a single facet's turn the seat slides setbacks down the
+    // boundary — and it can do that without ever leaving the face, sliding along a
+    // boundary link the face keeps, which is exactly the case the outline test
+    // passes. The section is then a blade: a slice tipped over into the crease's own
+    // direction, its arc tilted out of the plane it should sweep, and the strip built
+    // on it stands off the surface (0.38 mm outside the solid at the crest of
+    // elbow_curved_endface) and shows as a fin.
+    //
+    // The measure is the crease's own length. A section spanning its two feet further
+    // apart ALONG the crease than the whole crease is long is turned more along the
+    // strip than across it; no honest slice can do that, whatever the corner. The
+    // crease is refused and left sharp for the kept-seam ribbon, exactly as an
+    // over-round or escaped one is.
+    for (const auto& e : selected) {
+      const auto& ts = adj.at(e);
+      if (ts.size() != 2) continue;
+      const Vector3d d = m.pos[e.second] - m.pos[e.first];
+      const double len = d.norm();
+      if (len < eps) continue;
+      bool blade = false;
+      for (const int u : {e.first, e.second}) {
+        const int x = u == e.first ? e.second : e.first;
+        const int px = pulled(u) ? farOf(u, ts[0], ts[1]) : -1;
+        const Vector3d Ta = px >= 0 ? stripFoot(u, px, ts[0]) : insetForTri(u, ts[0]);
+        const Vector3d Tb = px >= 0 ? stripFoot(u, px, ts[1]) : insetForTri(u, ts[1]);
+        const Vector3d eh = (m.pos[x] - m.pos[u]).normalized();
+        blade = blade || std::abs((Ta - Tb).dot(eh)) > kBladeSpreadLens * len;
+      }
+      if (blade) refuseBladeRun(e.first, e.second, inc, bad);
     }
     return bad;
   }
