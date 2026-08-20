@@ -316,8 +316,27 @@ inline constexpr double kOverRoundRunDeg = 1.0;
 // How many times the size gate may refuse and rebuild. Refusing only ever removes
 // setback, so no refusal can create a new over-round face and the sweep converges;
 // the cap is only there so a pathological mesh cannot loop. A build still over-round
-// at the cap is emitted as it was before the gate existed.
-inline constexpr int kOverRoundPasses = 4;
+// at the cap is emitted as it was before the gate existed — which is the failure
+// mode this number guards: a cap short of where the refusal settles hands the last,
+// ungated pass a selection the gate had already rejected, and the crumpled strips
+// that gate exists to refuse are emitted after all. A tapering wall on a
+// tessellated arc refuses one facet per pass as the handover walks along it, so the
+// budget has to be a run of facets long, not a couple of corners.
+inline constexpr int kOverRoundPasses = 12;
+
+// How far a strip's seat may stand outside the outline of the face it is supposed
+// to be tangent to, in blend sizes, before that crease is refused. Zero is the
+// honest answer for a face that is one whole plane, but a tessellated wall is cut
+// into a surface per facet, and a seat on one facet routinely spills a fraction of
+// a millimetre onto the next — the same wall, a different surface id — which is not
+// an escape at all. What is an escape is the mitre against a kept-sharp neighbour
+// leaving the vertex the same way, which lands whole setbacks down the boundary and
+// off the end of the face; measured, the two are 0.05 sizes and 1-3.6 sizes apart.
+// One size is the physical line between them: a ball of the blend's own size seated
+// at the vertex cannot touch anything further off the face than that, so nothing
+// there is a seat. Lower it and a facet spill is refused as a race; raise it and the
+// racing mitre is emitted and its strip comes back as a crumple.
+inline constexpr double kSeatEscapeSizes = 1.0;
 
 // How exactly a finished footprint triangulation must reproduce its own polygon's
 // area, as a fraction of that area. It is the check that the hole bridges did not
@@ -1087,6 +1106,31 @@ double loopArea2(const std::vector<Vector2d>& p)
     a += p[i].x() * q.y() - q.x() * p[i].y();
   }
   return a;
+}
+
+// How far a point stands outside a closed 2-D loop: zero when it is inside or on
+// the loop, otherwise its distance to the nearest link. Inside is by crossing
+// number; the distance is what tells a seat that has raced off the face from one
+// that has merely spilled a whisker onto the next facet of a tessellated wall,
+// which is the same surface in every sense but the surface id.
+double loopEscape(const std::vector<Vector2d>& p, const Vector2d& q)
+{
+  const size_t n = p.size();
+  bool in = false;
+  double dmin = 1e30;
+  for (size_t i = 0; i < n; ++i) {
+    const Vector2d& a = p[i];
+    const Vector2d& b = p[(i + 1) % n];
+    const Vector2d ab = b - a;
+    const double l2 = ab.squaredNorm();
+    const double t = l2 > 0 ? std::clamp((q - a).dot(ab) / l2, 0.0, 1.0) : 0.0;
+    dmin = std::min(dmin, (q - (a + t * ab)).norm());
+    if ((a.y() > q.y()) != (b.y() > q.y())) {
+      const double x = a.x() + (q.y() - a.y()) / (b.y() - a.y()) * ab.x();
+      if (q.x() < x) in = !in;
+    }
+  }
+  return in ? 0.0 : dmin;
 }
 
 // Where two segments cross each other properly — strictly inside both, so segments
@@ -2498,6 +2542,34 @@ struct Blender
       inc[e.second].push_back(e.first);
     }
     std::set<EdgeKey> bad;
+    // Each planar surface's source outline: its plane, and the loops that bound it
+    // projected into one basis for the whole surface, each with its signed area — so
+    // a point can be asked whether it stands on the face.
+    struct Outline
+    {
+      Basis2 B;
+      Vector3d origin, nrm;
+      std::vector<std::pair<std::vector<Vector2d>, double>> loops;
+    };
+    std::map<int, Outline> faceOutline;
+    for (const auto& [S, tris] : surfaceGroups()) {
+      Vector3d fn;
+      if (tris.size() < 2 || !surfacePlanar(tris, fn)) continue;
+      Outline o;
+      o.origin = m.pos[m.tris[tris.front()].v[0]];
+      o.nrm = fn;
+      o.B = planeBasis(o.origin, fn);
+      for (const auto& loop : surfaceLoops(tris)) {
+        if (loop.size() < 3) continue;
+        std::vector<Vector2d> poly;
+        poly.reserve(loop.size());
+        for (const auto& l : loop) poly.push_back(project2(o.B, m.pos[l.a]));
+        const double a = loopArea2(poly);
+        if (std::abs(a) < eps * eps) continue;
+        o.loops.emplace_back(std::move(poly), a);
+      }
+      if (!o.loops.empty()) faceOutline.emplace(S, std::move(o));
+    }
     for (const auto& [S, tris] : surfaceGroups()) {
       Vector3d nrm;
       if (tris.size() < 2 || !surfacePlanar(tris, nrm)) continue;
@@ -2533,6 +2605,44 @@ struct Blender
           refuseRun(q.a, q.b, inc, bad);
         }
       }
+    }
+    // A seat is a point ON its face. The retreat only ever carries a boundary vertex
+    // into the face, so a seat outside the face's own source outline is not a seat at
+    // all, and the strip foot that reads it is placed off the surface it is supposed
+    // to be tangent to.
+    //
+    // It happens where a refused crease hands over to a selected one leaving the
+    // vertex almost the same way. The kept edge offsets by zero, so the two offset
+    // lines cross 1/sin(turn) setbacks out; on a tessellated arc, where the turn is a
+    // single facet, that is several setbacks down the boundary and past the end of a
+    // face that ends there. The mitre limit holds the slide finite, not on the face.
+    //
+    // A slide that stays on the face is exactly what the kept edge is there for — the
+    // seat runs along the sharp edge and the sharp part stays sewn to the blended
+    // part — so what is asked is membership of the SOURCE outline, which the retreat
+    // can only shrink, with kSeatEscapeSizes of slack for the facet-to-facet spill a
+    // tessellated wall makes of one surface per facet. It is asked of the seats the
+    // strips actually stand on, per crease end and per side, because the trim seats
+    // per (vertex, triangle): one facet at a vertex can be pulled back onto a crossing
+    // while the next one along keeps the racing mitre.
+    for (const auto& e : selected) {
+      bool off = false;
+      for (const int u : {e.first, e.second})
+        for (const int t : adj.at(e)) {
+          const auto it = faceOutline.find(surfaceOf[t]);
+          if (it == faceOutline.end()) continue;
+          const Outline& o = it->second;
+          const Vector3d P = insetForTri(u, t);
+          // Only a seat that is IN the face's plane and outside its outline. A seat
+          // that has left the plane altogether is a different fault with a different
+          // answer — a fan run stamped with one shared inset across a smooth junction
+          // of two planes — and refusing the crease is not that one's remedy.
+          if (std::abs(o.nrm.dot(P - o.origin)) > eps) continue;
+          const Vector2d q = project2(o.B, P);
+          for (const auto& [poly, area] : o.loops)
+            if (area > 0) off = off || loopEscape(poly, q) > kSeatEscapeSizes * size;
+        }
+      if (off) refuseRun(e.first, e.second, inc, bad);
     }
     return bad;
   }
