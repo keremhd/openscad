@@ -135,9 +135,11 @@ holes are 4 mm and 0.0002 mm and which differ in no other number. `sweep.sh
 The claim that a truncated open bead shows up in `bnd` and nowhere else is
 **false**, and it is false by construction rather than by accident:
 
-- `fillet()` builds its tool as a `manifold::Manifold` and hands the caller a
-  Manifold boolean of it against the target. Every edge of that mesh is carried
-  by exactly two faces.
+- `fillet()` authors the blended solid itself: `OutMesh` welds the triangles it
+  emitted and `orient()` walks them into one consistent shell, counting the edges
+  that came back carried by one face and the ones carried by more than two. A
+  build with either is refused outright and the model is returned unchanged, so
+  what reaches the exporter has every edge on exactly two faces.
 - `mesh.py` welds vertices, which can only *merge* edges, so every count it ends
   up with is a sum of twos.
 - The one face it drops is one welding collapsed, and such a face contributes an
@@ -181,12 +183,12 @@ visible as a change in *shape*, side by side with the classes that did not move:
 |---|---|
 | S5-T01…T04 | `tube=2` — exact torus, lbracket both elbows and box_step both elbows |
 | S5-T05 | `tube=4 saddle=4` — rib: torus and saddle in one model |
-| S5-T06 | `tube=4 cap=4` — pocket |
+| S5-T06 | `tube=4 capTri=12` — pocket |
 | S5-T07 | `tube=0` at stock, `tube=2` at `min_angle = 25` — shallow_crease's fold is not selected at stock, so at stock there is no fold corner to dispatch |
 | S5-T08, T10 | `flat=2`, `flat=4` — the flat ear-clip, on the tee and on the same tee off-axis |
-| S5-T09 | `cap=8` — cross has no mixed corner at all, only single-sign spherical caps |
-| S5-T11 | `saddle=6` — a built bead running into a refused crease |
-| S5-T12 | `fan=4` — the crude centroid fan, 48-facet trunk against 10-facet branch |
+| S5-T09 | `capTri=8 flat=3` — cross has no mixed corner at all, only single-sign spherical caps |
+| S5-T11 | `saddle=5 flat=1` — a built bead running into a refused crease |
+| S5-T12 | `flat=4` — the flat ear-clip, 48-facet trunk against 10-facet branch |
 
 **The class in the caption is measured.** `fillet()` echoes a second line per
 call —

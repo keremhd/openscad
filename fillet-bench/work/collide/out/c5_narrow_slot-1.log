@@ -1,0 +1,10 @@
+ECHO: fillet: radius 1 blended 106 edge(s) (12 concave, 94 convex); 358 verts, 712 tris in file c5_narrow_slot.scad, line 8
+ECHO: fillet: corners tube=4 capTri=12 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=82 none=0 in file c5_narrow_slot.scad, line 8
+Geometries in cache: 4
+Geometry cache size in bytes: 37072
+CGAL Polyhedrons in cache: 1
+CGAL cache size in bytes: 4000
+Total rendering time: 0:00:00.004
+Top level object is a 3D object (PolySet):
+   Convex:       no
+   Triangles:    712

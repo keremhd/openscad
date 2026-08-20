@@ -86,8 +86,8 @@ tiles=(
   "tee|cylinder junction (5,0,10)|flat ear-clip flat=2|4,0,10.5|0.5,-1,0.5|44"
   "cross|three-axis star (0,0,0)|tri-cap valleys capTri=8, flat=3|0,0,0|1,-1,1|58"
   "tee_oblique|oblique junction (5,0,11.5)|flat ear-clip flat=4|4,0,11.5|0.5,-1,0.5|44"
-  "refused_neighbour|refused crease (7.5,4,7.44) + built bead|saddle saddle=6|7.5,0,7.45|1,-0.6,0.8|40"
-  "mixed_fn|48/10-facet junction (6,0,10)|centroid fan fan=4|5,0,10.5|0.5,-1,0.5|50"
+  "refused_neighbour|refused crease (7.5,4,7.44) + built bead|saddle saddle=5 + flat=1|7.5,0,7.45|1,-0.6,0.8|40"
+  "mixed_fn|48/10-facet junction (6,0,10)|flat ear-clip flat=4|5,0,10.5|0.5,-1,0.5|50"
 )
 
 print "${#tiles[@]} corner tiles -> sheets/sheet-$SHEET.png\n"

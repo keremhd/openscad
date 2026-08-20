@@ -1,0 +1,11 @@
+WARNING: fillet: the blend left 0 open edge(s) and 6 non-manifold edge(s); the model is returned unchanged in file c3_thin_web.scad, line 8
+Geometries in cache: 2
+Geometry cache size in bytes: 1712
+CGAL Polyhedrons in cache: 2
+CGAL cache size in bytes: 9500
+Total rendering time: 0:00:00.006
+   Top level object is a 3D object (manifold):
+   Status:     NoError
+   Genus:      0
+   Vertices:       19
+   Facets:         34
