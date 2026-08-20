@@ -2629,9 +2629,19 @@ struct Blender
       }
       if (!o.loops.empty()) faceOutline.emplace(S, std::move(o));
     }
+    // A ONE-TRIANGLE SURFACE IS ASKED TOO. It is the case the gate most needs to
+    // see, not the one it can afford to skip: where a boolean cuts an intersection
+    // curve that turns through a right angle inside a single facet — the tangency
+    // of two cylinders of the same diameter, where the curve crosses itself — it
+    // leaves one razor triangle whose whole boundary is crease. Every link of that
+    // boundary is shorter than the setbacks marching in on it, so its retreat turns
+    // right round: the seats swap ends, the triangle comes back inverted and tens of
+    // times its own area, and it laps the strips and corner patches seated along
+    // with it. A triangle already has the plane and the loop this test needs, so the
+    // only thing the old count was buying was the miss.
     for (const auto& [S, tris] : surfaceGroups()) {
       Vector3d nrm;
-      if (tris.size() < 2 || !surfacePlanar(tris, nrm)) continue;
+      if (tris.empty() || !surfacePlanar(tris, nrm)) continue;
       for (const auto& loop : surfaceLoops(tris)) {
         const int n = static_cast<int>(loop.size());
         if (n < 3) continue;
