@@ -304,11 +304,21 @@ inline constexpr double kFoldDihedralDeg = 170.0;
 // creases either side of it -- and each refusal moves the mitres of ITS neighbours,
 // which reverses the next link along, one facet per pass, until every concave crease
 // on the model has been refused. The bound therefore has to clear the artifact by
-// more than a whisker. Measured, the waist sliver stands at 0.105 sizes, and the
-// whole bench is no worse anywhere between here and 0.5 -- the weld is a judged
-// tier, so a weld that costs folds is dropped -- so this sits just clear of the
-// artifact rather than out where the judgement is doing the work.
-inline constexpr double kSliverCreaseFrac = 0.15;
+// more than a whisker. Measured, the waist sliver stands at 0.105 sizes.
+//
+// THE VALUE IS THE MEASURED OPTIMUM, not a round number: over 3240 cells (40 bench
+// models x nine tessellations x nine radii) 0.25 is the largest reach that costs no
+// cell anything. Below it the boolean's own debris survives -- a mismatched-facet
+// link of an intersection curve stands at 0.230 sizes on two cylinders of different
+// $fn, at 0.231 on a cross and at 0.186 on a large tee, and each of those laps its
+// neighbours at every tessellation. Above it the weld starts taking turns the
+// patches close worse: at 0.30 three cells come back with twice the flaps and at
+// 0.35 five do. What it can still absorb at 0.25 is a chamfer narrower than about a
+// fifth of the blend -- and that chamfer lies wholly inside the band the blend
+// resurfaces, so it is replaced by the fillet rather than left as a flat spot in
+// the middle of the round. Nothing here moves further than a quarter of the blend
+// size, and only inside the band being rebuilt.
+inline constexpr double kSliverCreaseFrac = 0.25;
 
 // Two consecutive points of a retreated boundary are ONE SEAT below this distance,
 // in mm. They arrive coincident whenever a trim has collapsed a link away, and a
@@ -1382,6 +1392,27 @@ struct Blender
 
   bool pulled(int u) const { return mixedVerts.count(u) || turnVerts.count(u); }
 
+  // A run of crease vertices whose blend footprint has collapsed onto one point,
+  // and the single cross-section the whole run is given. Populated by
+  // fuseCollapsedCreases(); empty wherever the offset is well-behaved. See there.
+  std::map<int, int> fusedRun;                             // vertex -> run representative
+  std::map<std::pair<int, bool>, std::vector<Vector3d>> fusedSection;
+  std::set<EdgeKey> fusedEdges;                            // creases with no strip to emit
+
+  // Whether a collapsed run is fused at all. On by default; the driver's last seat
+  // tier turns it off and keeps that build only if fewer folds came with it.
+  bool fuseCollapsed = true;
+
+  int fusedRootOf(int u) const
+  {
+    auto it = fusedRun.find(u);
+    while (it != fusedRun.end() && it->second != u) {
+      u = it->second;
+      it = fusedRun.find(u);
+    }
+    return u;
+  }
+
   // The size gate's verdict, filled by run() when gateSize is on: the selected
   // creases whose faces the setbacks have consumed (overRoundEdges). Non-empty means
   // nothing was emitted — the caller drops these from the selection, leaving them
@@ -1808,6 +1839,16 @@ struct Blender
         if (dB > 0) pts[j] -= dB * nB0;
       }
     }
+    // One collapsed run, one section — but only where the run's own section already
+    // stands on this section's two feet, so the substitution moves no weld point and
+    // only settles the arc between them. See fuseCollapsedCreases().
+    if (!fusedSection.empty()) {
+      const auto it = fusedSection.find({fusedRootOf(u), concave});
+      if (it != fusedSection.end() && it->second.size() == pts.size() &&
+          (it->second.front() - pts.front()).norm() <= kFootprintSeatTol &&
+          (it->second.back() - pts.back()).norm() <= kFootprintSeatTol)
+        return it->second;
+    }
     return pts;
   }
 
@@ -1815,6 +1856,7 @@ struct Blender
   // stitched into quads.
   void emitEdge(const EdgeKey& e)
   {
+    if (fusedEdges.count(e)) return;  // no strip: see fuseCollapsedCreases()
     const auto& ts = adj.at(e);
     const bool concave = concaveOf.at(e);
     const std::vector<Vector3d> cu = crossSectionEdge(e.first, ts[0], ts[1], concave);
@@ -4372,6 +4414,101 @@ struct Blender
     }
   }
 
+  // Give a crease run whose footprint has collapsed to a point ONE cross-section,
+  // and no strips.
+  //
+  // A strip is spanned between the sections at its edge's two ends, and each section
+  // is spanned between its two tangent feet — the points where the blend leaves the
+  // faces either side. trimFootprintSpikes and repairInsetFolds can put several
+  // consecutive crease vertices' insets on ONE point (insetCollapse), and where they
+  // do it on BOTH sides at once the strips over that run all have the same two feet:
+  // each is a whole fillet section's worth of surface swept across a ribbon a few
+  // hundredths of a millimetre wide, and the several of them lie on top of each
+  // other. They lap, and every lap is a fold — two bosses grazing at the waist read
+  // 26 of them at $fn 64, all strip against strip at the four waist points.
+  //
+  // The surface pass has already closed over that run as a single point, because it
+  // reads the same collapsed insets. This makes the strips agree with it: the run is
+  // one vertex to the blend, so it gets one section (the first one, taken in the
+  // selection's own order so the choice does not move with iteration), every edge
+  // inside the run has no strip to emit, and the edges leaving the run start from
+  // that same section — the same vector, not a copy each neighbour recomputes from
+  // its own incident triangles, so their first quads share its points exactly
+  // instead of meeting it across a lens of arc-interior disagreement.
+  //
+  // The test is on the feet and not on the whole section: the feet are where the
+  // strip welds to the surface, so two sections with the same feet cover the same
+  // footprint however their interiors were rounded. The tolerance is the mesh's own
+  // weld — below it the two feet are one point to everything downstream. Everything
+  // past that is guarded twice: the substitution in crossSectionEdge is declined
+  // unless the section it replaces already stands on the same two feet, and a strip
+  // is dropped only where the check below finds every other strip at both its ends
+  // already on the run's section. A run that does not pass both keeps its strips and
+  // its ribbons, which is exactly the state before this existed.
+  void fuseCollapsedCreases()
+  {
+    if (!fuseCollapsed) return;
+    for (const auto& e : selected) {
+      const auto it = adj.find(e);
+      if (it == adj.end() || it->second.size() != 2) continue;
+      const auto& ts = it->second;
+      const bool concave = concaveOf.at(e);
+      const std::vector<Vector3d> cu = crossSectionEdge(e.first, ts[0], ts[1], concave);
+      const std::vector<Vector3d> cv = crossSectionEdge(e.second, ts[0], ts[1], concave);
+      if (cu.size() != cv.size() || cu.empty()) continue;
+      if ((cu.front() - cv.front()).norm() > kFootprintSeatTol) continue;
+      if ((cu.back() - cv.back()).norm() > kFootprintSeatTol) continue;
+      const int a = fusedRootOf(e.first), b = fusedRootOf(e.second);
+      fusedEdges.insert(e);
+      if (a == b) continue;
+      fusedRun[a] = a;
+      fusedRun[b] = a;
+    }
+    if (fusedEdges.empty()) return;
+    // `selected` and `fusedEdges` are ordered sets, so the run's section is the same
+    // one on every run of the same build.
+    for (const auto& e : fusedEdges) {
+      const auto& ts = adj.at(e);
+      const bool concave = concaveOf.at(e);
+      const auto key = std::make_pair(fusedRootOf(e.first), concave);
+      if (fusedSection.count(key)) continue;
+      fusedSection[key] = crossSectionEdge(e.first, ts[0], ts[1], concave);
+    }
+    // Dropping a strip is only safe where every OTHER strip meeting either of its
+    // ends starts from the same section, because then the two neighbours it leaves
+    // facing each other are already the same ring of points. A crease vertex whose
+    // other selected edges sit on different feet (a branch leaving the run, a corner
+    // whose sector mitres elsewhere) declines the substitution above, and its strip
+    // is kept: without it there would be a lens-shaped gap between the section the
+    // run carries and the one the neighbour computed for itself.
+    std::map<int, std::vector<EdgeKey>> atVertex;
+    for (const auto& e : selected) {
+      atVertex[e.first].push_back(e);
+      atVertex[e.second].push_back(e);
+    }
+    auto everyEdgeOnRunSection = [&](int u) {
+      const int root = fusedRootOf(u);
+      for (const auto& e : atVertex[u]) {
+        const auto it = adj.find(e);
+        if (it == adj.end() || it->second.size() != 2) return false;
+        const bool concave = concaveOf.at(e);
+        const auto sec = fusedSection.find({root, concave});
+        if (sec == fusedSection.end()) return false;
+        if (crossSectionEdge(u, it->second[0], it->second[1], concave) != sec->second) return false;
+      }
+      return true;
+    };
+    std::map<int, bool> ok;
+    for (auto it = fusedEdges.begin(); it != fusedEdges.end();) {
+      const auto keep = [&](int u) {
+        const auto f = ok.find(u);
+        return f != ok.end() ? f->second : (ok[u] = everyEdgeOnRunSection(u));
+      };
+      if (keep(it->first) && keep(it->second)) ++it;
+      else it = fusedEdges.erase(it);
+    }
+  }
+
   // Re-emit every surface triangle with its boundary vertices set back to their
   // inset positions (interior vertices are unchanged), then the edge strips, the
   // kept-seam ribbons, and the corner patches.
@@ -4391,6 +4528,7 @@ struct Blender
       if (!overRound.empty()) return;
     }
     flipInvertedInsets();
+    fuseCollapsedCreases();
     // Each planar face is emitted as one footprint — its own retreated boundary,
     // re-triangulated to fit it. Where that cannot be vouched for, and on every
     // curved surface (whose facets are surfaces of their own and carry no interior
@@ -4503,7 +4641,7 @@ std::shared_ptr<const Geometry> buildBlend(
   // attempt found over-round, left sharp here; `overRound`, when given, receives the
   // ones this pass found (and then nothing was emitted).
   auto buildPass = [&](const MergedMesh& m, double surfaceThresholdDeg, bool pullIn,
-                       double stationFrac, bool turnPull, bool sub,
+                       double stationFrac, bool turnPull, bool fuse, bool sub,
                        const std::map<int, EdgeKey>& stationOf,
                        const std::set<EdgeKey>& refuse,
                        std::set<EdgeKey>* overRound) -> Attempt {
@@ -4518,6 +4656,7 @@ std::shared_ptr<const Geometry> buildBlend(
     b.pullIn = pullIn;
     b.stationFrac = stationFrac;
     b.turnPull = turnPull;
+    b.fuseCollapsed = fuse;
     b.gateSize = overRound != nullptr;
     // Uniform arc tessellation: a quarter-turn's worth of segments from the
     // discretizer, applied to every cross-section regardless of its subtended
@@ -4611,14 +4750,14 @@ std::shared_ptr<const Geometry> buildBlend(
   // strictly less to consume than the last and the sweep converges; the final pass
   // runs ungated so a mesh still over-round at the cap is emitted rather than lost.
   auto buildOn = [&](const MergedMesh& m, double surfaceThresholdDeg, bool pullIn,
-                     double stationFrac, bool turnPull, bool sub,
+                     double stationFrac, bool turnPull, bool fuse, bool sub,
                      const std::map<int, EdgeKey>& stationOf, bool gate) -> Attempt {
     std::set<EdgeKey> refuse;
     for (int pass = 0;; ++pass) {
       std::set<EdgeKey> more;
       const bool last = !gate || pass + 1 >= kOverRoundPasses;
-      Attempt a = buildPass(m, surfaceThresholdDeg, pullIn, stationFrac, turnPull, sub, stationOf,
-                            refuse, last ? nullptr : &more);
+      Attempt a = buildPass(m, surfaceThresholdDeg, pullIn, stationFrac, turnPull, fuse, sub,
+                            stationOf, refuse, last ? nullptr : &more);
       if (more.empty()) return a;
       refuse.insert(more.begin(), more.end());
     }
@@ -4640,23 +4779,35 @@ std::shared_ptr<const Geometry> buildBlend(
   auto ladder = [&](const MergedMesh& mm, const std::map<int, EdgeKey>& stationOf,
                     const MergedMesh& unsplit, bool splitFallback, bool gate) -> Attempt {
     Attempt r = buildOn(mm, kDefaultSurfaceThresholdDeg, /*pullIn=*/true, kPullStationFrac, false,
-                        true, stationOf, gate);
+                        /*fuse=*/true, true, stationOf, gate);
     if (r.status != Status::Ok || r.folds > 0) {
-      Attempt t = buildOn(mm, kDefaultSurfaceThresholdDeg, true, 1.0, false, true, stationOf, gate);
-      if (better(t, r)) r = std::move(t);
-    }
-    if (r.status != Status::Ok || r.folds > 0) {
-      Attempt t = buildOn(mm, kDefaultSurfaceThresholdDeg, false, 1.0, false, true, stationOf, gate);
+      Attempt t =
+        buildOn(mm, kDefaultSurfaceThresholdDeg, true, 1.0, false, true, true, stationOf, gate);
       if (better(t, r)) r = std::move(t);
     }
     if (r.status != Status::Ok || r.folds > 0) {
       Attempt t =
-        buildOn(mm, kDefaultSurfaceThresholdDeg, true, kPullStationFrac, true, true, stationOf, gate);
+        buildOn(mm, kDefaultSurfaceThresholdDeg, false, 1.0, false, true, true, stationOf, gate);
+      if (better(t, r)) r = std::move(t);
+    }
+    if (r.status != Status::Ok || r.folds > 0) {
+      Attempt t = buildOn(mm, kDefaultSurfaceThresholdDeg, true, kPullStationFrac, true, true, true,
+                          stationOf, gate);
+      if (better(t, r)) r = std::move(t);
+    }
+    // Last of the seat tiers: the collapsed-run fusion off. It only ever drops strips
+    // whose neighbours already stand on the same section, so it cannot open the mesh,
+    // but one section for a run is one section fewer than the run had, and a run long
+    // enough for that to matter is better served by the ribbons it was folding with.
+    // Judged like every tier above: taken only where it lays fewer flaps.
+    if (r.status != Status::Ok || r.folds > 0) {
+      Attempt t = buildOn(mm, kDefaultSurfaceThresholdDeg, /*pullIn=*/true, kPullStationFrac, false,
+                          /*fuse=*/false, true, stationOf, gate);
       if (better(t, r)) r = std::move(t);
     }
     if (splitFallback && (r.status != Status::Ok || r.folds > 0)) {
-      Attempt t =
-        buildOn(unsplit, kDefaultSurfaceThresholdDeg, false, 1.0, false, /*sub=*/false, {}, gate);
+      Attempt t = buildOn(unsplit, kDefaultSurfaceThresholdDeg, false, 1.0, false, true,
+                          /*sub=*/false, {}, gate);
       if (better(t, r)) r = std::move(t);
     }
     return r;
