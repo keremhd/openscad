@@ -291,7 +291,24 @@ inline constexpr double kFoldDihedralDeg = 170.0;
 // crease geometry is welded away -- a short but genuine segment of a chain stops
 // being one, and the turn it carried lands on the wrong vertex; lower it and the
 // sliver survives and its strip laps the strips either side of it.
-inline constexpr double kSliverCreaseFrac = 0.05;
+//
+// A sliver is an ABSOLUTE length the boolean left behind -- two bosses grazing at
+// the waist leave one 21 microns long whatever blend is asked for -- while this
+// bound scales with the blend, so the same edge is a sliver at one radius and not
+// at the next one down. That is the right form (at a small enough radius the blend
+// really can resolve a 21-micron crease), but a fraction this low puts the crossover
+// inside the range of radii the bench asks for: at 0.05 the waist sliver is welded
+// at radius 0.5 and survives at 0.3, and what it does when it survives is not only
+// lap its neighbours. It also reaches the size gate, where it is a boundary link
+// far shorter than the two setbacks marching in on it, so the gate refuses the two
+// creases either side of it -- and each refusal moves the mitres of ITS neighbours,
+// which reverses the next link along, one facet per pass, until every concave crease
+// on the model has been refused. The bound therefore has to clear the artifact by
+// more than a whisker. Measured, the waist sliver stands at 0.105 sizes, and the
+// whole bench is no worse anywhere between here and 0.5 -- the weld is a judged
+// tier, so a weld that costs folds is dropped -- so this sits just clear of the
+// artifact rather than out where the judgement is doing the work.
+inline constexpr double kSliverCreaseFrac = 0.15;
 
 // Two consecutive points of a retreated boundary are ONE SEAT below this distance,
 // in mm. They arrive coincident whenever a trim has collapsed a link away, and a
