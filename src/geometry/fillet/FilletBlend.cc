@@ -1839,33 +1839,45 @@ struct Blender
     if (cl != insetCollapse.end()) return cl->second;
     const auto ov = insetOverride.find({u, t});
     if (ov != insetOverride.end()) return ov->second;
+    const auto raw = insetRawForTri(u, t);
+    if (!raw) return insetPoint(u, surfaceOf[t]);
+    // A seat measured in one facet's plane is the seat only while the surface IS that
+    // plane. On a wall that bends, re-measure it along the wall (walkOnSurface).
+    if (!walkCurved || !surfaceCurved(surfaceOf[t])) return *raw;
+    const auto w = walkOnSurface(u, t, *raw);
+    return w ? *w : *raw;
+  }
+
+  // The seat before the walk: the mitre exactly as it falls in triangle t's own
+  // plane. Nothing where the fan is not a clean manifold sector and the seat comes
+  // from the surface rather than from a mitre at all.
+  //
+  // The developed footprint asks for this rather than for the walked seat, because
+  // the development already carries the walk: unfolding the surface turns the walk
+  // into the straight line it was measured as, so the in-plane mitre read through
+  // the facet's own map IS where the walked seat lands.
+  std::optional<Vector3d> insetRawForTri(int u, int t) const
+  {
     const auto s = sectorOf(u, t);
-    if (!s) return insetPoint(u, surfaceOf[t]);
+    if (!s) return std::nullopt;
     auto offsetLine = [&](int x, int tside, Vector3d& base, Vector3d& dir) {
       const EdgeKey e{std::min(u, x), std::max(u, x)};
       const double sb = selected.count(e) ? setback(e) : 0.0;
       base = m.pos[u] + sb * perpInto(u, x, tside);
       dir = (m.pos[x] - m.pos[u]).normalized();
     };
-    // A seat measured in one facet's plane is the seat only while the surface IS that
-    // plane. On a wall that bends, re-measure it along the wall (walkOnSurface).
-    const auto seat = [&](const Vector3d& p) {
-      if (!walkCurved || !surfaceCurved(surfaceOf[t])) return p;
-      const auto w = walkOnSurface(u, t, p);
-      return w ? *w : p;
-    };
     if (s->xb == s->xf) {
       Vector3d base, dir;
       offsetLine(s->xf, s->tf, base, dir);
-      return seat(base);
+      return base;
     }
     Vector3d b1, d1, b2, d2;
     offsetLine(s->xb, s->tb, b1, d1);
     offsetLine(s->xf, s->tf, b2, d2);
     const EdgeKey eb{std::min(u, s->xb), std::max(u, s->xb)};
     const EdgeKey ef{std::min(u, s->xf), std::max(u, s->xf)};
-    return seat(mitre(m.pos[u], b1, d1, selected.count(eb) ? setback(eb) : 0.0, b2, d2,
-                      selected.count(ef) ? setback(ef) : 0.0));
+    return mitre(m.pos[u], b1, d1, selected.count(eb) ? setback(eb) : 0.0, b2, d2,
+                 selected.count(ef) ? setback(ef) : 0.0);
   }
 
   // The far endpoint of the selected edge whose two incident triangles are t0/t1
@@ -2710,12 +2722,27 @@ struct Blender
               Vector2d X;
               if (!segCross2(p[i], p[(i + 1) % n], p[j], p[(j + 1) % n], eps, X)) continue;
               // The run i+1..j, closed through the crossing. Against it stands the
-              // rest of the loop, also closed through the crossing; their areas sum
-              // to the loop's, so at most one turns the other way.
-              std::vector<Vector2d> run{X};
-              for (int k = i + 1; k <= j; ++k) run.push_back(p[k]);
-              const double a = loopArea2(run);
-              if (a * whole >= 0) continue;  // this run is not the fold-back
+              // rest of the loop -- j+1..i the other way round the seam -- also
+              // closed through the crossing; their areas sum to the loop's, so at
+              // most one turns the other way. EITHER of them can be the one: which
+              // side of a crossing the swallowed run falls on is a fact about the
+              // face, not about where the loop happened to start, and reading only
+              // the first left a wide mitre that had folded a whole face over
+              // uncollapsed -- and with it the whole-face footprint refused, for the
+              // boundary was still crossing itself.
+              const auto swallowed = [&](const std::vector<int>& ks) {
+                std::vector<Vector2d> run{X};
+                for (const int k : ks) run.push_back(p[k]);
+                return loopArea2(run) * whole < 0;
+              };
+              std::vector<int> ks;
+              for (int k = i + 1; k <= j; ++k) ks.push_back(k);
+              if (!swallowed(ks)) {
+                ks.clear();
+                for (int k = j + 1; k < n; ++k) ks.push_back(k);
+                for (int k = 0; k <= i; ++k) ks.push_back(k);
+                if (!swallowed(ks)) continue;  // neither run is the fold-back
+              }
               // Every seat the run gives up has to be near the crossing that
               // swallows it, and the same few setbacks the link repair allows its
               // survivor is the bound. It is two tests in one. A crossing that has
@@ -2730,10 +2757,10 @@ struct Blender
               // not this trim, and it is left for the strips to answer for.
               const Vector3d X3 = unproject2(B, X);
               bool spike = true;
-              for (int k = i + 1; k <= j && spike; ++k)
-                spike = (X3 - seat[k]).norm() <= kFoldSurvivorSetbacks * size;
+              for (const int k : ks)
+                if ((X3 - seat[k]).norm() > kFoldSurvivorSetbacks * size) spike = false;
               if (!spike) continue;
-              for (int k = i + 1; k <= j; ++k) {
+              for (const int k : ks) {
                 const int u = loop[k].a;
                 const Vector3d at = seat[k];
                 if ((X3 - at).squaredNorm() < 1e-24) continue;
@@ -4818,6 +4845,25 @@ struct Blender
     }
   }
 
+  // One surface's triangles, emitted the way they have always been emitted: as one
+  // footprint where the face is planar and that can be vouched for, else run by
+  // coplanar run, else triangle by triangle.
+  void emitSurfaceSet(const std::vector<int>& tris)
+  {
+    if (emitSurfacePatch(tris)) return;
+    const auto runs = coplanarRuns(tris);
+    if (runs.size() > 1) {
+      std::vector<int> left;
+      for (const auto& run : runs)
+        if (!emitSurfacePatch(run.second))
+          left.insert(left.end(), run.second.begin(), run.second.end());
+      if (left.empty()) return;
+      for (const int t : left) emitSurfaceTri(t);
+      return;
+    }
+    for (const int t : tris) emitSurfaceTri(t);
+  }
+
   // Re-emit every surface triangle with its boundary vertices set back to their
   // inset positions (interior vertices are unchanged), then the edge strips, the
   // kept-seam ribbons, and the corner patches.
@@ -4857,20 +4903,7 @@ struct Blender
     // over itself. Re-cutting each run from its own footprint drops the source
     // triangulation, needles and all. The runs meet along a seam that is not a
     // crease, so both sides seat it on the same sector-local insets and weld.
-    for (const auto& [S, tris] : surfaceGroups()) {
-      if (emitSurfacePatch(tris)) continue;
-      const auto runs = coplanarRuns(tris);
-      if (runs.size() > 1) {
-        std::vector<int> left;
-        for (const auto& run : runs)
-          if (!emitSurfacePatch(run.second))
-            left.insert(left.end(), run.second.begin(), run.second.end());
-        if (left.empty()) continue;
-        for (const int t : left) emitSurfaceTri(t);
-        continue;
-      }
-      for (const int t : tris) emitSurfaceTri(t);
-    }
+    for (const auto& [S, tris] : surfaceGroups()) emitSurfaceSet(tris);
     for (const auto& e : selected) emitEdge(e);
     for (const auto& e : feature)
       if (!selected.count(e)) emitKeptSeam(e);
@@ -5252,7 +5285,10 @@ std::shared_ptr<const Geometry> buildBlend(
     return a;
   };
 
-  Attempt a = searchBoth();
+  // The walk switch and everything under it, as one search.
+  auto searchWalks = [&]() -> Attempt {
+    curvedWalk = true;
+    Attempt a = searchBoth();
   // Measuring the retreat along the wall is right where the wall is the surface the
   // seats are on, and it puts them back on it. It is not free: a run of seats the
   // collapse machinery had brought onto one point is spread back out along the wall,
@@ -5261,11 +5297,15 @@ std::shared_ptr<const Geometry> buildBlend(
   // bosses grazing at the waist go from 4 flaps to 32 that way at $fn 64. So the
   // whole search is made again with the walk off, and the fewer-folds build wins. A
   // model with no curved surface, or one that came out clean, never pays for it.
-  if (a.status != Status::Ok || a.folds > 0) {
-    curvedWalk = false;
-    Attempt f = searchBoth();
-    if (better(f, a)) a = std::move(f);
-  }
+    if (a.status != Status::Ok || a.folds > 0) {
+      curvedWalk = false;
+      Attempt f = searchBoth();
+      if (better(f, a)) a = std::move(f);
+    }
+    return a;
+  };
+
+  Attempt a = searchWalks();
 
   switch (a.status) {
     case Status::Empty:
