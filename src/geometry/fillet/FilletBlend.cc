@@ -1414,6 +1414,25 @@ struct Blender
   // neighbour. Keyed by source triangle; the three points are already inset.
   std::map<int, std::array<Vector3d, 3>> surfaceOverride;
 
+  // Where a round-over dies ON a face — the face's plane holding the whole of the
+  // strip's last cross-section — the face is what closes the strip, and the arc is
+  // part of the face's own outline. Populated by computeTerminusBites(); keyed by
+  // the terminus vertex, carrying the face it dies on and the section that replaces
+  // that face's corner. Empty at every other vertex, so nothing else moves.
+  struct TerminusBite
+  {
+    int surf;
+    std::vector<Vector3d> sec;
+  };
+  std::map<int, TerminusBite> terminusBite;
+
+  // The surfaces that were emitted as one whole footprint, which is the only path
+  // that can carry a bite. Filled as the surfaces are emitted and read by the corner
+  // pass afterwards, so the face and the corner always agree on whether the bite
+  // happened: a face that declined the footprint keeps its square corner and its
+  // strip end keeps the flat cap.
+  std::set<int> bitSurf;
+
   // Vertices where selected edges of BOTH signs meet — the mixed corners whose
   // strips otherwise blade. Populated by computeMixedVerts() before any emit.
   // Everything keyed off this set (the pulled-in cross-section, the surface
@@ -2650,7 +2669,12 @@ struct Blender
   // The same loop as the face actually carries it: seats, plus the pulled-in strip
   // feet that fall on each link, in the order the per-triangle pass inserts them.
   // Consecutive points closer than the weld are one seat and are emitted once.
-  std::vector<Vector3d> loopFootprint(const std::vector<BLink>& loop) const
+  //
+  // `bite` splices in the terminus sections (see computeTerminusBites): at a vertex
+  // where a round-over dies on this face, the face's corner is not a point but the
+  // arc the round-over cut out of it. The section is laid the way the loop runs —
+  // its end nearer the link coming in first — so the loop stays simple.
+  std::vector<Vector3d> loopFootprint(const std::vector<BLink>& loop, bool bite) const
   {
     std::vector<Vector3d> p;
     const double weld = kFootprintSeatTol;
@@ -2658,8 +2682,19 @@ struct Blender
       if (!p.empty() && (p.back() - q).norm() < weld) return;
       p.push_back(q);
     };
-    for (const BLink& l : loop) {
-      push(insetForTri(l.a, l.t));
+    const int n = static_cast<int>(loop.size());
+    for (int i = 0; i < n; ++i) {
+      const BLink& l = loop[i];
+      const auto bt = bite ? terminusBite.find(l.a) : terminusBite.end();
+      if (bt != terminusBite.end() && bt->second.surf == surfaceOf[l.t]) {
+        std::vector<Vector3d> sec = bt->second.sec;
+        const Vector3d back = m.pos[loop[(i - 1 + n) % n].a] - m.pos[l.a];
+        if ((sec.front() - m.pos[l.a]).dot(back) < (sec.back() - m.pos[l.a]).dot(back))
+          std::reverse(sec.begin(), sec.end());
+        for (const Vector3d& q : sec) push(q);
+      } else {
+        push(insetForTri(l.a, l.t));
+      }
       if (const auto fa = footOn(l.a, l.b, l.t)) push(*fa);
       if (const auto fb = footOn(l.b, l.a, l.t)) push(*fb);
     }
@@ -3052,7 +3087,7 @@ struct Blender
   // the old way: a face whose loops will not chain, a boundary still crossing itself
   // after the trim, an ear clip that finds no ear, a triangulation whose area does
   // not match its own polygon's.
-  bool emitSurfacePatch(const std::vector<int>& tris)
+  bool emitSurfacePatch(const std::vector<int>& tris, bool bite)
   {
     Vector3d nrm;
     if (tris.size() < 2 || !surfacePlanar(tris, nrm)) return false;
@@ -3061,7 +3096,7 @@ struct Blender
 
     std::vector<std::vector<Vector3d>> ring3;
     for (const auto& loop : loops) {
-      std::vector<Vector3d> f = loopFootprint(loop);
+      std::vector<Vector3d> f = loopFootprint(loop, bite);
       if (f.size() >= 3) ring3.push_back(std::move(f));
     }
     if (ring3.empty()) return false;
@@ -4309,6 +4344,15 @@ struct Blender
         selVia.push_back(key.first == u ? key.second : key.first);
     if (selVia.empty()) { ++cornerCounts.none; return; }
 
+    // A round-over that ran off the end of the solid: the end face has taken the
+    // section into its own outline (computeTerminusBites), so the strip end is closed
+    // already and any patch here would be a second sheet lying on the face.
+    if (const auto bt = terminusBite.find(u);
+        bt != terminusBite.end() && bitSurf.count(bt->second.surf)) {
+      ++cornerCounts.none;
+      return;
+    }
+
     // A smooth crease passing through u: exactly two selected edges whose
     // edge-local cross-sections coincide. emitEdge already welds their two strips
     // along that shared cross-section (each shared segment carries one quad from
@@ -4518,6 +4562,20 @@ struct Blender
     return true;
   }
 
+  // The seat a kept seam reads at u on triangle t. Where t's face has taken a
+  // terminus section into its own outline (computeTerminusBites), its corner at u is
+  // gone and the seam ends on the section instead — which is the seat the other side
+  // of the seam already carries, so the ribbon closes to nothing, exactly as it does
+  // away from any fillet.
+  Vector3d seamSeat(int u, int t, int other) const
+  {
+    const auto bt = terminusBite.find(u);
+    if (bt != terminusBite.end() && bt->second.surf == surfaceOf[t] &&
+        surfaceOf[t] != surfaceOf[other] && bitSurf.count(bt->second.surf))
+      return insetForTri(u, other);
+    return insetForTri(u, t);
+  }
+
   // A kept surface boundary (a feature edge we did not select — a tessellation
   // seam, a gentle fold, or a crease left sharp by the sign filter) stays sharp,
   // but a nearby selected fillet insets the faces on either side of it, and by
@@ -4526,12 +4584,16 @@ struct Blender
   // boundaries — a kept edge is a zero-radius fillet, so this is emitEdge's
   // straight-line counterpart. Away from any fillet both sides inset to the same
   // place and every triangle here degenerates, so the edge stays a plain seam.
+  //
+  // The seat it reads at u on triangle t is seamSeat's, not the plain inset: where
+  // t's face has taken a terminus section into its own outline, its corner at u is
+  // no longer on the face and the ribbon cannot end there.
   void emitKeptSeam(const EdgeKey& e)
   {
     const auto& ts = adj.at(e);
     const int v = e.first, w = e.second;
-    const Vector3d Va = insetForTri(v, ts[0]), Vb = insetForTri(v, ts[1]);
-    const Vector3d Wa = insetForTri(w, ts[0]), Wb = insetForTri(w, ts[1]);
+    const Vector3d Va = seamSeat(v, ts[0], ts[1]), Vb = seamSeat(v, ts[1], ts[0]);
+    const Vector3d Wa = seamSeat(w, ts[0], ts[1]), Wb = seamSeat(w, ts[1], ts[0]);
     out.tri(Va, Wa, Wb);
     out.tri(Va, Wb, Vb);
   }
@@ -4845,17 +4907,109 @@ struct Blender
     }
   }
 
+  // Where a round-over runs off the end of the solid, the face it runs off is what
+  // closes it.
+  //
+  // A strip that ends against a kept-sharp boundary is normally closed by a flat cap
+  // across the ring — the perpendicular patch that seals the volume. That patch is
+  // only a patch while there is a gap to fill. Where the crease leaves the end face
+  // along its normal, the strip's last cross-section lies IN that face's plane, and
+  // the arc has cut the face's corner away rather than left a gap: the face's own
+  // outline turns along the arc. Emitted with the square corner still on it, the
+  // face covers the arc region and the cap comes back as a second sheet lying on it
+  // — zero thickness, facing the other way, and shading as a dark wedge on the
+  // corner of every such terminus. Nothing about it is a fold or a hole, so every
+  // census passes it; it is simply two faces where the solid has one.
+  //
+  // So the face is re-cut instead: its boundary detours along the section, and the
+  // strip end takes no cap at all. The two then share the section's edges exactly as
+  // a strip and a face share every other seat, and the corner is closed once.
+  //
+  // Only where the reading is exact, which is the whole of the test:
+  //  - one selected crease at the vertex, and convex. A valley's arc bulges OUT of
+  //    the corner rather than cutting into it, so its cap is real surface and its
+  //    face has nothing to give up.
+  //  - every point of the section lies in the end face's plane. That is what makes
+  //    the cap coplanar with the face, and it is the whole reason the cap is a
+  //    second sheet rather than a patch.
+  //  - the end face has not retreated at the vertex, and every other seat there is
+  //    already an end of the section. Then the ring the corner pass would build is
+  //    the section and nothing else — an open arc, not a loop — so dropping the cap
+  //    drops a lamina and leaves no hole behind it.
+  void computeTerminusBites()
+  {
+    terminusBite.clear();
+    const double tol = kFootprintSeatTol;
+    std::map<int, std::vector<EdgeKey>> at;
+    for (const auto& e : selected) {
+      at[e.first].push_back(e);
+      at[e.second].push_back(e);
+    }
+    if (at.empty()) return;
+    std::map<int, std::vector<int>> vTris;
+    for (size_t t = 0; t < m.tris.size(); ++t)
+      for (const int u : m.tris[t].v)
+        if (at.count(u)) vTris[u].push_back(static_cast<int>(t));
+    const auto groups = surfaceGroups();
+    for (const auto& [u, es] : at) {
+      if (es.size() != 1 || pulled(u)) continue;
+      const EdgeKey& e = es.front();
+      if (concaveOf.at(e)) continue;
+      const auto& ts = adj.at(e);
+      if (ts.size() != 2) continue;
+      const std::vector<Vector3d> sec = crossSectionEdge(u, ts[0], ts[1], /*concave=*/false);
+      if (sec.size() < 3) continue;
+      // The face the crease dies on: the one surface at u that is neither of the two
+      // the crease runs between.
+      const int s0 = surfaceOf[ts[0]], s1 = surfaceOf[ts[1]];
+      const auto fanIt = vTris.find(u);
+      if (fanIt == vTris.end()) continue;
+      const std::vector<int>& fanTris = fanIt->second;
+      int surf = -1;
+      bool one = true;
+      for (const int t : fanTris) {
+        const int s = surfaceOf[t];
+        if (s == s0 || s == s1) continue;
+        if (surf < 0) surf = s;
+        else if (surf != s) one = false;
+      }
+      if (!one || surf < 0) continue;
+      const auto gIt = groups.find(surf);
+      if (gIt == groups.end()) continue;
+      Vector3d nrm;
+      if (gIt->second.size() < 2 || !surfacePlanar(gIt->second, nrm)) continue;
+      bool inPlane = true;
+      for (const Vector3d& q : sec)
+        if (std::abs((q - m.pos[u]).dot(nrm)) > tol) inPlane = false;
+      if (!inPlane) continue;
+      // Every seat at u is either the untouched corner on the end face, or an end of
+      // the section: nothing else stands in the ring the cap would close.
+      bool clean = true;
+      for (const int t : fanTris) {
+        const Vector3d P = insetForTri(u, t);
+        if (surfaceOf[t] == surf) clean = clean && (P - m.pos[u]).norm() < tol;
+        else clean = clean && ((P - sec.front()).norm() < tol || (P - sec.back()).norm() < tol);
+      }
+      if (!clean) continue;
+      terminusBite[u] = {surf, sec};
+    }
+  }
+
   // One surface's triangles, emitted the way they have always been emitted: as one
   // footprint where the face is planar and that can be vouched for, else run by
-  // coplanar run, else triangle by triangle.
+  // coplanar run, else triangle by triangle. Only the whole-surface footprint takes
+  // the terminus bites: a run is a piece of a face, and a bite belongs to the face.
   void emitSurfaceSet(const std::vector<int>& tris)
   {
-    if (emitSurfacePatch(tris)) return;
+    if (emitSurfacePatch(tris, /*bite=*/true)) {
+      bitSurf.insert(surfaceOf[tris.front()]);
+      return;
+    }
     const auto runs = coplanarRuns(tris);
     if (runs.size() > 1) {
       std::vector<int> left;
       for (const auto& run : runs)
-        if (!emitSurfacePatch(run.second))
+        if (!emitSurfacePatch(run.second, /*bite=*/false))
           left.insert(left.end(), run.second.begin(), run.second.end());
       if (left.empty()) return;
       for (const int t : left) emitSurfaceTri(t);
@@ -4884,6 +5038,7 @@ struct Blender
     }
     flipInvertedInsets();
     fuseCollapsedCreases();
+    computeTerminusBites();
     // Each planar face is emitted as one footprint — its own retreated boundary,
     // re-triangulated to fit it. Where that cannot be vouched for, and on every
     // curved surface (whose facets are surfaces of their own and carry no interior
