@@ -1,0 +1,26 @@
+2026-08-21 04:20:39	AC02-crease-convex.scad	stamp	9de6d8c0	re-derived after curved-wall walk + centre slide + both-runs trim + terminus bite landed; transient-binary stamps retired
+2026-08-21 04:20:39	AC05-corner-unequal-arcs.scad	stamp	9de6d8c0	re-derived after curved-wall walk + centre slide + both-runs trim + terminus bite landed; transient-binary stamps retired
+2026-08-21 04:20:39	AC15-crease-onto-curved-end.scad	stamp	9de6d8c0	re-derived after curved-wall walk + centre slide + both-runs trim + terminus bite landed; transient-binary stamps retired
+2026-08-21 04:20:39	AC16-endface-kink10.scad	stamp	9de6d8c0	re-derived after curved-wall walk + centre slide + both-runs trim + terminus bite landed; transient-binary stamps retired
+2026-08-21 04:20:39	AC17-thin-arm.scad	stamp	9de6d8c0	re-derived after curved-wall walk + centre slide + both-runs trim + terminus bite landed; transient-binary stamps retired
+2026-08-21 04:20:39	AC19-over-round.scad	stamp	9de6d8c0	re-derived after curved-wall walk + centre slide + both-runs trim + terminus bite landed; transient-binary stamps retired
+2026-08-21 04:20:39	AC23-curved-arrival-seam.scad	stamp	9de6d8c0	re-derived after curved-wall walk + centre slide + both-runs trim + terminus bite landed; transient-binary stamps retired
+2026-08-21 04:20:53	AC01-crease-concave.scad	stamp	9de6d8c0	re-verified unchanged on the committed binary; transient-binary stamp retired
+2026-08-21 04:20:53	AC03-corner-convex-tri.scad	stamp	9de6d8c0	re-verified unchanged on the committed binary; transient-binary stamp retired
+2026-08-21 04:20:53	AC04-corner-concave-tri.scad	stamp	9de6d8c0	re-verified unchanged on the committed binary; transient-binary stamp retired
+2026-08-21 04:20:53	AC06-elbow-square.scad	stamp	9de6d8c0	re-verified unchanged on the committed binary; transient-binary stamp retired
+2026-08-21 04:20:53	AC07-elbow-oblique40.scad	stamp	9de6d8c0	re-verified unchanged on the committed binary; transient-binary stamp retired
+2026-08-21 04:20:54	AC08-trough60.scad	stamp	9de6d8c0	re-verified unchanged on the committed binary; transient-binary stamp retired
+2026-08-21 04:20:54	AC09-trough120.scad	stamp	9de6d8c0	re-verified unchanged on the committed binary; transient-binary stamp retired
+2026-08-21 04:20:54	AC10-mixed-nonexact.scad	stamp	9de6d8c0	re-verified unchanged on the committed binary; transient-binary stamp retired
+2026-08-21 04:20:54	AC10b-mixed-nonexact-harder.scad	stamp	9de6d8c0	re-verified unchanged on the committed binary; transient-binary stamp retired
+2026-08-21 04:20:54	AC11-inverse-elbow.scad	stamp	9de6d8c0	re-verified unchanged on the committed binary; transient-binary stamp retired
+2026-08-21 04:20:54	AC12-rib-into-face.scad	stamp	9de6d8c0	re-verified unchanged on the committed binary; transient-binary stamp retired
+2026-08-21 04:20:54	AC13-mixed-fn-branch.scad	stamp	9de6d8c0	re-verified unchanged on the committed binary; transient-binary stamp retired
+2026-08-21 04:20:54	AC14-curved-trough-wall.scad	stamp	9de6d8c0	re-verified unchanged on the committed binary; transient-binary stamp retired
+2026-08-21 04:20:54	AC18-crowded-arms.scad	stamp	9de6d8c0	re-verified unchanged on the committed binary; transient-binary stamp retired
+2026-08-21 04:20:54	AC20-blade.scad	stamp	9de6d8c0	re-verified unchanged on the committed binary; transient-binary stamp retired
+2026-08-21 04:20:54	AC21-sliver-crease.scad	stamp	9de6d8c0	re-verified unchanged on the committed binary; transient-binary stamp retired
+2026-08-21 04:20:54	AC22-shallow-fold.scad	stamp	9de6d8c0	re-verified unchanged on the committed binary; transient-binary stamp retired
+2026-08-21 04:20:54	AC22b-shallow-fold-selected.scad	stamp	9de6d8c0	re-verified unchanged on the committed binary; transient-binary stamp retired
+2026-08-21 04:20:54	AC24-three-arm-junction.scad	stamp	9de6d8c0	re-verified unchanged on the committed binary; transient-binary stamp retired

@@ -3,6 +3,7 @@
 #
 #   ./sheets-to-pdf.sh                 sheets/sheet-*.png -> sheets/sheets.pdf
 #   ./sheets-to-pdf.sh out.pdf         same, custom output path
+#   ./sheets-to-pdf.sh --from 'atomic/pages/*.png' out.pdf   any other page set
 #
 # One sheet PNG per A4 page (portrait), scaled to fit with the aspect ratio
 # preserved and centred on the page, in natural sheet order.
@@ -13,9 +14,11 @@
 set -eu
 cd "${0:A:h}"
 
+GLOB='sheets/sheet-*.png'
+if [[ ${1:-} == --from ]]; then GLOB=$2; shift 2; fi
 OUT=${1:-sheets/sheets.pdf}
-pages=(sheets/sheet-*.png(n))   # (n) = numeric sort, so sheet-2 precedes sheet-10
-[[ ${#pages[@]} -gt 0 ]] || { print -u2 "no sheets/sheet-*.png -- run ./sheet.sh first"; exit 1; }
+pages=(${~GLOB}(n))             # (n) = numeric sort, so sheet-2 precedes sheet-10
+[[ ${#pages[@]} -gt 0 ]] || { print -u2 "no $GLOB -- run ./sheet.sh first"; exit 1; }
 (( $+commands[sips] )) || { print -u2 "need sips (macOS)"; exit 1; }
 (( $+commands[gs] ))   || { print -u2 "need Ghostscript (gs) on PATH"; exit 1; }
 

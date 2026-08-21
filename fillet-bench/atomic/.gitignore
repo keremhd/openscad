@@ -1,0 +1,4 @@
+# Per-tile intermediates: 1170 files, ~16 MB, and every one of them is
+# reproducible in about three minutes with ./atomic.sh. The record that is
+# worth keeping is pages/ and results/atomic.tsv.
+tiles/
