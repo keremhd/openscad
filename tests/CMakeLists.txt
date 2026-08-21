@@ -267,6 +267,9 @@ if(EXAMPLES_DIR)
 endif(EXAMPLES_DIR)
 
 file(GLOB FEATURES_3D_FILES   ${TEST_SCAD_DIR}/3D/features/*.scad)
+list(REMOVE_ITEM FEATURES_3D_FILES # -> EXPERIMENTAL_FILLET_FILES, it needs --enable=fillet
+  ${TEST_SCAD_DIR}/3D/features/fillet-tests.scad
+)
 file(GLOB DEPRECATED_3D_FILES ${TEST_SCAD_DIR}/3D/deprecated/*.scad)
 file(GLOB ISSUES_3D_FILES     ${TEST_SCAD_DIR}/3D/issues/*.scad)
 file(GLOB SCAD_AMF_FILES           ${TEST_SCAD_DIR}/amf/*.scad)
@@ -621,6 +624,9 @@ list(APPEND RENDER_DIFFERENT_EXPECTATIONS
 
   # Manifold can represent the very thin slice
   ${TEST_SCAD_DIR}/3D/issues/issue1165.scad
+
+  # The fillet tool files are in EXPERIMENTAL_FILLET_CGAL_DIFF_FILES below;
+  # they need --enable=fillet, so they cannot ride the generic lists.
 )
 if(EXAMPLES_DIR)
   list(APPEND RENDER_DIFFERENT_EXPECTATIONS
@@ -1238,6 +1244,33 @@ if(EXAMPLES_DIR)
 endif(EXAMPLES_DIR)
 
 #
+# --enable=fillet tests
+#
+# The two fillet modules (fillet, chamfer) register behind
+# Feature::ExperimentalFillet, so fillet-tests.scad is an unknown-module error
+# without the flag — and they are not registered at all in a build without
+# Manifold, which is why the whole block is conditional rather than disabled test
+# by test afterwards.
+if (ENABLE_MANIFOLD)
+list(APPEND EXPERIMENTAL_FILLET_FILES
+  ${TEST_SCAD_DIR}/3D/features/fillet-tests.scad
+)
+
+add_cmdline_test(dump                     EXPERIMENTAL OPENSCAD SUFFIX csg FILES ${EXPERIMENTAL_FILLET_FILES} ARGS --enable=fillet)
+add_cmdline_test(render-cgal              EXPERIMENTAL OPENSCAD SUFFIX png FILES ${EXPERIMENTAL_FILLET_FILES} EXPECTEDDIR render ARGS --render --enable=fillet --backend=cgal)
+if (ENABLE_MANIFOLD_TESTS)
+add_cmdline_test(render-manifold          EXPERIMENTAL OPENSCAD SUFFIX png FILES ${EXPERIMENTAL_FILLET_FILES} EXPECTEDDIR render ARGS --render --enable=fillet --backend=manifold)
+endif()
+add_cmdline_test(preview-cgal             EXPERIMENTAL OPENSCAD SUFFIX png FILES ${EXPERIMENTAL_FILLET_FILES} EXPECTEDDIR preview ARGS --enable=fillet --backend=cgal)
+if (ENABLE_MANIFOLD_TESTS)
+add_cmdline_test(preview-manifold         EXPERIMENTAL OPENSCAD SUFFIX png FILES ${EXPERIMENTAL_FILLET_FILES} EXPECTEDDIR preview ARGS --enable=fillet --backend=manifold)
+endif()
+add_cmdline_test(throwntogether-cgal      EXPERIMENTAL OPENSCAD SUFFIX png FILES ${EXPERIMENTAL_FILLET_FILES} EXPECTEDDIR throwntogether ARGS --preview=throwntogether --enable=fillet --backend=cgal)
+add_cmdline_test(throwntogether-manifold  EXPERIMENTAL OPENSCAD SUFFIX png FILES ${EXPERIMENTAL_FILLET_FILES} EXPECTEDDIR throwntogether ARGS --preview=throwntogether --enable=fillet --backend=manifold)
+add_cmdline_test(render-csg-cgal          EXPERIMENTAL SCRIPT ${EXPORT_IMPORT_PNGTEST_PY} SUFFIX png FILES ${EXPERIMENTAL_FILLET_FILES} EXPECTEDDIR render ARGS ${OPENSCAD_EXE_ARG} --format=csg --render --enable=fillet --backend=cgal)
+endif(ENABLE_MANIFOLD)
+
+#
 # --enable=import-function tests
 #
 list(APPEND EXPERIMENTAL_IMPORT_FILES
@@ -1549,6 +1582,9 @@ if(NOT ENABLE_MANIFOLD)
     openscad-colorscheme-metallic-render_CSG
     lazyunion-render_lazyunion-difference-for
     render-manifold_roof
+
+    # The fillet tests are not created at all without Manifold; see the
+    # --enable=fillet block above.
   )
 endif()
 

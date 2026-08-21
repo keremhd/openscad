@@ -1,0 +1,11 @@
+WARNING: fillet: radius 1 does not fit 2 of the 16 crease(s) selected; the worst is at [7.072, 4.425, 6.154] - the blend would leave the surface it is meant to meet, by 3.03008. Dropped at: [7.07157, 4.42468, 6.15427], [7.07157, -4.42468, 6.15427] in file models/pipe_into_face.scad, line 5
+Geometries in cache: 3
+Geometry cache size in bytes: 3912
+CGAL Polyhedrons in cache: 2
+CGAL cache size in bytes: 91000
+Total rendering time: 0:00:00.025
+   Top level object is a 3D object (manifold):
+   Status:     NoError
+   Genus:      0
+   Vertices:      340
+   Facets:        676

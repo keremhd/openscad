@@ -1,0 +1,6 @@
+// A brush selecting one edge of a box and leaving the rest sharp. Children 1+
+// are the brush; a brush = argument is a parse error.
+FNSET = 0; $fn = FNSET;
+R = 2;
+module part() { cube([40, 20, 12], center = true); }
+fillet(r = R) { part(); translate([0, 10, 6]) cube([44, 8, 8], center = true); }

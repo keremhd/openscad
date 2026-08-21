@@ -1,0 +1,444 @@
+binary: /private/tmp/claude-501/-Users-kerem-Devel-openscad/86517c18-0145-4bf3-879b-972815bd1c7a/scratchpad/pin-adf2beef/OpenSCAD.app/Contents/MacOS/OpenSCAD
+        built Aug  5 14:51:20 2026
+flags:  --enable=fillet --backend=manifold
+reader: exact ASCII STL, OFF read alongside and compared
+weld:   1e-6
+runs:   3 per cell
+*** 567 SOURCE FILES ARE NEWER THAN THE BINARY -- these numbers are about the old build ***
+../src/handle_dep.h
+../src/version.h
+../src/core/OffsetNode.h
+../src/core/ColorUtil.cc
+../src/core/progress.h
+
+24 models (13 with a $fn axis), results -> results/sweep-fd3dec78.tsv
+
+  tee                fn=def  r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee                fn=8    r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee                fn=10   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee                fn=12   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee                fn=14   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee                fn=16   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee                fn=19   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=2   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee                fn=24   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee                fn=26   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee                fn=32   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee                fn=48   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee                fn=64   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 5s
+  tee                fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee                fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee                fn=def  r=0.5   INVALID   nonman=0   nmvert=2   chi=4   genus=n/a  comp=3/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee                fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee                fn=def  r=0.9   INVALID   nonman=0   nmvert=1   chi=3   genus=n/a  comp=2/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee                fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee                fn=def  r=1.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee                fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_oblique        fn=def  r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee_oblique        fn=8    r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_oblique        fn=10   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_oblique        fn=12   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee_oblique        fn=14   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_oblique        fn=16   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_oblique        fn=19   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=2   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_oblique        fn=24   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee_oblique        fn=26   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_oblique        fn=32   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_oblique        fn=48   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_oblique        fn=64   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_oblique        fn=def  r=0.2   INVALID   nonman=0   nmvert=1   chi=3   genus=n/a  comp=2/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_oblique        fn=def  r=0.3   INVALID   nonman=0   nmvert=1   chi=3   genus=n/a  comp=2/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee_oblique        fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_oblique        fn=def  r=0.8   INVALID   nonman=0   nmvert=1   chi=3   genus=n/a  comp=2/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_oblique        fn=def  r=0.9   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee_oblique        fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_oblique        fn=def  r=1.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee_oblique        fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee_small          fn=def  r=def   INVALID   nonman=0   nmvert=0   chi=4   genus=0    comp=2/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_small          fn=8    r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee_small          fn=10   r=def   INVALID   nonman=0   nmvert=0   chi=4   genus=0    comp=2/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_small          fn=12   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_small          fn=14   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_small          fn=16   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee_small          fn=19   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=2   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_small          fn=24   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_small          fn=26   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee_small          fn=32   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_small          fn=48   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_small          fn=64   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_small          fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_small          fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_small          fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee_small          fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_small          fn=def  r=0.9   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_small          fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee_small          fn=def  r=1.5   INVALID   nonman=0   nmvert=0   chi=4   genus=0    comp=2/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_small          fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_large          fn=def  r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee_large          fn=8    r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_large          fn=10   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_large          fn=12   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee_large          fn=14   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_large          fn=16   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_large          fn=19   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=2   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee_large          fn=24   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_large          fn=26   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_large          fn=32   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_large          fn=48   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee_large          fn=64   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 5s
+  tee_large          fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee_large          fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_large          fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_large          fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee_large          fn=def  r=0.9   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_large          fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  tee_large          fn=def  r=1.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  tee_large          fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cross              fn=def  r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cross              fn=8    r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cross              fn=10   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cross              fn=12   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  cross              fn=14   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cross              fn=16   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cross              fn=19   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cross              fn=24   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cross              fn=26   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cross              fn=32   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cross              fn=48   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 7s
+  cross              fn=64   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 8s
+  cross              fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cross              fn=def  r=0.3   INVALID   nonman=1   nmvert=0   chi=3   genus=n/a  comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cross              fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cross              fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cross              fn=def  r=0.9   INVALID   nonman=0   nmvert=0   chi=4   genus=0    comp=2/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  cross              fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cross              fn=def  r=1.5   VALID     nonman=0   nmvert=0   chi=-2  genus=2    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cross              fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=-6  genus=4    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  boss_plate         fn=def  r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  boss_plate         fn=8    r=def   INVALID   nonman=8   nmvert=0   chi=6   genus=n/a  comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  boss_plate         fn=10   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  boss_plate         fn=12   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  boss_plate         fn=14   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  boss_plate         fn=16   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  boss_plate         fn=19   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  boss_plate         fn=24   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  boss_plate         fn=26   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  boss_plate         fn=32   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  boss_plate         fn=48   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  boss_plate         fn=64   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  boss_plate         fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  boss_plate         fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  boss_plate         fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  boss_plate         fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  boss_plate         fn=def  r=0.9   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  boss_plate         fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  boss_plate         fn=def  r=1.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  boss_plate         fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  two_bosses         fn=def  r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  two_bosses         fn=8    r=def   INVALID   nonman=6   nmvert=0   chi=5   genus=n/a  comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  two_bosses         fn=10   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  two_bosses         fn=12   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  two_bosses         fn=14   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  two_bosses         fn=16   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  two_bosses         fn=19   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  two_bosses         fn=24   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  two_bosses         fn=26   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  two_bosses         fn=32   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  two_bosses         fn=48   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 5s
+  two_bosses         fn=64   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  two_bosses         fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  two_bosses         fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  two_bosses         fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  two_bosses         fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  two_bosses         fn=def  r=0.9   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  two_bosses         fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  two_bosses         fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  pipe_into_face     fn=def  r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  pipe_into_face     fn=8    r=def   INVALID   nonman=2   nmvert=0   chi=3   genus=n/a  comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  pipe_into_face     fn=10   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  pipe_into_face     fn=12   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  pipe_into_face     fn=14   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  pipe_into_face     fn=16   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  pipe_into_face     fn=19   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  pipe_into_face     fn=24   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  pipe_into_face     fn=26   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  pipe_into_face     fn=32   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  pipe_into_face     fn=48   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  pipe_into_face     fn=64   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  pipe_into_face     fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  pipe_into_face     fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  pipe_into_face     fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  pipe_into_face     fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  pipe_into_face     fn=def  r=0.9   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  pipe_into_face     fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  pipe_into_face     fn=def  r=1.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  pipe_into_face     fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  dome               fn=def  r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  dome               fn=8    r=def   INVALID   nonman=4   nmvert=0   chi=4   genus=n/a  comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  dome               fn=10   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  dome               fn=12   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  dome               fn=14   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  dome               fn=16   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  dome               fn=19   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  dome               fn=24   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  dome               fn=26   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  dome               fn=32   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  dome               fn=48   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  dome               fn=64   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  dome               fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  dome               fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  dome               fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  dome               fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  dome               fn=def  r=0.9   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  dome               fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  dome               fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  hole_plate         fn=def  r=def   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  hole_plate         fn=8    r=def   INVALID   nonman=8   nmvert=0   chi=4   genus=n/a  comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  hole_plate         fn=10   r=def   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  hole_plate         fn=12   r=def   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  hole_plate         fn=14   r=def   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  hole_plate         fn=16   r=def   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  hole_plate         fn=19   r=def   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  hole_plate         fn=24   r=def   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  hole_plate         fn=26   r=def   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  hole_plate         fn=32   r=def   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  hole_plate         fn=48   r=def   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  hole_plate         fn=64   r=def   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 5s
+  hole_plate         fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  hole_plate         fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  hole_plate         fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  hole_plate         fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  hole_plate         fn=def  r=0.9   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  hole_plate         fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  hole_plate         fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  bevel_boss         fn=def  r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  bevel_boss         fn=8    r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  bevel_boss         fn=10   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  bevel_boss         fn=12   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  bevel_boss         fn=14   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  bevel_boss         fn=16   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  bevel_boss         fn=19   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  bevel_boss         fn=24   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  bevel_boss         fn=26   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  bevel_boss         fn=32   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  bevel_boss         fn=48   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  bevel_boss         fn=64   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  bevel_boss         fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  bevel_boss         fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  bevel_boss         fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  bevel_boss         fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  bevel_boss         fn=def  r=0.9   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  bevel_boss         fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  bevel_boss         fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cyl_control        fn=def  r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  cyl_control        fn=8    r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cyl_control        fn=10   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cyl_control        fn=12   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  cyl_control        fn=14   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cyl_control        fn=16   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cyl_control        fn=19   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  cyl_control        fn=24   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cyl_control        fn=26   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cyl_control        fn=32   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  cyl_control        fn=48   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cyl_control        fn=64   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cyl_control        fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cyl_control        fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  cyl_control        fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cyl_control        fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cyl_control        fn=def  r=0.9   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  cyl_control        fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cyl_control        fn=def  r=1.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cyl_control        fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  lbracket           fn=def  r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  - lbracket has no curvature; $fn axis skipped (trap 7)
+  lbracket           fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  lbracket           fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  lbracket           fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  lbracket           fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  lbracket           fn=def  r=0.9   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  lbracket           fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  lbracket           fn=def  r=1.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  lbracket           fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  box_step           fn=def  r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  - box_step has no curvature; $fn axis skipped (trap 7)
+  box_step           fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  box_step           fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  box_step           fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  box_step           fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  box_step           fn=def  r=0.9   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  box_step           fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  box_step           fn=def  r=1.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  box_step           fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  rib                fn=def  r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  - rib has no curvature; $fn axis skipped (trap 7)
+  rib                fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  rib                fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  rib                fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  rib                fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  rib                fn=def  r=0.9   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  rib                fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  rib                fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  thin_slab          fn=def  r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  - thin_slab has no curvature; $fn axis skipped (trap 7)
+  thin_slab          fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  thin_slab          fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  thin_slab          fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  thin_slab          fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  thin_slab          fn=def  r=0.9   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  thin_slab          fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  thin_slab          fn=def  r=1.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  thin_slab          fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  pocket             fn=def  r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  - pocket has no curvature; $fn axis skipped (trap 7)
+  pocket             fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  pocket             fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  pocket             fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  pocket             fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  pocket             fn=def  r=0.9   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  pocket             fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  pocket             fn=def  r=1.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  pocket             fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  chamfer_box        fn=def  r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  - chamfer_box has no curvature; $fn axis skipped (trap 7)
+  chamfer_box        fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  chamfer_box        fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  chamfer_box        fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  chamfer_box        fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  chamfer_box        fn=def  r=0.9   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  chamfer_box        fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  chamfer_box        fn=def  r=1.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  chamfer_box        fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  brush_one_edge     fn=def  r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  - brush_one_edge has no curvature; $fn axis skipped (trap 7)
+  brush_one_edge     fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  brush_one_edge     fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  brush_one_edge     fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  brush_one_edge     fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  brush_one_edge     fn=def  r=0.9   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  brush_one_edge     fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  brush_one_edge     fn=def  r=1.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  brush_one_edge     fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cube_control       fn=def  r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  - cube_control has no curvature; $fn axis skipped (trap 7)
+  cube_control       fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  cube_control       fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cube_control       fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cube_control       fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  cube_control       fn=def  r=0.9   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cube_control       fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  cube_control       fn=def  r=1.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  cube_control       fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  mixed_fn           fn=def  r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  - mixed_fn has no curvature; $fn axis skipped (trap 7)
+  mixed_fn           fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  mixed_fn           fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  mixed_fn           fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  mixed_fn           fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  mixed_fn           fn=def  r=0.9   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  mixed_fn           fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  mixed_fn           fn=def  r=1.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  mixed_fn           fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  rib_into_boss      fn=def  r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  rib_into_boss      fn=8    r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  rib_into_boss      fn=10   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  rib_into_boss      fn=12   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  rib_into_boss      fn=14   r=def   INVALID   nonman=3   nmvert=0   chi=4   genus=n/a  comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  rib_into_boss      fn=16   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  rib_into_boss      fn=19   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  rib_into_boss      fn=24   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  rib_into_boss      fn=26   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  rib_into_boss      fn=32   r=def   INVALID   nonman=4   nmvert=0   chi=4   genus=n/a  comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  rib_into_boss      fn=48   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  rib_into_boss      fn=64   r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  rib_into_boss      fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  rib_into_boss      fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  rib_into_boss      fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  rib_into_boss      fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  rib_into_boss      fn=def  r=0.9   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  rib_into_boss      fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  rib_into_boss      fn=def  r=1.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  rib_into_boss      fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  refused_neighbour  fn=def  r=def   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=2   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  - refused_neighbour has no curvature; $fn axis skipped (trap 7)
+  refused_neighbour  fn=def  r=0.2   INVALID   nonman=1   nmvert=0   chi=2   genus=n/a  comp=1/1 warn=2   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  refused_neighbour  fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=2   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  refused_neighbour  fn=def  r=0.8   INVALID   nonman=1   nmvert=0   chi=2   genus=n/a  comp=1/1 warn=2   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  refused_neighbour  fn=def  r=0.9   INVALID   nonman=1   nmvert=0   chi=2   genus=n/a  comp=1/1 warn=2   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  refused_neighbour  fn=def  r=1.0   INVALID   nonman=1   nmvert=0   chi=2   genus=n/a  comp=1/1 warn=2   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  refused_neighbour  fn=def  r=1.5   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=2   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  refused_neighbour  fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=2   genus=0    comp=1/1 warn=2   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  shallow_crease     fn=def  r=def   VALID     nonman=0   nmvert=0   chi=4   genus=0    comp=2/2 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  - shallow_crease has no curvature; $fn axis skipped (trap 7)
+  shallow_crease     fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=4   genus=0    comp=2/2 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  shallow_crease     fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=4   genus=0    comp=2/2 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  shallow_crease     fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=4   genus=0    comp=2/2 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  shallow_crease     fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=4   genus=0    comp=2/2 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  shallow_crease     fn=def  r=0.9   VALID     nonman=0   nmvert=0   chi=4   genus=0    comp=2/2 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  shallow_crease     fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=4   genus=0    comp=2/2 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  shallow_crease     fn=def  r=1.5   VALID     nonman=0   nmvert=0   chi=4   genus=0    comp=2/2 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 3s
+  shallow_crease     fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=4   genus=0    comp=2/2 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+
+done. 353 rows in results/sweep-fd3dec78.tsv, weld tolerance 1e-6, 3 runs per cell
+invalid rows:
+  tee  fn=def  r=0.5  INVALID  nonman=0  nmvert=2  chi=4  comp=3/1  warn=0  tol=1e-6  runs=3  distinct=1
+  tee  fn=def  r=0.9  INVALID  nonman=0  nmvert=1  chi=3  comp=2/1  warn=0  tol=1e-6  runs=3  distinct=1
+  tee_oblique  fn=def  r=0.2  INVALID  nonman=0  nmvert=1  chi=3  comp=2/1  warn=1  tol=1e-6  runs=3  distinct=1
+  tee_oblique  fn=def  r=0.3  INVALID  nonman=0  nmvert=1  chi=3  comp=2/1  warn=1  tol=1e-6  runs=3  distinct=1
+  tee_oblique  fn=def  r=0.8  INVALID  nonman=0  nmvert=1  chi=3  comp=2/1  warn=1  tol=1e-6  runs=3  distinct=1
+  tee_small  fn=def  r=def  INVALID  nonman=0  nmvert=0  chi=4  comp=2/1  warn=0  tol=1e-6  runs=3  distinct=1
+  tee_small  fn=10  r=def  INVALID  nonman=0  nmvert=0  chi=4  comp=2/1  warn=0  tol=1e-6  runs=3  distinct=1
+  tee_small  fn=def  r=1.5  INVALID  nonman=0  nmvert=0  chi=4  comp=2/1  warn=1  tol=1e-6  runs=3  distinct=1
+  cross  fn=def  r=0.3  INVALID  nonman=1  nmvert=0  chi=3  comp=1/1  warn=1  tol=1e-6  runs=3  distinct=1
+  cross  fn=def  r=0.9  INVALID  nonman=0  nmvert=0  chi=4  comp=2/1  warn=1  tol=1e-6  runs=3  distinct=1
+  boss_plate  fn=8  r=def  INVALID  nonman=8  nmvert=0  chi=6  comp=1/1  warn=0  tol=1e-6  runs=3  distinct=1
+  two_bosses  fn=8  r=def  INVALID  nonman=6  nmvert=0  chi=5  comp=1/1  warn=1  tol=1e-6  runs=3  distinct=1
+  pipe_into_face  fn=8  r=def  INVALID  nonman=2  nmvert=0  chi=3  comp=1/1  warn=1  tol=1e-6  runs=3  distinct=1
+  dome  fn=8  r=def  INVALID  nonman=4  nmvert=0  chi=4  comp=1/1  warn=0  tol=1e-6  runs=3  distinct=1
+  hole_plate  fn=8  r=def  INVALID  nonman=8  nmvert=0  chi=4  comp=1/1  warn=0  tol=1e-6  runs=3  distinct=1
+  rib_into_boss  fn=14  r=def  INVALID  nonman=3  nmvert=0  chi=4  comp=1/1  warn=0  tol=1e-6  runs=3  distinct=1
+  rib_into_boss  fn=32  r=def  INVALID  nonman=4  nmvert=0  chi=4  comp=1/1  warn=0  tol=1e-6  runs=3  distinct=1
+  refused_neighbour  fn=def  r=0.2  INVALID  nonman=1  nmvert=0  chi=2  comp=1/1  warn=2  tol=1e-6  runs=3  distinct=1
+  refused_neighbour  fn=def  r=0.8  INVALID  nonman=1  nmvert=0  chi=2  comp=1/1  warn=2  tol=1e-6  runs=3  distinct=1
+  refused_neighbour  fn=def  r=0.9  INVALID  nonman=1  nmvert=0  chi=2  comp=1/1  warn=2  tol=1e-6  runs=3  distinct=1
+  refused_neighbour  fn=def  r=1.0  INVALID  nonman=1  nmvert=0  chi=2  comp=1/1  warn=2  tol=1e-6  runs=3  distinct=1
+rows whose fault is a pinched vertex (invisible to every edge count):
+  tee  fn=def  r=0.5  nmvert=2  chi=4
+  tee  fn=def  r=0.9  nmvert=1  chi=3
+  tee_oblique  fn=def  r=0.2  nmvert=1  chi=3
+  tee_oblique  fn=def  r=0.3  nmvert=1  chi=3
+  tee_oblique  fn=def  r=0.8  nmvert=1  chi=3
+rows with more components than the model builds (a shed fragment):
+  tee  fn=def  r=0.5  comp=3  wanted 1
+  tee  fn=def  r=0.9  comp=2  wanted 1
+  tee_oblique  fn=def  r=0.2  comp=2  wanted 1
+  tee_oblique  fn=def  r=0.3  comp=2  wanted 1
+  tee_oblique  fn=def  r=0.8  comp=2  wanted 1
+  tee_small  fn=def  r=def  comp=2  wanted 1
+  tee_small  fn=10  r=def  comp=2  wanted 1
+  tee_small  fn=def  r=1.5  comp=2  wanted 1
+  cross  fn=def  r=0.9  comp=2  wanted 1
+binaries present in results/sweep-fd3dec78.tsv (more than one means the table mixes builds):
+  fd3dec78
+cells where the OFF export changed the answer (the exporter, not the geometry):
+cells where genus is not 0 (a fillet that changed the topology), with the throat it turns on:
+  cross  fn=def  r=1.5  genus=2  chi=-2  throat~0.000211mm
+  cross  fn=def  r=2.0  genus=4  chi=-6  throat~0.000137mm
+  hole_plate  fn=def  r=def  genus=1  chi=0  throat~0.177mm
+  hole_plate  fn=10  r=def  genus=1  chi=0  throat~0.0382mm
+  hole_plate  fn=12  r=def  genus=1  chi=0  throat~0.00169mm
+  hole_plate  fn=14  r=def  genus=1  chi=0  throat~0.0687mm
+  hole_plate  fn=16  r=def  genus=1  chi=0  throat~0.00158mm
+  hole_plate  fn=19  r=def  genus=1  chi=0  throat~0.0201mm
+  hole_plate  fn=24  r=def  genus=1  chi=0  throat~0.00152mm
+  hole_plate  fn=26  r=def  genus=1  chi=0  throat~0.0253mm
+  hole_plate  fn=32  r=def  genus=1  chi=0  throat~0.00151mm
+  hole_plate  fn=48  r=def  genus=1  chi=0  throat~0.0015mm
+  hole_plate  fn=64  r=def  genus=1  chi=0  throat~0.0015mm
+  hole_plate  fn=def  r=0.2  genus=1  chi=0  throat~0.0236mm
+  hole_plate  fn=def  r=0.3  genus=1  chi=0  throat~0.0355mm
+  hole_plate  fn=def  r=0.5  genus=1  chi=0  throat~0.0591mm
+  hole_plate  fn=def  r=0.8  genus=1  chi=0  throat~0.0946mm
+  hole_plate  fn=def  r=0.9  genus=1  chi=0  throat~0.106mm
+  hole_plate  fn=def  r=1.0  genus=1  chi=0  throat~0.118mm
+  hole_plate  fn=def  r=2.0  genus=1  chi=0  throat~0.142mm
+cells whose runs disagreed with each other:

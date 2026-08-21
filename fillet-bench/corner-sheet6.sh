@@ -1,0 +1,211 @@
+#!/bin/zsh
+# Render the gate-boundary page: one zoomed tile per NEW edge-case model, aimed
+# at the corner the model was built to probe, with the mesh verdict on the label.
+#
+#   ./corner-sheet6.sh              the whole page
+#   ./corner-sheet6.sh S6-T02       just that tile, re-rendered in place
+#   ./corner-sheet6.sh --no-pdf     skip the PDF bundle
+#
+# Sheet 5 puts one tile on each corner-dispatch class using models that were
+# already in the corpus. This page does the opposite: every model here is new
+# and exists only to sit just outside (or just inside) the exact-torus corner
+# gate -- oblique end faces, non-square dihedrals, curved walls, crowded arms,
+# the inverse elbow, and two controls that must still take the torus path.
+#
+# Eleven of these twelve are now IN expect.txt: they were staged apart while
+# unmeasured, and are promoted now that every one of them is VALID at every cell
+# of the sweep's own $fn and radius axes. step_notch is the exception and is
+# still staged here alone. Sheet 6 is still self-contained and rebuilds nothing
+# else -- the eleven also carry whole-model tiles on sheets 1-4 now.
+#
+# The dispatch class in each caption is MEASURED, exactly as on sheet 5: fillet()
+# echoes a second line per call --
+#   fillet: corners tube=N capTri=N cap=N coons=N saddle=N flat=N fan=N weld=N none=N
+# -- so every label below is read off that line and the line itself goes into
+# INDEX.md beside it. The oblique and dihedral rows said "loft" here because
+# that is what they took before the exact canal-surface corner landed; they are
+# tube now. A label that stops matching its counters is the finding.
+#
+# The mesh verdict IS measured. Each tile exports an exact ASCII STL from the
+# same invocation set as the picture and runs mesh.py on it, so a new model that
+# breaks the operator says so on its own tile rather than in a footnote.
+set -u
+cd "${0:A:h}"
+zmodload zsh/mathfunc   # sqrt(), for turning the eye direction into a unit vector
+
+# printf writes "36,616" under a comma-decimal locale, --camera reads that as two
+# extra fields, and the render silently produces no file. Pin the numeric locale.
+export LC_ALL=C LC_NUMERIC=C
+
+BIN=${BIN:-../build/OpenSCAD.app/Contents/MacOS/OpenSCAD}
+FLAGS=${FLAGS:---enable=fillet}
+TOL=${TOL:-1e-6}
+TILE_W=${TILE_W:-700}
+TILE_H=${TILE_H:-560}
+COLS=3
+ROWS=4
+SHEET=6
+FONT=/System/Library/Fonts/Helvetica.ttc
+
+[[ -x $BIN ]] || { print -u2 "no binary at $BIN -- set BIN="; exit 1; }
+print "binary: $BIN"
+print "        built $(stat -f '%Sm' "$BIN")"
+print ""
+
+mkdir -p tiles sheets
+INDEX=sheets/INDEX.md
+ONLY=""
+NOPDF=""
+for a in "$@"; do
+  case $a in
+    --no-pdf) NOPDF=1 ;;
+    *) ONLY=$a ;;
+  esac
+done
+
+# model | what it probes | expected dispatch | centre x,y,z | eye direction | distance
+#
+# The centre is a vertex read off the model's own source, not a guess. Every
+# oblique model's corner is where the crease line x=6 z=6 meets the raked end
+# plane, so its y is 6*tan(rake) and is written out here rather than eyeballed.
+tiles=(
+  "elbow_oblique75|end face raked 15deg, crease meets it at 75deg|canal tube=2|6,1.608,6|1,-1,0.7|55"
+  "elbow_oblique50|end face raked 40deg, crease meets it at 50deg|canal tube=2|6,5.035,6|1,-1,0.7|55"
+  "elbow_dihedral60|60deg trough, square end face|canal tube=2|6,0,6|1,-1,0.7|55"
+  "elbow_dihedral120|120deg trough (leaning wall), square end face|canal tube=4|24,0,6|1,-1,0.7|35"
+  "elbow_curved_endface|crease dies on a cylindrical end wall, 3 facets across|flat + fan at stock: flat=2 fan=2|6,0.88,6|1,-1,0.7|30"
+  "elbow_curved_wall|cylindrical trough wall, arc crease|saddle=2 at stock, tube=2 at fn 16/64|7.91,0,6|1,-1,0.7|55"
+  "elbow_facet_endface|end face kinks 10deg exactly at the crease|one of each: tube=1 coons=1|6,0,6|1,-1,0.7|55"
+  "elbow_crowded|arms 6 thick against 2R=5.8|torus tube=2, not crowded out|6,0,6|1,-1,0.7|40"
+  "elbow_thin_arm|arm 3 thick against 2R=4|cap + saddle + flat: cap=2 saddle=2 flat=4 (was torus tube=2)|3,0,6|1,-1,0.7|45"
+  "step_notch|inverse elbow: 2 concave + 1 convex|torus + tri-cap tube=3 capTri=11|20,10,20|1,1,1|55"
+  "elbow_rot30|control: square elbow rotated 30deg about z|torus tube=2|2.598,1.5,3|1.366,-0.366,0.7|28"
+  "elbow_big|control: lbracket at 3x size and 3x radius|torus tube=2|18,0,18|1,-1,0.7|165"
+)
+
+print "${#tiles[@]} gate-boundary tiles -> sheets/sheet-$SHEET.png\n"
+
+# A standalone full run owns its own rows and NOTHING ELSE in the index: cut out
+# exactly this page's own section -- from our "## " heading to the next one --
+# and stash whatever followed it, put back when we finish or are interrupted.
+# Sheets 1-5 keep their tables whatever this script does, and the order the sheet
+# scripts run in is irrelevant.
+HEADING="## Gate boundary"
+if [[ -z $ONLY ]]; then
+  if [[ -f $INDEX ]]; then
+    : > $INDEX.head; : > $INDEX.tail
+    awk -v h="$HEADING" -v head="$INDEX.head" -v tail="$INDEX.tail" '
+      state == 0 && index($0, h) == 1 { state = 1 }
+      state == 1 && /^## / && index($0, h) != 1 { state = 2 }
+      state == 0 { print > head; next }
+      state == 2 { print > tail }
+    ' $INDEX
+    # Trailing blank lines go, and the stash is put back behind one blank line of
+    # our own: without this the separator blank doubles on every single run and
+    # the file grows a line at a time forever.
+    perl -0pi -e 's/\n+\z/\n/' $INDEX.head
+    mv $INDEX.head $INDEX
+    trap 'if [[ -s '$INDEX'.tail ]]; then print "" >> '$INDEX'; cat '$INDEX'.tail >> '$INDEX'; fi; rm -f '$INDEX'.tail' EXIT INT TERM
+  fi
+  print "\n## Gate boundary (sheet $SHEET)\n" >> $INDEX
+  print "Generated by \`corner-sheet6.sh\`. Twelve models built to sit just outside or" >> $INDEX
+  print "just inside the exact-torus corner gate; eleven of them are now in" >> $INDEX
+  print "\`expect.txt\` and swept, step_notch is not. Stock defaults, camera parked on" >> $INDEX
+  print "the probed vertex. Everything here is measured: the dispatch column is a" >> $INDEX
+  print "label on the \`fillet: corners ...\` echo in the next column, and the mesh" >> $INDEX
+  print "column comes from an exact ASCII STL at weld $TOL.\n" >> $INDEX
+  print "| tile | model | what it probes | dispatch | corners (measured) | mesh | camera (eye -> centre) |" >> $INDEX
+  print "|---|---|---|---|---|---|---|" >> $INDEX
+fi
+
+i=0
+for entry in $tiles; do
+  i=$((i + 1))
+  id=$(printf "S%d-T%02d" $SHEET $i)
+  [[ -n $ONLY && $ONLY != $id ]] && continue
+
+  name=${entry%%|*};       rest=${entry#*|}
+  probe=${rest%%|*};       rest=${rest#*|}
+  dispatch=${rest%%|*};    rest=${rest#*|}
+  centre=${rest%%|*};      rest=${rest#*|}
+  dir=${rest%%|*};         dist=${rest#*|}
+
+  cx=${centre%%,*}; cr=${centre#*,}; cy=${cr%%,*}; cz=${cr#*,}
+  dx=${dir%%,*};    dr=${dir#*,};    dy=${dr%%,*}; dz=${dr#*,}
+  len=$(( sqrt(dx * dx + dy * dy + dz * dz) ))
+  ex=$(printf '%.3f' $(( cx + dx / len * dist )))
+  ey=$(printf '%.3f' $(( cy + dy / len * dist )))
+  ez=$(printf '%.3f' $(( cz + dz / len * dist )))
+  cam="$ex,$ey,$ez,$cx,$cy,$cz"
+
+  png=tiles/$id.png
+  stl=tiles/$id.stl
+  log=tiles/$id.log
+
+  # No --viewall/--autocenter: the aim is the point. Everything else matches
+  # sheet.sh, so this is the same solid the whole-model tiles would show.
+  ${=BIN} $=FLAGS --backend=manifold --render \
+      --imgsize=$TILE_W,$TILE_H --projection=p --colorscheme=Cornfield \
+      --camera=$cam -o $png models/$name.scad > $log 2>&1
+  # The mesh comes from the same binary and the same source in the same pass, so
+  # the verdict on the label is about the solid in the picture above it.
+  ${=BIN} $=FLAGS --backend=manifold --render -o $stl models/$name.scad >> $log 2>&1
+
+  wc=$(sed -n 's|^// *mesh\.py-comp: *\([0-9][0-9]*\).*|\1|p' models/$name.scad | head -1)
+  wc=${wc:-1}
+
+  if [[ -f $stl ]]; then
+    stat=$(python3 mesh.py --tol $TOL --comp $wc $stl 2>&1 | sed "s|$stl: ||")
+  else
+    stat="NO MESH"
+  fi
+  warn=$(grep -c "WARNING:" $log 2>/dev/null); warn=${warn:-0}
+  short=$(print "$stat" | cut -d' ' -f1)
+
+  # The dispatch echo of the same two renders, so the label above is checkable
+  # against the run that produced the picture. Both invocations echo it, so read
+  # the unique lines rather than both copies.
+  corners=$(sed -n 's/^ECHO: fillet: corners \(.*\) in file.*/\1/p' $log | sort -u | paste -sd'/' - | sed 's|/| / |g')
+  corners=${corners:-none echoed}
+
+  if [[ -f $png ]]; then
+    magick $png -background white -bordercolor white -border 6 \
+      -font $FONT -pointsize 22 -fill black \
+      label:"$id  $name  [$dispatch]" -gravity center -append \
+      -font $FONT -pointsize 17 -fill gray30 \
+      label:"$probe" -gravity center -append \
+      -font $FONT -pointsize 18 -fill $([[ $short == VALID ]] && print gray30 || print red) \
+      label:"$short  warnings=$warn" -gravity center -append \
+      tiles/$id-labeled.png 2>/dev/null
+  else
+    # A model that renders nothing still gets a tile: the blank carries the
+    # reason in its own label, which is the whole point of keeping it.
+    print -u2 "$id: NO OUTPUT -- see $log"
+    magick -size ${TILE_W}x${TILE_H} xc:white -bordercolor white -border 6 \
+      -font $FONT -pointsize 22 -fill red \
+      label:"$id  $name  [$dispatch]" -gravity center -append \
+      -font $FONT -pointsize 17 -fill gray30 \
+      label:"$probe" -gravity center -append \
+      -font $FONT -pointsize 18 -fill red \
+      label:"NO IMAGE  $short  warnings=$warn" -gravity center -append \
+      tiles/$id-labeled.png 2>/dev/null
+  fi
+
+  print "$id $name [$dispatch] $corners -> $stat warnings=$warn"
+  [[ -z $ONLY ]] && \
+    print "| $id | $name | $probe | $dispatch | \`$corners\` | $stat | \`$cam\` |" >> $INDEX
+done
+
+files=(tiles/S$SHEET-T*-labeled.png(N))
+if (( ${#files} )); then
+  montage -background white -tile ${COLS}x${ROWS} -geometry +10+10 \
+      $files sheets/sheet-$SHEET.png 2>/dev/null
+  magick sheets/sheet-$SHEET.png -background white -font $FONT -pointsize 34 -fill black \
+      label:"fillet bench -- sheet $SHEET: torus-gate boundary (dispatch and mesh verdict both measured)" \
+      -gravity center +swap -append sheets/sheet-$SHEET.png 2>/dev/null
+  print "sheets/sheet-$SHEET.png"
+fi
+
+if [[ -z $NOPDF && -x ./sheets-to-pdf.sh ]]; then
+  ./sheets-to-pdf.sh || print -u2 "sheets-to-pdf.sh failed -- PNGs are still current"
+fi

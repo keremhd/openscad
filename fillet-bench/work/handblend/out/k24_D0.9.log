@@ -1,0 +1,11 @@
+ECHO: round_tool: selection brush takes 1 of 63 candidate edge(s) in file handblend_step.scad, line 55
+Geometries in cache: 4
+Geometry cache size in bytes: 7960
+CGAL Polyhedrons in cache: 2
+CGAL cache size in bytes: 29500
+Total rendering time: 0:00:00.001
+   Top level object is a 3D object (manifold):
+   Status:     NoError
+   Genus:      0
+   Vertices:       90
+   Facets:        176

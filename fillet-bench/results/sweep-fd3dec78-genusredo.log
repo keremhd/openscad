@@ -1,0 +1,444 @@
+binary: /private/tmp/claude-501/-Users-kerem-Devel-openscad/86517c18-0145-4bf3-879b-972815bd1c7a/scratchpad/pin-adf2beef/OpenSCAD.app/Contents/MacOS/OpenSCAD
+        built Aug  5 14:51:20 2026
+flags:  --enable=fillet --backend=manifold
+reader: exact ASCII STL, OFF read alongside and compared
+weld:   1e-6
+runs:   3 per cell
+*** 567 SOURCE FILES ARE NEWER THAN THE BINARY -- these numbers are about the old build ***
+../src/handle_dep.h
+../src/version.h
+../src/core/OffsetNode.h
+../src/core/ColorUtil.cc
+../src/core/progress.h
+
+24 models (13 with a $fn axis), results -> results/sweep-fd3dec78.tsv
+
+  = tee fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  = tee fn=8 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee fn=10 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee fn=12 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee fn=14 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee fn=16 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee fn=19 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee fn=24 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee fn=26 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee fn=32 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee fn=48 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee fn=64 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = tee fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = tee fn=def r=0.5 (already in results/sweep-fd3dec78.tsv)
+  = tee fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = tee fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = tee fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  = tee fn=def r=1.5 (already in results/sweep-fd3dec78.tsv)
+  = tee fn=def r=2.0 (already in results/sweep-fd3dec78.tsv)
+  = tee_oblique fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_oblique fn=8 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_oblique fn=10 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_oblique fn=12 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_oblique fn=14 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_oblique fn=16 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_oblique fn=19 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_oblique fn=24 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_oblique fn=26 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_oblique fn=32 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_oblique fn=48 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_oblique fn=64 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_oblique fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = tee_oblique fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = tee_oblique fn=def r=0.5 (already in results/sweep-fd3dec78.tsv)
+  = tee_oblique fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = tee_oblique fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = tee_oblique fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  = tee_oblique fn=def r=1.5 (already in results/sweep-fd3dec78.tsv)
+  = tee_oblique fn=def r=2.0 (already in results/sweep-fd3dec78.tsv)
+  = tee_small fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_small fn=8 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_small fn=10 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_small fn=12 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_small fn=14 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_small fn=16 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_small fn=19 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_small fn=24 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_small fn=26 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_small fn=32 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_small fn=48 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_small fn=64 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_small fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = tee_small fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = tee_small fn=def r=0.5 (already in results/sweep-fd3dec78.tsv)
+  = tee_small fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = tee_small fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = tee_small fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  = tee_small fn=def r=1.5 (already in results/sweep-fd3dec78.tsv)
+  = tee_small fn=def r=2.0 (already in results/sweep-fd3dec78.tsv)
+  = tee_large fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_large fn=8 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_large fn=10 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_large fn=12 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_large fn=14 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_large fn=16 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_large fn=19 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_large fn=24 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_large fn=26 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_large fn=32 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_large fn=48 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_large fn=64 r=def (already in results/sweep-fd3dec78.tsv)
+  = tee_large fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = tee_large fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = tee_large fn=def r=0.5 (already in results/sweep-fd3dec78.tsv)
+  = tee_large fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = tee_large fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = tee_large fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  = tee_large fn=def r=1.5 (already in results/sweep-fd3dec78.tsv)
+  = tee_large fn=def r=2.0 (already in results/sweep-fd3dec78.tsv)
+  = cross fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  = cross fn=8 r=def (already in results/sweep-fd3dec78.tsv)
+  = cross fn=10 r=def (already in results/sweep-fd3dec78.tsv)
+  = cross fn=12 r=def (already in results/sweep-fd3dec78.tsv)
+  = cross fn=14 r=def (already in results/sweep-fd3dec78.tsv)
+  = cross fn=16 r=def (already in results/sweep-fd3dec78.tsv)
+  = cross fn=19 r=def (already in results/sweep-fd3dec78.tsv)
+  = cross fn=24 r=def (already in results/sweep-fd3dec78.tsv)
+  = cross fn=26 r=def (already in results/sweep-fd3dec78.tsv)
+  = cross fn=32 r=def (already in results/sweep-fd3dec78.tsv)
+  = cross fn=48 r=def (already in results/sweep-fd3dec78.tsv)
+  = cross fn=64 r=def (already in results/sweep-fd3dec78.tsv)
+  = cross fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = cross fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = cross fn=def r=0.5 (already in results/sweep-fd3dec78.tsv)
+  = cross fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = cross fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = cross fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  cross              fn=def  r=1.5   VALID     nonman=0   nmvert=0   chi=-2  genus=2    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 5s
+  cross              fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=-6  genus=4    comp=1/1 warn=1   tol=1e-6 runs=3 distinct=1 off=yes 6s
+  = boss_plate fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  = boss_plate fn=8 r=def (already in results/sweep-fd3dec78.tsv)
+  = boss_plate fn=10 r=def (already in results/sweep-fd3dec78.tsv)
+  = boss_plate fn=12 r=def (already in results/sweep-fd3dec78.tsv)
+  = boss_plate fn=14 r=def (already in results/sweep-fd3dec78.tsv)
+  = boss_plate fn=16 r=def (already in results/sweep-fd3dec78.tsv)
+  = boss_plate fn=19 r=def (already in results/sweep-fd3dec78.tsv)
+  = boss_plate fn=24 r=def (already in results/sweep-fd3dec78.tsv)
+  = boss_plate fn=26 r=def (already in results/sweep-fd3dec78.tsv)
+  = boss_plate fn=32 r=def (already in results/sweep-fd3dec78.tsv)
+  = boss_plate fn=48 r=def (already in results/sweep-fd3dec78.tsv)
+  = boss_plate fn=64 r=def (already in results/sweep-fd3dec78.tsv)
+  = boss_plate fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = boss_plate fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = boss_plate fn=def r=0.5 (already in results/sweep-fd3dec78.tsv)
+  = boss_plate fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = boss_plate fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = boss_plate fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  = boss_plate fn=def r=1.5 (already in results/sweep-fd3dec78.tsv)
+  = boss_plate fn=def r=2.0 (already in results/sweep-fd3dec78.tsv)
+  = two_bosses fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  = two_bosses fn=8 r=def (already in results/sweep-fd3dec78.tsv)
+  = two_bosses fn=10 r=def (already in results/sweep-fd3dec78.tsv)
+  = two_bosses fn=12 r=def (already in results/sweep-fd3dec78.tsv)
+  = two_bosses fn=14 r=def (already in results/sweep-fd3dec78.tsv)
+  = two_bosses fn=16 r=def (already in results/sweep-fd3dec78.tsv)
+  = two_bosses fn=19 r=def (already in results/sweep-fd3dec78.tsv)
+  = two_bosses fn=24 r=def (already in results/sweep-fd3dec78.tsv)
+  = two_bosses fn=26 r=def (already in results/sweep-fd3dec78.tsv)
+  = two_bosses fn=32 r=def (already in results/sweep-fd3dec78.tsv)
+  = two_bosses fn=48 r=def (already in results/sweep-fd3dec78.tsv)
+  = two_bosses fn=64 r=def (already in results/sweep-fd3dec78.tsv)
+  = two_bosses fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = two_bosses fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = two_bosses fn=def r=0.5 (already in results/sweep-fd3dec78.tsv)
+  = two_bosses fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = two_bosses fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = two_bosses fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  = two_bosses fn=def r=2.0 (already in results/sweep-fd3dec78.tsv)
+  = pipe_into_face fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  = pipe_into_face fn=8 r=def (already in results/sweep-fd3dec78.tsv)
+  = pipe_into_face fn=10 r=def (already in results/sweep-fd3dec78.tsv)
+  = pipe_into_face fn=12 r=def (already in results/sweep-fd3dec78.tsv)
+  = pipe_into_face fn=14 r=def (already in results/sweep-fd3dec78.tsv)
+  = pipe_into_face fn=16 r=def (already in results/sweep-fd3dec78.tsv)
+  = pipe_into_face fn=19 r=def (already in results/sweep-fd3dec78.tsv)
+  = pipe_into_face fn=24 r=def (already in results/sweep-fd3dec78.tsv)
+  = pipe_into_face fn=26 r=def (already in results/sweep-fd3dec78.tsv)
+  = pipe_into_face fn=32 r=def (already in results/sweep-fd3dec78.tsv)
+  = pipe_into_face fn=48 r=def (already in results/sweep-fd3dec78.tsv)
+  = pipe_into_face fn=64 r=def (already in results/sweep-fd3dec78.tsv)
+  = pipe_into_face fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = pipe_into_face fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = pipe_into_face fn=def r=0.5 (already in results/sweep-fd3dec78.tsv)
+  = pipe_into_face fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = pipe_into_face fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = pipe_into_face fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  = pipe_into_face fn=def r=1.5 (already in results/sweep-fd3dec78.tsv)
+  = pipe_into_face fn=def r=2.0 (already in results/sweep-fd3dec78.tsv)
+  = dome fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  = dome fn=8 r=def (already in results/sweep-fd3dec78.tsv)
+  = dome fn=10 r=def (already in results/sweep-fd3dec78.tsv)
+  = dome fn=12 r=def (already in results/sweep-fd3dec78.tsv)
+  = dome fn=14 r=def (already in results/sweep-fd3dec78.tsv)
+  = dome fn=16 r=def (already in results/sweep-fd3dec78.tsv)
+  = dome fn=19 r=def (already in results/sweep-fd3dec78.tsv)
+  = dome fn=24 r=def (already in results/sweep-fd3dec78.tsv)
+  = dome fn=26 r=def (already in results/sweep-fd3dec78.tsv)
+  = dome fn=32 r=def (already in results/sweep-fd3dec78.tsv)
+  = dome fn=48 r=def (already in results/sweep-fd3dec78.tsv)
+  = dome fn=64 r=def (already in results/sweep-fd3dec78.tsv)
+  = dome fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = dome fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = dome fn=def r=0.5 (already in results/sweep-fd3dec78.tsv)
+  = dome fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = dome fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = dome fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  = dome fn=def r=2.0 (already in results/sweep-fd3dec78.tsv)
+  hole_plate         fn=def  r=def   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 5s
+  = hole_plate fn=8 r=def (already in results/sweep-fd3dec78.tsv)
+  hole_plate         fn=10   r=def   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 5s
+  hole_plate         fn=12   r=def   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  hole_plate         fn=14   r=def   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 6s
+  hole_plate         fn=16   r=def   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 5s
+  hole_plate         fn=19   r=def   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 6s
+  hole_plate         fn=24   r=def   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 6s
+  hole_plate         fn=26   r=def   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 7s
+  hole_plate         fn=32   r=def   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 7s
+  hole_plate         fn=48   r=def   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 10s
+  hole_plate         fn=64   r=def   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 15s
+  hole_plate         fn=def  r=0.2   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  hole_plate         fn=def  r=0.3   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 5s
+  hole_plate         fn=def  r=0.5   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 4s
+  hole_plate         fn=def  r=0.8   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 5s
+  hole_plate         fn=def  r=0.9   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 5s
+  hole_plate         fn=def  r=1.0   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 5s
+  hole_plate         fn=def  r=2.0   VALID     nonman=0   nmvert=0   chi=0   genus=1    comp=1/1 warn=0   tol=1e-6 runs=3 distinct=1 off=yes 5s
+  = bevel_boss fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  = bevel_boss fn=8 r=def (already in results/sweep-fd3dec78.tsv)
+  = bevel_boss fn=10 r=def (already in results/sweep-fd3dec78.tsv)
+  = bevel_boss fn=12 r=def (already in results/sweep-fd3dec78.tsv)
+  = bevel_boss fn=14 r=def (already in results/sweep-fd3dec78.tsv)
+  = bevel_boss fn=16 r=def (already in results/sweep-fd3dec78.tsv)
+  = bevel_boss fn=19 r=def (already in results/sweep-fd3dec78.tsv)
+  = bevel_boss fn=24 r=def (already in results/sweep-fd3dec78.tsv)
+  = bevel_boss fn=26 r=def (already in results/sweep-fd3dec78.tsv)
+  = bevel_boss fn=32 r=def (already in results/sweep-fd3dec78.tsv)
+  = bevel_boss fn=48 r=def (already in results/sweep-fd3dec78.tsv)
+  = bevel_boss fn=64 r=def (already in results/sweep-fd3dec78.tsv)
+  = bevel_boss fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = bevel_boss fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = bevel_boss fn=def r=0.5 (already in results/sweep-fd3dec78.tsv)
+  = bevel_boss fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = bevel_boss fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = bevel_boss fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  = bevel_boss fn=def r=2.0 (already in results/sweep-fd3dec78.tsv)
+  = cyl_control fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  = cyl_control fn=8 r=def (already in results/sweep-fd3dec78.tsv)
+  = cyl_control fn=10 r=def (already in results/sweep-fd3dec78.tsv)
+  = cyl_control fn=12 r=def (already in results/sweep-fd3dec78.tsv)
+  = cyl_control fn=14 r=def (already in results/sweep-fd3dec78.tsv)
+  = cyl_control fn=16 r=def (already in results/sweep-fd3dec78.tsv)
+  = cyl_control fn=19 r=def (already in results/sweep-fd3dec78.tsv)
+  = cyl_control fn=24 r=def (already in results/sweep-fd3dec78.tsv)
+  = cyl_control fn=26 r=def (already in results/sweep-fd3dec78.tsv)
+  = cyl_control fn=32 r=def (already in results/sweep-fd3dec78.tsv)
+  = cyl_control fn=48 r=def (already in results/sweep-fd3dec78.tsv)
+  = cyl_control fn=64 r=def (already in results/sweep-fd3dec78.tsv)
+  = cyl_control fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = cyl_control fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = cyl_control fn=def r=0.5 (already in results/sweep-fd3dec78.tsv)
+  = cyl_control fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = cyl_control fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = cyl_control fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  = cyl_control fn=def r=1.5 (already in results/sweep-fd3dec78.tsv)
+  = cyl_control fn=def r=2.0 (already in results/sweep-fd3dec78.tsv)
+  = lbracket fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  - lbracket has no curvature; $fn axis skipped (trap 7)
+  = lbracket fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = lbracket fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = lbracket fn=def r=0.5 (already in results/sweep-fd3dec78.tsv)
+  = lbracket fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = lbracket fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = lbracket fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  = lbracket fn=def r=1.5 (already in results/sweep-fd3dec78.tsv)
+  = lbracket fn=def r=2.0 (already in results/sweep-fd3dec78.tsv)
+  = box_step fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  - box_step has no curvature; $fn axis skipped (trap 7)
+  = box_step fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = box_step fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = box_step fn=def r=0.5 (already in results/sweep-fd3dec78.tsv)
+  = box_step fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = box_step fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = box_step fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  = box_step fn=def r=1.5 (already in results/sweep-fd3dec78.tsv)
+  = box_step fn=def r=2.0 (already in results/sweep-fd3dec78.tsv)
+  = rib fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  - rib has no curvature; $fn axis skipped (trap 7)
+  = rib fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = rib fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = rib fn=def r=0.5 (already in results/sweep-fd3dec78.tsv)
+  = rib fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = rib fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = rib fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  = rib fn=def r=2.0 (already in results/sweep-fd3dec78.tsv)
+  = thin_slab fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  - thin_slab has no curvature; $fn axis skipped (trap 7)
+  = thin_slab fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = thin_slab fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = thin_slab fn=def r=0.5 (already in results/sweep-fd3dec78.tsv)
+  = thin_slab fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = thin_slab fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = thin_slab fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  = thin_slab fn=def r=1.5 (already in results/sweep-fd3dec78.tsv)
+  = thin_slab fn=def r=2.0 (already in results/sweep-fd3dec78.tsv)
+  = pocket fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  - pocket has no curvature; $fn axis skipped (trap 7)
+  = pocket fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = pocket fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = pocket fn=def r=0.5 (already in results/sweep-fd3dec78.tsv)
+  = pocket fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = pocket fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = pocket fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  = pocket fn=def r=1.5 (already in results/sweep-fd3dec78.tsv)
+  = pocket fn=def r=2.0 (already in results/sweep-fd3dec78.tsv)
+  = chamfer_box fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  - chamfer_box has no curvature; $fn axis skipped (trap 7)
+  = chamfer_box fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = chamfer_box fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = chamfer_box fn=def r=0.5 (already in results/sweep-fd3dec78.tsv)
+  = chamfer_box fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = chamfer_box fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = chamfer_box fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  = chamfer_box fn=def r=1.5 (already in results/sweep-fd3dec78.tsv)
+  = chamfer_box fn=def r=2.0 (already in results/sweep-fd3dec78.tsv)
+  = brush_one_edge fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  - brush_one_edge has no curvature; $fn axis skipped (trap 7)
+  = brush_one_edge fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = brush_one_edge fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = brush_one_edge fn=def r=0.5 (already in results/sweep-fd3dec78.tsv)
+  = brush_one_edge fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = brush_one_edge fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = brush_one_edge fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  = brush_one_edge fn=def r=1.5 (already in results/sweep-fd3dec78.tsv)
+  = brush_one_edge fn=def r=2.0 (already in results/sweep-fd3dec78.tsv)
+  = cube_control fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  - cube_control has no curvature; $fn axis skipped (trap 7)
+  = cube_control fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = cube_control fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = cube_control fn=def r=0.5 (already in results/sweep-fd3dec78.tsv)
+  = cube_control fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = cube_control fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = cube_control fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  = cube_control fn=def r=1.5 (already in results/sweep-fd3dec78.tsv)
+  = cube_control fn=def r=2.0 (already in results/sweep-fd3dec78.tsv)
+  = mixed_fn fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  - mixed_fn has no curvature; $fn axis skipped (trap 7)
+  = mixed_fn fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = mixed_fn fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = mixed_fn fn=def r=0.5 (already in results/sweep-fd3dec78.tsv)
+  = mixed_fn fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = mixed_fn fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = mixed_fn fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  = mixed_fn fn=def r=1.5 (already in results/sweep-fd3dec78.tsv)
+  = mixed_fn fn=def r=2.0 (already in results/sweep-fd3dec78.tsv)
+  = rib_into_boss fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  = rib_into_boss fn=8 r=def (already in results/sweep-fd3dec78.tsv)
+  = rib_into_boss fn=10 r=def (already in results/sweep-fd3dec78.tsv)
+  = rib_into_boss fn=12 r=def (already in results/sweep-fd3dec78.tsv)
+  = rib_into_boss fn=14 r=def (already in results/sweep-fd3dec78.tsv)
+  = rib_into_boss fn=16 r=def (already in results/sweep-fd3dec78.tsv)
+  = rib_into_boss fn=19 r=def (already in results/sweep-fd3dec78.tsv)
+  = rib_into_boss fn=24 r=def (already in results/sweep-fd3dec78.tsv)
+  = rib_into_boss fn=26 r=def (already in results/sweep-fd3dec78.tsv)
+  = rib_into_boss fn=32 r=def (already in results/sweep-fd3dec78.tsv)
+  = rib_into_boss fn=48 r=def (already in results/sweep-fd3dec78.tsv)
+  = rib_into_boss fn=64 r=def (already in results/sweep-fd3dec78.tsv)
+  = rib_into_boss fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = rib_into_boss fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = rib_into_boss fn=def r=0.5 (already in results/sweep-fd3dec78.tsv)
+  = rib_into_boss fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = rib_into_boss fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = rib_into_boss fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  = rib_into_boss fn=def r=1.5 (already in results/sweep-fd3dec78.tsv)
+  = rib_into_boss fn=def r=2.0 (already in results/sweep-fd3dec78.tsv)
+  = refused_neighbour fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  - refused_neighbour has no curvature; $fn axis skipped (trap 7)
+  = refused_neighbour fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = refused_neighbour fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = refused_neighbour fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = refused_neighbour fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = refused_neighbour fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  = refused_neighbour fn=def r=1.5 (already in results/sweep-fd3dec78.tsv)
+  = refused_neighbour fn=def r=2.0 (already in results/sweep-fd3dec78.tsv)
+  = shallow_crease fn=def r=def (already in results/sweep-fd3dec78.tsv)
+  - shallow_crease has no curvature; $fn axis skipped (trap 7)
+  = shallow_crease fn=def r=0.2 (already in results/sweep-fd3dec78.tsv)
+  = shallow_crease fn=def r=0.3 (already in results/sweep-fd3dec78.tsv)
+  = shallow_crease fn=def r=0.5 (already in results/sweep-fd3dec78.tsv)
+  = shallow_crease fn=def r=0.8 (already in results/sweep-fd3dec78.tsv)
+  = shallow_crease fn=def r=0.9 (already in results/sweep-fd3dec78.tsv)
+  = shallow_crease fn=def r=1.0 (already in results/sweep-fd3dec78.tsv)
+  = shallow_crease fn=def r=1.5 (already in results/sweep-fd3dec78.tsv)
+  = shallow_crease fn=def r=2.0 (already in results/sweep-fd3dec78.tsv)
+
+done. 353 rows in results/sweep-fd3dec78.tsv, weld tolerance 1e-6, 3 runs per cell
+invalid rows:
+  tee  fn=def  r=0.5  INVALID  nonman=0  nmvert=2  chi=4  comp=3/1  warn=0  tol=1e-6  runs=3  distinct=1
+  tee  fn=def  r=0.9  INVALID  nonman=0  nmvert=1  chi=3  comp=2/1  warn=0  tol=1e-6  runs=3  distinct=1
+  tee_oblique  fn=def  r=0.2  INVALID  nonman=0  nmvert=1  chi=3  comp=2/1  warn=1  tol=1e-6  runs=3  distinct=1
+  tee_oblique  fn=def  r=0.3  INVALID  nonman=0  nmvert=1  chi=3  comp=2/1  warn=1  tol=1e-6  runs=3  distinct=1
+  tee_oblique  fn=def  r=0.8  INVALID  nonman=0  nmvert=1  chi=3  comp=2/1  warn=1  tol=1e-6  runs=3  distinct=1
+  tee_small  fn=def  r=def  INVALID  nonman=0  nmvert=0  chi=4  comp=2/1  warn=0  tol=1e-6  runs=3  distinct=1
+  tee_small  fn=10  r=def  INVALID  nonman=0  nmvert=0  chi=4  comp=2/1  warn=0  tol=1e-6  runs=3  distinct=1
+  tee_small  fn=def  r=1.5  INVALID  nonman=0  nmvert=0  chi=4  comp=2/1  warn=1  tol=1e-6  runs=3  distinct=1
+  cross  fn=def  r=0.3  INVALID  nonman=1  nmvert=0  chi=3  comp=1/1  warn=1  tol=1e-6  runs=3  distinct=1
+  cross  fn=def  r=0.9  INVALID  nonman=0  nmvert=0  chi=4  comp=2/1  warn=1  tol=1e-6  runs=3  distinct=1
+  boss_plate  fn=8  r=def  INVALID  nonman=8  nmvert=0  chi=6  comp=1/1  warn=0  tol=1e-6  runs=3  distinct=1
+  two_bosses  fn=8  r=def  INVALID  nonman=6  nmvert=0  chi=5  comp=1/1  warn=1  tol=1e-6  runs=3  distinct=1
+  pipe_into_face  fn=8  r=def  INVALID  nonman=2  nmvert=0  chi=3  comp=1/1  warn=1  tol=1e-6  runs=3  distinct=1
+  dome  fn=8  r=def  INVALID  nonman=4  nmvert=0  chi=4  comp=1/1  warn=0  tol=1e-6  runs=3  distinct=1
+  hole_plate  fn=8  r=def  INVALID  nonman=8  nmvert=0  chi=4  comp=1/1  warn=0  tol=1e-6  runs=3  distinct=1
+  rib_into_boss  fn=14  r=def  INVALID  nonman=3  nmvert=0  chi=4  comp=1/1  warn=0  tol=1e-6  runs=3  distinct=1
+  rib_into_boss  fn=32  r=def  INVALID  nonman=4  nmvert=0  chi=4  comp=1/1  warn=0  tol=1e-6  runs=3  distinct=1
+  refused_neighbour  fn=def  r=0.2  INVALID  nonman=1  nmvert=0  chi=2  comp=1/1  warn=2  tol=1e-6  runs=3  distinct=1
+  refused_neighbour  fn=def  r=0.8  INVALID  nonman=1  nmvert=0  chi=2  comp=1/1  warn=2  tol=1e-6  runs=3  distinct=1
+  refused_neighbour  fn=def  r=0.9  INVALID  nonman=1  nmvert=0  chi=2  comp=1/1  warn=2  tol=1e-6  runs=3  distinct=1
+  refused_neighbour  fn=def  r=1.0  INVALID  nonman=1  nmvert=0  chi=2  comp=1/1  warn=2  tol=1e-6  runs=3  distinct=1
+rows whose fault is a pinched vertex (invisible to every edge count):
+  tee  fn=def  r=0.5  nmvert=2  chi=4
+  tee  fn=def  r=0.9  nmvert=1  chi=3
+  tee_oblique  fn=def  r=0.2  nmvert=1  chi=3
+  tee_oblique  fn=def  r=0.3  nmvert=1  chi=3
+  tee_oblique  fn=def  r=0.8  nmvert=1  chi=3
+rows with more components than the model builds (a shed fragment):
+  tee  fn=def  r=0.5  comp=3  wanted 1
+  tee  fn=def  r=0.9  comp=2  wanted 1
+  tee_oblique  fn=def  r=0.2  comp=2  wanted 1
+  tee_oblique  fn=def  r=0.3  comp=2  wanted 1
+  tee_oblique  fn=def  r=0.8  comp=2  wanted 1
+  tee_small  fn=def  r=def  comp=2  wanted 1
+  tee_small  fn=10  r=def  comp=2  wanted 1
+  tee_small  fn=def  r=1.5  comp=2  wanted 1
+  cross  fn=def  r=0.9  comp=2  wanted 1
+binaries present in results/sweep-fd3dec78.tsv (more than one means the table mixes builds):
+  fd3dec78
+cells where the OFF export changed the answer (the exporter, not the geometry):
+cells where genus is not 0 (a fillet that changed the topology), with the throat it turns on:
+  cross  fn=def  r=1.5  genus=2  chi=-2  throat<=0.01mm
+  cross  fn=def  r=2.0  genus=4  chi=-6  throat<=0.01mm
+  hole_plate  fn=def  r=def  genus=1  chi=0  throat survives every weld tried
+  hole_plate  fn=10  r=def  genus=1  chi=0  throat survives every weld tried
+  hole_plate  fn=12  r=def  genus=1  chi=0  throat survives every weld tried
+  hole_plate  fn=14  r=def  genus=1  chi=0  throat survives every weld tried
+  hole_plate  fn=16  r=def  genus=1  chi=0  throat survives every weld tried
+  hole_plate  fn=19  r=def  genus=1  chi=0  throat survives every weld tried
+  hole_plate  fn=24  r=def  genus=1  chi=0  throat survives every weld tried
+  hole_plate  fn=26  r=def  genus=1  chi=0  throat survives every weld tried
+  hole_plate  fn=32  r=def  genus=1  chi=0  throat survives every weld tried
+  hole_plate  fn=48  r=def  genus=1  chi=0  throat survives every weld tried
+  hole_plate  fn=64  r=def  genus=1  chi=0  throat survives every weld tried
+  hole_plate  fn=def  r=0.2  genus=1  chi=0  throat survives every weld tried
+  hole_plate  fn=def  r=0.3  genus=1  chi=0  throat survives every weld tried
+  hole_plate  fn=def  r=0.5  genus=1  chi=0  throat survives every weld tried
+  hole_plate  fn=def  r=0.8  genus=1  chi=0  throat survives every weld tried
+  hole_plate  fn=def  r=0.9  genus=1  chi=0  throat survives every weld tried
+  hole_plate  fn=def  r=1.0  genus=1  chi=0  throat survives every weld tried
+  hole_plate  fn=def  r=2.0  genus=1  chi=0  throat survives every weld tried
+cells whose runs disagreed with each other:

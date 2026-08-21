@@ -1,0 +1,246 @@
+diff --git a/src/geometry/fillet/FilletBlend.cc b/src/geometry/fillet/FilletBlend.cc
+index 24bd0ec49..065c3ac5a 100644
+--- a/src/geometry/fillet/FilletBlend.cc
++++ b/src/geometry/fillet/FilletBlend.cc
+@@ -24,6 +24,8 @@
+ #include <cmath>
+ #include <cstddef>
+ #include <cstdint>
++#include <cstdio>
++#include <cstdlib>
+ #include <map>
+ #include <memory>
+ #include <optional>
+@@ -103,7 +105,15 @@ struct OutMesh
+ 
+     int boundary = 0;
+     for (const auto& [k, fs] : e2f)
+-      if (fs.size() == 1) ++boundary;
++      if (fs.size() == 1) {
++        ++boundary;
++        if (std::getenv("FILLET_DEBUG")) {
++          const Vector3d& a = V[k.first];
++          const Vector3d& b = V[k.second];
++          fprintf(stderr, "[OPEN] (%.2f,%.2f,%.2f)->(%.2f,%.2f,%.2f)\n", a.x(), a.y(), a.z(),
++                  b.x(), b.y(), b.z());
++        }
++      }
+ 
+     // Does face f traverse undirected edge (a,b) in the direction a->b?
+     auto dirAB = [&](int f, int a, int b) {
+@@ -148,6 +158,53 @@ struct OutMesh
+     return boundary;
+   }
+ 
++  // Close every remaining boundary loop with a centroid fan. A fillet fragment
++  // that ends where the crease drops below the feature threshold (a tangent
++  // junction) leaves its strip end open; so does a mixed-sign vertex-star. Rather
++  // than refuse the whole blend for these local gaps, cap them — a crude but
++  // valid closure (winding is fixed afterwards by orient()). Returns the number
++  // of loops capped.
++  int capHoles()
++  {
++    auto ekey = [](int a, int b) { return std::pair<int, int>{std::min(a, b), std::max(a, b)}; };
++    int capped = 0;
++    for (int pass = 0; pass < 64; ++pass) {
++      // Directed boundary half-edges (a->b) whose undirected edge is used once,
++      // recomputed each pass since a fan closes the loop it fills.
++      std::map<std::pair<int, int>, int> use;
++      for (const auto& f : F)
++        for (int i = 0; i < 3; ++i) ++use[ekey(f[i], f[(i + 1) % 3])];
++      std::map<int, int> nextOf;  // a -> b along the hole boundary (one per vertex)
++      for (const auto& f : F)
++        for (int i = 0; i < 3; ++i) {
++          const int a = f[i], b = f[(i + 1) % 3];
++          if (use[ekey(a, b)] == 1) nextOf[a] = b;
++        }
++      if (nextOf.empty()) break;
++      // Walk one loop from an arbitrary boundary vertex.
++      const int start = nextOf.begin()->first;
++      std::vector<int> loop;
++      std::set<int> seen;
++      int cur = start;
++      bool ok = true;
++      while (true) {
++        if (seen.count(cur)) break;  // closed (back to a visited vertex)
++        seen.insert(cur);
++        loop.push_back(cur);
++        auto it = nextOf.find(cur);
++        if (it == nextOf.end()) { ok = false; break; }
++        cur = it->second;
++      }
++      if (ok && loop.size() >= 3) {
++        fan(loop);
++        ++capped;
++      } else {
++        break;  // could not form a loop; leave it for the validity check to catch
++      }
++    }
++    return capped;
++  }
++
+   // Edges shared by more than two triangles — a non-manifold "fin", which
+   // orient()'s boundary count cannot see. Used to reject a blend that overlaps
+   // itself (e.g. two fillets colliding along an exact tangency line).
+@@ -391,6 +448,124 @@ struct Blender
+             std::max(surfaceOf[ts[0]], surfaceOf[ts[1]])};
+   }
+ 
++  // One local face-side of a crease at vertex u: the fan sector containing a
++  // given incident triangle, i.e. the run of triangles reachable from it around
++  // u without crossing a feature edge, bounded by the two feature edges at its
++  // ends. This is the side a fillet arc actually seats against — and it is LOCAL,
++  // so it stays correct where smoothSurfaces merged the two sides of a fold into
++  // one global surface (a tangent junction, where the crease dihedral dips below
++  // the feature threshold somewhere else on the loop). `xb`/`xf` are the bounding
++  // feature edges' far vertices; `tb`/`tf` the sector triangles incident to them
++  // (for perpInto's orientation); `navg` the sector's averaged outward normal.
++  struct Sector
++  {
++    int xb, xf, tb, tf;
++    Vector3d navg;
++  };
++  std::optional<Sector> sectorOf(int u, int t) const
++  {
++    const std::vector<std::pair<int, int>> fan = fanAround(u);
++    const int n = static_cast<int>(fan.size());
++    if (n == 0) return std::nullopt;
++    int i = -1;
++    for (int k = 0; k < n; ++k)
++      if (fan[k].first == t) { i = k; break; }
++    if (i < 0) return std::nullopt;
++    auto isFeat = [&](int via) {
++      return feature.count({std::min(u, via), std::max(u, via)}) > 0;
++    };
++    // fan[k].second is the edge (u, via) between triangle k and k+1.
++    int f = i, steps = 0;
++    while (!isFeat(fan[f].second) && steps < n) { f = (f + 1) % n; ++steps; }
++    if (steps >= n) return std::nullopt;  // no feature edge in this fan
++    int b = i;
++    steps = 0;
++    while (!isFeat(fan[(b - 1 + n) % n].second) && steps < n) { b = (b - 1 + n) % n; ++steps; }
++    Sector s;
++    s.xf = fan[f].second;
++    s.tf = fan[f].first;
++    s.xb = fan[(b - 1 + n) % n].second;
++    s.tb = fan[b].first;
++    // Average the outward normals of the sector's triangles (b..f, cyclic), so a
++    // smooth curved crease gives every edge on it the same seat normal at u — the
++    // adjacent strips then share this cross-section and close without a gap.
++    Vector3d nsum = Vector3d::Zero();
++    for (int k = b;; k = (k + 1) % n) {
++      nsum += m.tris[fan[k].first].normal;
++      if (k == f) break;
++    }
++    s.navg = nsum.norm() > 1e-12 ? Vector3d(nsum.normalized()) : m.tris[t].normal;
++    return s;
++  }
++
++  // Where vertex u lands once the crease is set back, on the side that triangle t
++  // sits on — the sector-local counterpart of insetPoint. Falls back to the
++  // surface-based inset where the fan is not a clean manifold sector, so nothing
++  // regresses on the disk-patch majority (there the sector and the surface agree).
++  Vector3d insetForTri(int u, int t) const
++  {
++    const auto s = sectorOf(u, t);
++    if (!s) return insetPoint(u, surfaceOf[t]);
++    auto offsetLine = [&](int x, int tside, Vector3d& base, Vector3d& dir) {
++      const EdgeKey e{std::min(u, x), std::max(u, x)};
++      const double sb = selected.count(e) ? setback(e) : 0.0;
++      base = m.pos[u] + sb * perpInto(u, x, tside);
++      dir = (m.pos[x] - m.pos[u]).normalized();
++    };
++    if (s->xb == s->xf) {
++      Vector3d base, dir;
++      offsetLine(s->xf, s->tf, base, dir);
++      return base;
++    }
++    Vector3d b1, d1, b2, d2;
++    offsetLine(s->xb, s->tb, b1, d1);
++    offsetLine(s->xf, s->tf, b2, d2);
++    return lineIntersect(b1, d1, b2, d2);
++  }
++
++  // The blend cross-section at vertex u for one selected edge, its two sides
++  // given by the edge's incident triangles t0/t1 — LOCAL, so it builds a proper
++  // two-sided arc even when both triangles share a merged surface. The seat
++  // normal comes from t0's sector (averaged), so adjacent edges on a smooth
++  // crease produce the identical cross-section at u and their strips close.
++  std::vector<Vector3d> crossSectionEdge(int u, int t0, int t1, bool concave) const
++  {
++    const Vector3d Ta = insetForTri(u, t0);
++    const Vector3d Tb = insetForTri(u, t1);
++    if (isChamfer) return {Ta, Tb};
++    const auto sa = sectorOf(u, t0);
++    const auto sb = sectorOf(u, t1);
++    if (!sa || !sb) return {Ta, Tb};
++    const Vector3d nA = sa->navg, nB = sb->navg;
++
++    const double r = size;
++    // Symmetric fillet centre: at distance r from both seats. Averaging the two
++    // sides' estimates (Ta+r*nA and Tb+r*nB) makes the arc independent of which
++    // triangle was labelled "A", so two edges continuing a smooth crease build
++    // the identical arc at their shared vertex and weld instead of leaving a gap.
++    const double sgn = concave ? r : -r;
++    const Vector3d C = 0.5 * ((Ta + sgn * nA) + (Tb + sgn * nB));
++    Vector3d ra = Ta - C, rb = Tb - C;
++    const double la = ra.norm(), lb = rb.norm();
++    if (la < 1e-9 || lb < 1e-9) return {Ta, Tb};
++    ra /= la;
++    rb /= lb;
++    const double ang = std::acos(std::clamp(ra.dot(rb), -1.0, 1.0));
++    if (ang < 1e-6) return {Ta, Tb};
++    Vector3d axis = ra.cross(rb);
++    if (axis.norm() < 1e-12) return {Ta, Tb};
++    axis.normalize();
++    std::vector<Vector3d> pts;
++    pts.reserve(arcSegs + 1);
++    for (int j = 0; j <= arcSegs; ++j) {
++      const double a = ang * j / arcSegs;
++      const Vector3d rot = ra * std::cos(a) + axis.cross(ra) * std::sin(a);
++      const double rad = la + (lb - la) * j / arcSegs;
++      pts.push_back(C + rad * rot);
++    }
++    return pts;
++  }
++
+   // The cross-section of the blend at vertex u for one crease side-pair
+   // {SA, SB}: from the tangent point on SA to the tangent point on SB — a flat
+   // segment for a chamfer, a tessellated arc for a fillet. The wall normals are
+@@ -447,9 +622,10 @@ struct Blender
+   // stitched into quads.
+   void emitEdge(const EdgeKey& e)
+   {
+-    const auto [SA, SB] = pairOf(e);
+-    const std::vector<Vector3d> cu = crossSectionAt(e.first, SA, SB);
+-    const std::vector<Vector3d> cv = crossSectionAt(e.second, SA, SB);
++    const auto& ts = adj.at(e);
++    const bool concave = concaveOf.at(e);
++    const std::vector<Vector3d> cu = crossSectionEdge(e.first, ts[0], ts[1], concave);
++    const std::vector<Vector3d> cv = crossSectionEdge(e.second, ts[0], ts[1], concave);
+     if (cu.size() != cv.size()) return;  // mismatched tessellation; skip (hole)
+     std::vector<int> iu, iv;
+     for (const auto& p : cu) iu.push_back(out.add(p));
+@@ -701,9 +877,12 @@ struct Blender
+   void run()
+   {
+     for (size_t t = 0; t < m.tris.size(); ++t) {
+-      const int S = surfaceOf[t];
++      const int ti = static_cast<int>(t);
+       const auto& v = m.tris[t].v;
+-      out.tri(insetPoint(v[0], S), insetPoint(v[1], S), insetPoint(v[2], S));
++      // Inset each vertex on the side triangle t sits on — sector-local, so a
++      // fold triangle sets back along its own wall rather than mitring across the
++      // merged surface.
++      out.tri(insetForTri(v[0], ti), insetForTri(v[1], ti), insetForTri(v[2], ti));
+     }
+     for (const auto& e : selected) emitEdge(e);
+     std::set<int> corners;
+@@ -799,6 +978,7 @@ std::shared_ptr<const Geometry> buildBlend(
+       return a;
+     }
+     b.run();
++    b.out.capHoles();  // close fragment-end / mixed-sign gaps before validating
+     a.boundary = b.out.orient();
+     a.nonman = b.out.nonManifoldEdges();
+     if (b.out.F.empty()) { a.status = Status::Empty; return a; }

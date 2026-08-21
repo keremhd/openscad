@@ -1,0 +1,73 @@
+# The 353-cell sweep under the OLD validity criterion and under the corrected one
+#
+#   11b6b3b1 = the recorded table (results/sweep-11b6b3b1.tsv), read by a mesh.py that
+#              checked non-manifold EDGES only and printed a genus regardless
+#   fd3dec78 = the same source tree, same models, same axes, read by the corrected
+#              mesh.py (results/sweep-fd3dec78.tsv): pinched vertices counted, genus
+#              suppressed when the surface is pinched, comp compared against what the
+#              model's source builds, throat reported beside a nonzero genus
+#
+# Both tables: 353 cells, exact ASCII STL, weld 1e-6, 3 renders per cell aggregated to
+# the worst outcome, one pinned binary each. The binaries are two builds of the same
+# source (src/ diffed clean between them); the criterion is what moved, not the code.
+#
+# HEADLINE: 21 cells are not valid, not 16. Five cells newly fail -- all debris the old
+# criterion had no check for -- four keep their verdict and change their reason from
+# "odd chi" to a located pinched vertex, twelve are unchanged, and NOTHING went the
+# other way. shallow_crease's nine comp=2 rows stay valid: the model declares that it
+# builds two plates.
+#
+recorded results/sweep-11b6b3b1.tsv: 353 cells, 16 not valid
+corrected results/sweep-fd3dec78.tsv: 353 cells, 21 not valid
+
+NEWLY FAILING under the corrected criterion (5):
+  cross              fn=def  r=0.9   comp=2/1
+  tee                fn=def  r=0.5   pinch=2 comp=3/1
+  tee_small          fn=10   r=def   comp=2/1
+  tee_small          fn=def  r=1.5   comp=2/1
+  tee_small          fn=def  r=def   comp=2/1
+
+WERE NOT VALID, NOW VALID (0):
+
+STILL FAILING, REASON CHANGED (4):
+  tee                fn=def  r=0.9   comp=2/1 chi-odd  ->  pinch=1 comp=2/1 chi-odd
+  tee_oblique        fn=def  r=0.2   comp=2/1 chi-odd  ->  pinch=1 comp=2/1 chi-odd
+  tee_oblique        fn=def  r=0.3   comp=2/1 chi-odd  ->  pinch=1 comp=2/1 chi-odd
+  tee_oblique        fn=def  r=0.8   comp=2/1 chi-odd  ->  pinch=1 comp=2/1 chi-odd
+
+STILL FAILING, SAME REASON (12):
+  boss_plate         fn=8    r=def   nonman=8
+  cross              fn=def  r=0.3   nonman=1 chi-odd
+  dome               fn=8    r=def   nonman=4
+  hole_plate         fn=8    r=def   nonman=8
+  pipe_into_face     fn=8    r=def   nonman=2 chi-odd
+  refused_neighbour  fn=def  r=0.2   nonman=1
+  refused_neighbour  fn=def  r=0.8   nonman=1
+  refused_neighbour  fn=def  r=0.9   nonman=1
+  refused_neighbour  fn=def  r=1.0   nonman=1
+  rib_into_boss      fn=14   r=def   nonman=3
+  rib_into_boss      fn=32   r=def   nonman=4
+  two_bosses         fn=8    r=def   nonman=6 chi-odd
+
+THE TRUE FAILURE LIST: 21 of 353 cells
+  boss_plate         fn=8    r=def   INVALID  nonman=8
+  cross              fn=def  r=0.3   INVALID  nonman=1 chi-odd
+  cross              fn=def  r=0.9   INVALID  comp=2/1
+  dome               fn=8    r=def   INVALID  nonman=4
+  hole_plate         fn=8    r=def   INVALID  nonman=8
+  pipe_into_face     fn=8    r=def   INVALID  nonman=2 chi-odd
+  refused_neighbour  fn=def  r=0.2   INVALID  nonman=1
+  refused_neighbour  fn=def  r=0.8   INVALID  nonman=1
+  refused_neighbour  fn=def  r=0.9   INVALID  nonman=1
+  refused_neighbour  fn=def  r=1.0   INVALID  nonman=1
+  rib_into_boss      fn=14   r=def   INVALID  nonman=3
+  rib_into_boss      fn=32   r=def   INVALID  nonman=4
+  tee                fn=def  r=0.5   INVALID  pinch=2 comp=3/1
+  tee                fn=def  r=0.9   INVALID  pinch=1 comp=2/1 chi-odd
+  tee_oblique        fn=def  r=0.2   INVALID  pinch=1 comp=2/1 chi-odd
+  tee_oblique        fn=def  r=0.3   INVALID  pinch=1 comp=2/1 chi-odd
+  tee_oblique        fn=def  r=0.8   INVALID  pinch=1 comp=2/1 chi-odd
+  tee_small          fn=10   r=def   INVALID  comp=2/1
+  tee_small          fn=def  r=1.5   INVALID  comp=2/1
+  tee_small          fn=def  r=def   INVALID  comp=2/1
+  two_bosses         fn=8    r=def   INVALID  nonman=6 chi-odd

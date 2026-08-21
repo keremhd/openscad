@@ -1,0 +1,14 @@
+# rib_into_boss across the $fn axis, 8 identical renders per cell
+# binary md5 11b6b3b1973c46d671a5e8443fb4640f (built 2026-08-05 01:08), exact ASCII STL, weld 1e-6
+# This table replaces the pre-fix one in README.md, which read 2 distinct meshes at every
+# $fn over 8 runs and 6-valid/2-invalid at $fn=14. 64 renders here, all rc=0.
+#
+# fn	runs	distinct_meshes	verdicts_seen
+8	8	1	VALID
+11	8	1	INVALID
+14	8	1	INVALID
+19	8	1	VALID
+25	8	1	INVALID
+26	8	1	VALID
+32	8	1	INVALID
+48	8	1	VALID

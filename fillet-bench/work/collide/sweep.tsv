@@ -1,0 +1,36 @@
+model	r	corners	blend	refused	warn	mesh	folds
+c1_thin_wall	1/2	tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=182 none=0	none	built	0	VALID v=626 e=1872 f=1248 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c1_thin_wall	3/4	tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=120 none=0	none	built	0	VALID v=440 e=1314 f=876 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c1_thin_wall	1	tube=0 capTri=10 cap=0 coons=0 saddle=1 flat=0 fan=1 weld=3 none=0	none	built	0	VALID v=77 e=225 f=150 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c1_thin_wall	5/4	tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=69 none=0	none	built	0	VALID v=287 e=855 f=570 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	5
+c1_thin_wall	3/2	tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=57 none=0	none	built	0	VALID v=251 e=747 f=498 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	5
+c1_thin_wall	2	tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=39 none=0	none	built	0	VALID v=194 e=576 f=384 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	4
+c2_parallel_creases	1	tube=8 capTri=16 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=126 none=0	none	built	0	VALID v=554 e=1656 f=1104 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c2_parallel_creases	3/2	tube=8 capTri=16 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=78 none=0	none	built	0	VALID v=410 e=1224 f=816 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c2_parallel_creases	2	tube=0 capTri=16 cap=0 coons=0 saddle=4 flat=0 fan=4 weld=0 none=0	none	built	0	VALID v=150 e=444 f=296 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c2_parallel_creases	5/2	tube=0 capTri=16 cap=0 coons=0 saddle=4 flat=0 fan=4 weld=40 none=0	none	built	0	VALID v=272 e=810 f=540 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	2
+c2_parallel_creases	3	tube=0 capTri=16 cap=0 coons=8 saddle=0 flat=0 fan=0 weld=0 none=0	none	built	0	VALID v=292 e=870 f=580 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	2
+c2_parallel_creases	7/2	tube=0 capTri=16 cap=0 coons=8 saddle=0 flat=0 fan=0 weld=26 none=0	none	built	0	VALID v=432 e=1290 f=860 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	24
+c3_thin_web	1	tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=86 none=0	none	built	0	VALID v=340 e=1014 f=676 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	4
+c3_thin_web	5/4	tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=72 none=0	none	built	0	VALID v=297 e=885 f=590 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c3_thin_web	3/2	tube=0 capTri=10 cap=0 coons=0 saddle=2 flat=0 fan=0 weld=2 none=0	none	built	0	VALID v=79 e=231 f=154 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c3_thin_web	2	tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=36 none=0	none	built	0	VALID v=189 e=561 f=374 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	4
+c3_thin_web	5/2	tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=34 none=0	none	built	0	VALID v=183 e=543 f=362 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	4
+c3_thin_web	3	none	none	REFUSED	1	VALID v=19 e=51 f=34 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c4_endface_eaten	1	tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=72 none=0	none	built	0	VALID v=301 e=897 f=598 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	3
+c4_endface_eaten	2	tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=28 none=0	none	built	0	VALID v=167 e=495 f=330 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	3
+c4_endface_eaten	5/2	tube=0 capTri=10 cap=0 coons=0 saddle=2 flat=0 fan=0 weld=2 none=0	none	built	0	VALID v=85 e=249 f=166 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c4_endface_eaten	11/4	tube=0 capTri=10 cap=0 coons=2 saddle=0 flat=0 fan=0 weld=22 none=0	none	built	0	VALID v=777 e=2325 f=1550 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	11
+c4_endface_eaten	3	tube=0 capTri=10 cap=0 coons=2 saddle=0 flat=0 fan=0 weld=2 none=0	none	built	0	VALID v=145 e=429 f=286 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	3
+c5_narrow_slot	1/2	tube=4 capTri=12 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=182 none=0	none	built	0	VALID v=658 e=1968 f=1312 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c5_narrow_slot	1	tube=4 capTri=12 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=82 none=0	none	built	0	VALID v=358 e=1068 f=712 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c5_narrow_slot	5/4	tube=4 capTri=12 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=66 none=0	none	built	0	VALID v=310 e=924 f=616 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c5_narrow_slot	3/2	tube=0 capTri=12 cap=0 coons=0 saddle=0 flat=0 fan=4 weld=0 none=0	none	built	0	VALID v=90 e=264 f=176 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c5_narrow_slot	2	tube=0 capTri=12 cap=0 coons=0 saddle=0 flat=0 fan=4 weld=30 none=0	none	built	0	VALID v=182 e=540 f=360 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	2
+c5_narrow_slot	5/2	tube=0 capTri=12 cap=0 coons=0 saddle=0 flat=0 fan=4 weld=28 none=0	none	built	0	VALID v=176 e=522 f=348 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	2
+c6_over_round_cube	1	tube=0 capTri=8 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=12 none=0	none	built	0	VALID v=84 e=246 f=164 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c6_over_round_cube	2	tube=0 capTri=8 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=0 none=0	none	built	0	VALID v=48 e=138 f=92 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c6_over_round_cube	5/2	tube=0 capTri=8 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=0 none=0	none	built	0	VALID v=48 e=138 f=92 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c6_over_round_cube	3	tube=0 capTri=8 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=0 none=0	none	built	0	VALID v=38 e=108 f=72 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c6_over_round_cube	7/2	tube=0 capTri=8 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=0 none=0	none	built	0	VALID v=80 e=234 f=156 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c6_over_round_cube	4	tube=0 capTri=8 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=0 none=0	none	built	0	VALID v=120 e=354 f=236 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0

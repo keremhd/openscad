@@ -1,0 +1,12 @@
+WARNING: fillet: radius 0.2 does not fit the crease at [7.5, 4, 7.44] - the blend would leave the surface it is meant to meet, by 0.0208107; that crease is dropped in file models/refused_neighbour.scad, line 12
+WARNING: fillet: radius 0.2 does not fit 4 of the 24 crease(s) selected; the worst is at [7.5, 4, 7.5] - another feature 0.311837 away needs the same material. Dropped at: [7.5, -4.18421, 7.5], [7.5, -4, 7.26075], [7.5, 4, 7.26075], [7.5, 4, 7.5] in file models/refused_neighbour.scad, line 12
+Geometries in cache: 5
+Geometry cache size in bytes: 4280
+CGAL Polyhedrons in cache: 2
+CGAL cache size in bytes: 94500
+Total rendering time: 0:00:00.019
+   Top level object is a 3D object (manifold):
+   Status:     NoError
+   Genus:      0
+   Vertices:      358
+   Facets:        712

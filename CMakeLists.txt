@@ -1018,6 +1018,7 @@ set(CORE_SOURCES
   src/core/DrawingCallback.cc
   src/core/EvaluationSession.cc
   src/core/Expression.cc
+  src/core/FilletNode.cc
   src/core/FreetypeRenderer.cc
   src/core/FunctionType.cc
   src/core/GroupModule.cc
@@ -1161,6 +1162,9 @@ set(CGAL_SOURCES
   )
 
 set(MANIFOLD_SOURCES
+  src/geometry/fillet/FilletBrush.cc
+  src/geometry/fillet/FilletMesh.cc
+  src/geometry/fillet/FilletBlend.cc
   src/geometry/manifold/ManifoldGeometry.cc
   src/geometry/manifold/manifoldutils.cc
   src/geometry/manifold/manifold-applyops.cc
@@ -1579,6 +1583,15 @@ file(GLOB_RECURSE TEST_SOURCES
 file(GLOB_RECURSE GUI_TEST_SOURCES
   "src/gui/*_test.cc"
 )
+# The globs above intentionally skip src/geometry/ — recursing there would also
+# pull in other, currently-unbuilt geometry test files. Add just the fillet tests
+# explicitly instead. They call the builder directly, which is only compiled with
+# Manifold, so they follow it.
+if(ENABLE_MANIFOLD)
+  list(APPEND TEST_SOURCES
+    "${CMAKE_CURRENT_SOURCE_DIR}/src/geometry/fillet/FilletMesh_test.cc"
+  )
+endif()
 list(FILTER Sources EXCLUDE REGEX ".*_test[.]cc")
 list(REMOVE_ITEM Sources "src/main_wrapper.cc")
 

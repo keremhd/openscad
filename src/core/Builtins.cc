@@ -58,6 +58,7 @@ extern void register_builtin_render();
 extern void register_builtin_import();
 extern void register_builtin_projection();
 extern void register_builtin_cgaladv();
+extern void register_builtin_fillet();
 extern void register_builtin_offset();
 extern void register_builtin_linear_extrude();
 extern void register_builtin_rotate_extrude();
@@ -89,6 +90,7 @@ void Builtins::initialize()
   register_builtin_import();
   register_builtin_projection();
   register_builtin_cgaladv();
+  register_builtin_fillet();
   register_builtin_offset();
   register_builtin_linear_extrude();
   register_builtin_rotate_extrude();

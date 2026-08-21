@@ -1,0 +1,115 @@
+#!/usr/bin/env bash
+# Shared plumbing for render.sh, check.sh and run_all.sh: locating the binary,
+# and reading a case's metadata back out of the case file itself.
+#
+# Case metadata (sign, slice, variants) lives in the .scad and nowhere else. The
+# shell gets at it by evaluating the file with OpenSCAD's echo export, which runs
+# the script without rendering any geometry and costs about a quarter of a
+# second. That way a variant can never be listed in one place and forgotten in
+# the other.
+
+find_openscad() {
+  if [[ -n "${OPENSCAD:-}" ]]; then echo "$OPENSCAD"; return; fi
+  local c
+  for c in "$ROOT/../build/OpenSCAD.app/Contents/MacOS/OpenSCAD" \
+           "$ROOT/../build/openscad" \
+           "$(command -v openscad || true)" \
+           "$(command -v openscad-nightly || true)"; do
+    [[ -n "$c" && -x "$c" ]] && { echo "$c"; return; }
+  done
+  echo ""
+}
+
+require_openscad() {
+  BIN="$(find_openscad)"
+  [[ -z "$BIN" ]] && { echo "ERROR: OpenSCAD binary not found (set OPENSCAD=...)" >&2; exit 2; }
+}
+
+# The fillet nodes are Manifold-only; ask for it explicitly rather than relying
+# on whatever the build defaults to.
+BACKEND_ARGS=(--backend=Manifold)
+
+# A size the feature cannot carry is refused, not silently resized, so for those
+# variants the warning is half the contract and the suite has to read it. Matched
+# loosely on purpose: tight enough to prove the warning is about a fillet size
+# rather than some unrelated complaint, loose enough that rewording the message
+# does not turn a correct operator red.
+FILLET_WARN_RE='WARNING.*(fillet|chamfer|round|bevel).*(radius|size)'
+
+# Dilation goes through CGAL's Nef kernel, which on some inputs takes minutes or
+# does not finish at all. One such case must not wedge the whole suite, so every
+# render and check is bounded. Returns 124 on timeout, mirroring GNU timeout(1),
+# which macOS does not ship.
+#
+# The bound is there to stop a check that will never finish, not to police cost.
+# Set close to how long the slowest real check takes, it turns machine load into
+# a test result — the closed-ring cases sat either side of a 60 s limit depending
+# on what else was running. The ones that genuinely do not converge run for over
+# ten minutes, so there is plenty of room between the two.
+CHECK_TIMEOUT=${CHECK_TIMEOUT:-180}
+
+run_bounded() {  # logfile cmd...
+  local log="$1"; shift
+  "$@" > "$log" 2>&1 &
+  local pid=$! waited=0
+  while kill -0 "$pid" 2>/dev/null; do
+    if [[ $waited -ge $CHECK_TIMEOUT ]]; then
+      kill -9 "$pid" 2>/dev/null
+      wait "$pid" 2>/dev/null
+      return 124
+    fi
+    sleep 1
+    waited=$((waited + 1))
+  done
+  wait "$pid"
+}
+
+case_path() {  # accepts a bare name, a name.scad, or a path
+  local f="$1"
+  [[ -f "$f" ]] && { cd "$(dirname "$f")" >/dev/null && echo "$PWD/$(basename "$f")"; return; }
+  [[ -f "$ROOT/cases/$f" ]] && { echo "$ROOT/cases/$f"; return; }
+  [[ -f "$ROOT/cases/$f.scad" ]] && { echo "$ROOT/cases/$f.scad"; return; }
+  echo ""
+}
+
+# Echo one line per variant plus the case sign and slice kind:
+#   SIGN <union|subtract>
+#   SLICE <top|front|stack>
+#   VARIANT <index> <name> <size> <kind> <tol>
+probe_case() {
+  local case_abs="$1" tmp
+  tmp="$(mktemp -d)"
+  cat > "$tmp/probe.scad" <<EOF
+include <$case_abs>;
+FILLET_DRIVER = true;
+echo(str("SIGN ", CASE_SIGN));
+echo(str("SLICE ", CASE_SLICE[0]));
+for (i = [0 : len(CASE_VARIANTS) - 1])
+  echo(str("VARIANT ", i, " ", CASE_VARIANTS[i][0], " ", CASE_VARIANTS[i][1], " ",
+           CASE_VARIANTS[i][2], " ", CASE_VARIANTS[i][3]));
+EOF
+  "$BIN" -o "$tmp/probe.echo" "$tmp/probe.scad" >/dev/null 2>&1
+  sed -nE 's/^ECHO: "((SIGN|SLICE|VARIANT) [^"]*)"$/\1/p' "$tmp/probe.echo"
+  rm -rf "$tmp"
+}
+
+# Which checks apply to a variant, from the kind it declares:
+#
+#   ref    a hand-written answer exists — the full comparison applies
+#   drop   the size is out of range for the feature, so the required output is a
+#          warning and no tool at all; "drops" replaces both "tool" (there is no
+#          bead to compare) and "emits" (whose polarity is inverted here)
+#   none   no closed form exists to compare against — the junction corners, where
+#          the equal-radius blend has no elementary solution. These keep the
+#          reference-free checks rather than dropping out of the suite.
+#
+# An unknown kind is a broken case file, not a variant to skip quietly; the
+# harness asserts on it, and this echoes nothing so no check reports a verdict.
+checks_for_variant() {  # kind
+  case "$1" in
+    ref)  echo "tool sandwich emits" ;;
+    drop) echo "drops sandwich" ;;
+    none) echo "sandwich emits" ;;
+    *)    echo "ERROR: unknown variant kind: $1" >&2 ;;
+  esac
+}

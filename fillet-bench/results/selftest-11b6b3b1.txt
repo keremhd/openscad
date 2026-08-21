@@ -1,0 +1,39 @@
+binary: /private/tmp/claude-501/-Users-kerem-Devel-openscad/17e6f34d-fddf-4738-abd1-a4856cf9e0d7/scratchpad/OpenSCAD-pinned.app/Contents/MacOS/OpenSCAD
+        built Aug  5 01:08:19 2026
+flags:  --enable=fillet --backend=manifold
+reader: exact ASCII STL, OFF read alongside and compared
+weld:   1e-6
+runs:   3 per cell
+sources newer than the binary: none
+
+known answers -- rib_into_boss across $fn (nondeterministic model)
+  PASS  rib_into_boss fn=11 -> INVALID nonman=2 chi=3 tol=1e-6 (3 runs)
+  PASS  rib_into_boss fn=25 -> INVALID nonman=4 chi=5 tol=1e-6 (3 runs)
+  PASS  rib_into_boss fn=32 -> INVALID nonman=4 chi=4 tol=1e-6 (3 runs)
+  PASS  rib_into_boss fn=26 -> VALID nonman=0 chi=2 tol=1e-6 (3 runs)
+  PASS  rib_into_boss fn=48 -> VALID nonman=0 chi=2 tol=1e-6 (3 runs)
+known answers -- refused_neighbour across r (deterministic model)
+  PASS  refused_neighbour r=0.2 -> INVALID nonman=1 chi=2 tol=1e-6 (3 runs)
+  PASS  refused_neighbour r=0.8 -> INVALID nonman=1 chi=2 tol=1e-6 (3 runs)
+  PASS  refused_neighbour r=0.9 -> INVALID nonman=1 chi=2 tol=1e-6 (3 runs)
+  PASS  refused_neighbour r=0.95 -> INVALID nonman=2 chi=2 tol=1e-6 (3 runs)
+  PASS  refused_neighbour r=1.0 -> INVALID nonman=1 chi=2 tol=1e-6 (3 runs)
+  PASS  refused_neighbour r=1.05 -> INVALID nonman=2 chi=2 tol=1e-6 (3 runs)
+  PASS  refused_neighbour r=0.3 -> VALID nonman=0 chi=2 tol=1e-6 (3 runs)
+  PASS  refused_neighbour r=0.5 -> VALID nonman=0 chi=2 tol=1e-6 (3 runs)
+  PASS  refused_neighbour r=1.2 -> VALID nonman=0 chi=2 tol=1e-6 (3 runs)
+the flaky/deterministic control pair
+  FAIL  rib_into_boss fn=32 looks deterministic (1 mesh in 16 runs) -- it is not; something is caching, or the reader is blind
+  PASS  refused_neighbour r=0.9 was deterministic across 3 runs, as it should be
+the OFF exporter loses precision; it must be seen, and must not change the verdict
+  PASS  refused_neighbour r=0.8: the OFF loses a vertex and the harness sees it
+  PASS  refused_neighbour r=0.8: OFF and STL still reach the same verdict
+plumbing -- the axes must move the mesh
+  PASS  -D FNSET reaches the model (cyl_control v: 96 at 12, 1248 at 48)
+  PASS  -D R reaches the model (refused_neighbour v: 356 at 0.5, 358 at 0.9)
+self-proof -- a facet rotation is a rigid motion
+  PASS  selfproof fn=16 rot 0 == rot 1: VALID v=332 e=990 f=660 chi=2 nonman=0
+  PASS  selfproof fn=24 rot 0 == rot 1: VALID v=656 e=1962 f=1308 chi=2 nonman=0
+  PASS  selfproof fn=32 rot 0 == rot 1: VALID v=1096 e=3282 f=2188 chi=2 nonman=0
+
+SELFTEST FAILED: 1 checks. The sweep is not to be believed.

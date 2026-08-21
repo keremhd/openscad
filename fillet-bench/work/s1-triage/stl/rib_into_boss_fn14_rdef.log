@@ -1,0 +1,11 @@
+ECHO: fillet_tool: selection brush takes 17 of 21 candidate edge(s) in file models/rib_into_boss.scad, line 20
+Geometries in cache: 8
+Geometry cache size in bytes: 10208
+CGAL Polyhedrons in cache: 3
+CGAL cache size in bytes: 169000
+Total rendering time: 0:00:00.019
+   Top level object is a 3D object (manifold):
+   Status:     NoError
+   Genus:      0
+   Vertices:      223
+   Facets:        442

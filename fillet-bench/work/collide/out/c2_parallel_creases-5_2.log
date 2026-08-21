@@ -1,0 +1,10 @@
+ECHO: fillet: radius 2.5 blended 76 edge(s) (12 concave, 64 convex); 272 verts, 540 tris in file c2_parallel_creases.scad, line 7
+ECHO: fillet: corners tube=0 capTri=16 cap=0 coons=0 saddle=4 flat=0 fan=4 weld=40 none=0 in file c2_parallel_creases.scad, line 7
+Geometries in cache: 5
+Geometry cache size in bytes: 29672
+CGAL Polyhedrons in cache: 1
+CGAL cache size in bytes: 6000
+Total rendering time: 0:00:00.014
+Top level object is a 3D object (PolySet):
+   Convex:       no
+   Triangles:    540

@@ -1,0 +1,163 @@
+commit 972be15a7a8933ed400d11240a433677452ea595
+Author: Claude <noreply@anthropic.com>
+Date:   Sun Aug 9 17:35:35 2026 +0000
+
+    fillet: pole-free convex corner cap so box corners stop beading
+    
+    emitCap tessellates a single-sign corner as a pole-and-rings fan: every
+    boundary point is slerped to one shared apex. On a convex box corner that
+    apex reads as a small bead in the centre and its facets swing toward it,
+    so the surrounding band shades as an uneven whorl with dark, recessed-
+    looking wedges where the three arcs meet -- the "corner bead".
+    
+    The corner is geometrically fine (a right-angle corner's rim sits exactly
+    on the size-sphere about the point equidistant from the three faces), so
+    this is a tessellation choice, not a size/height error. Replace the fan,
+    for genuine convex corners only, with a barycentric subdivision of the
+    spherical triangle bounded by the three fillet arcs: no central pole, and
+    the grid lines run parallel to the three incident round-over strips so the
+    cap shades as an even continuation of them.
+    
+    emitCorner now records which ring points are the sector-inset corners and
+    hands them to emitCapTri; it runs only when the ring is exactly three
+    equal-length arcs and all edges are convex. Concave caps (pockets) and any
+    other ring fall through to emitCap unchanged. The cap seats its interior on
+    the rim's own mean radius, so an oblique (non-90) corner -- where the rim is
+    not perfectly on the cornerBall sphere -- gets no annular step either. The
+    three boundary rows reuse the exact ring vertices, so the cap still welds to
+    the strips.
+    
+    Not yet built or bench-rendered in this environment (no toolchain here);
+    verified with a standalone geometry harness that the rim lies on the sphere
+    and the subdivision welds pole-free. Needs a bench run to confirm on the
+    sheets and check no VALID tile regresses.
+    
+    Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>
+    Claude-Session: https://claude.ai/code/session_0185AugoASVh16LxZwo5Zdxw
+
+diff --git a/src/geometry/fillet/FilletBlend.cc b/src/geometry/fillet/FilletBlend.cc
+index 516fff9..12bdf8a 100644
+--- a/src/geometry/fillet/FilletBlend.cc
++++ b/src/geometry/fillet/FilletBlend.cc
+@@ -913,6 +913,74 @@ struct Blender
+       }
+   }
+ 
++  // Tessellate a convex trihedral corner as a subdivided spherical triangle rather
++  // than emitCap's pole-and-rings fan. A genuine convex box corner is three fillet
++  // arcs meeting at three sector corners, all on one sphere about C. A
++  // pole fan sweeps every boundary point to one shared apex, so its facets swing
++  // toward that apex and shade as a whorl pinched at the centre with dark, recessed-
++  // looking wedges where the arcs meet — the "corner bead". This instead lays a
++  // barycentric grid over the three corner directions and projects it to the sphere:
++  // no pole, and the grid lines run parallel to the three incident round-over strips
++  // so the cap shades as an even continuation of them. The three boundary rows reuse
++  // the exact ring vertices, so the cap welds to the strips even where the arcs are
++  // not perfect great circles (a non-right-angle corner). `cornerPos` are the ring
++  // indices of the three sector corners, in ring order. Returns false — and the
++  // caller falls back to emitCap — unless the ring is exactly three equal-length
++  // arcs, which is every real convex box/plate corner.
++  bool emitCapTri(const std::vector<int>& ring, const std::vector<int>& cornerPos,
++                  const Vector3d& C)
++  {
++    if (cornerPos.size() != 3) return false;
++    const int n = static_cast<int>(ring.size());
++    const int p0 = cornerPos[0], p1 = cornerPos[1], p2 = cornerPos[2];
++    const int seg = p1 - p0;
++    if (seg < 1 || p2 - p1 != seg || n - p2 != seg) return false;  // not three equal arcs
++    auto dirOf = [&](int p) -> Vector3d {
++      const Vector3d d = out.V[ring[p]] - C;
++      const double l = d.norm();
++      return l > 1e-12 ? Vector3d(d / l) : Vector3d(Vector3d::UnitZ());
++    };
++    // Radius = the rim's own mean distance to C, not a hard `size`. At a right-angle
++    // corner the whole rim already lies on the size-sphere, so this is size exactly;
++    // at an oblique corner, where the rim is not perfectly on the cornerBall sphere,
++    // it seats the interior on the rim's radius and avoids an annular step between the
++    // interior and the (exact) boundary vertices.
++    double r = 0.0;
++    for (int i = 0; i < n; ++i) r += (out.V[ring[i]] - C).norm();
++    r /= n;
++    const Vector3d u0 = dirOf(p0), u1 = dirOf(p1), u2 = dirOf(p2);
++    // g[i][j], i + j <= seg: barycentric (seg-i-j, i, j)/seg over (u0, u1, u2). The
++    // three boundaries map to the ring's own arc samples; interior points are the
++    // barycentric direction renormalised onto the sphere.
++    std::vector<std::vector<int>> g(seg + 1);
++    for (int i = 0; i <= seg; ++i) {
++      g[i].resize(seg + 1 - i);
++      for (int j = 0; i + j <= seg; ++j) {
++        if (j == 0)
++          g[i][j] = ring[(p0 + i) % n];             // arc corner0 -> corner1
++        else if (i == 0)
++          g[i][j] = ring[(p0 - j + n) % n];         // arc corner0 -> corner2
++        else if (i + j == seg)
++          g[i][j] = ring[(p1 + j) % n];             // arc corner1 -> corner2
++        else {
++          const double w0 = static_cast<double>(seg - i - j) / seg,
++                       w1 = static_cast<double>(i) / seg, w2 = static_cast<double>(j) / seg;
++          Vector3d d = w0 * u0 + w1 * u1 + w2 * u2;
++          const double l = d.norm();
++          d = l > 1e-12 ? Vector3d(d / l) : u0;
++          g[i][j] = out.add(C + r * d);
++        }
++      }
++    }
++    // Winding is left to orient(), exactly as emitCap leaves it.
++    for (int i = 0; i < seg; ++i)
++      for (int j = 0; i + j < seg; ++j) {
++        out.tri(g[i][j], g[i + 1][j], g[i][j + 1]);
++        if (i + j + 1 < seg) out.tri(g[i + 1][j], g[i + 1][j + 1], g[i][j + 1]);
++      }
++    return true;
++  }
++
+   // Ear-clip a ring in its best-fit plane, returning the triangles as LOCAL
+   // indices (0..n-1) into the ring array rather than emitting them. The projection
+   // is a simple polygon wherever the flat ear-clip already worked, so this base
+@@ -1224,8 +1292,10 @@ struct Blender
+     // two arrays in lockstep through the same adjacent-duplicate dedup.
+     std::vector<int> ring;
+     std::vector<Vector3d> ringNrm;
+-    auto pushRing = [&](int idx, const Vector3d& nrm) {
++    std::vector<int> cornerPos;  // ring indices of the sector-inset corners (the arc joins)
++    auto pushRing = [&](int idx, const Vector3d& nrm, bool corner) {
+       if (!ring.empty() && ring.back() == idx) return;
++      if (corner) cornerPos.push_back(static_cast<int>(ring.size()));
+       ring.push_back(idx);
+       ringNrm.push_back(nrm);
+     };
+@@ -1233,7 +1303,7 @@ struct Blender
+       const int i = (start + off) % n;
+       const int tri = fan[i].first;
+       const int via = fan[i].second;  // edge (u,via) leaving this triangle
+-      pushRing(out.add(insetForTri(u, tri)), m.tris[tri].normal);
++      pushRing(out.add(insetForTri(u, tri)), m.tris[tri].normal, /*corner=*/true);
+       if (isSelected(u, via)) {
+         const EdgeKey e{std::min(u, via), std::max(u, via)};
+         const auto& ts = adj.at(e);
+@@ -1254,11 +1324,12 @@ struct Blender
+             const Vector3d d = cs[j] - *Copt;
+             if (d.norm() > 1e-9) nrm = d.normalized();
+           }
+-          pushRing(out.add(cs[j]), nrm);
++          pushRing(out.add(cs[j]), nrm, /*corner=*/false);
+         }
+       }
+     }
+     if (ring.size() >= 2 && ring.front() == ring.back()) { ring.pop_back(); ringNrm.pop_back(); }
++    while (!cornerPos.empty() && cornerPos.back() >= static_cast<int>(ring.size())) cornerPos.pop_back();
+ 
+     // Sign of the selected edges here.
+     bool anyConcave = false, anyConvex = false;
+@@ -1276,6 +1347,11 @@ struct Blender
+     // Only for a real junction — a strip end gets a flat cap instead.
+     if (!isChamfer && junction && !mixed && ring.size() >= 3) {
+       if (auto C = cornerBall(u, anyConcave)) {
++        // A convex box corner (three equal fillet arcs) tessellates as a subdivided
++        // spherical triangle — no central pole, facets flowing with the strips — so
++        // it does not read as a beaded knuckle. Concave caps and any ring that is not
++        // three equal arcs fall through to the pole-fan below.
++        if (!anyConcave && emitCapTri(ring, cornerPos, *C)) return;
+         Vector3d poleUnit = (m.pos[u] - *C).normalized();
+         if (poleUnit.squaredNorm() < 0.5) {  // u sits on the centre: fall back to the ring
+           Vector3d centroid = Vector3d::Zero();

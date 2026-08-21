@@ -1,0 +1,142 @@
+# Expected state of every check at the current milestone.
+#
+#   <case>  <variant>  <check>  PASS|FAIL|CRASH|TIMEOUT|ERROR
+#
+# "*" matches anything; the FIRST matching line wins, so put specific cases
+# above the catch-alls. Anything not listed is expected to PASS.
+#
+# This file is a ledger of TEMPORARY DEBT — what is red today and expected to go
+# green as the operator is built. It is not where the suite records what correct
+# behaviour is; that lives in the case files, as each variant's kind. The
+# distinction matters when deleting lines: a line here means "not there yet", so
+# a permanent contract must never be written as one, or someone will eventually
+# delete it believing they fixed something.
+#
+# All four tools now build real geometry, and every two-face case — flat and
+# ring, concave and convex — matches its hand reference, brushed or whole. What
+# is left below is red for reasons outside the operator — a check that cannot
+# express its case's answer, or a kernel downstream that will not dilate a result
+# that is nonetheless correct — so the catch-all that used to say "the
+# rounded tools emit nothing" is gone rather than narrowed: an unlisted check is
+# expected to pass, and that is now the common case rather than the exception.
+
+selftest_equal          *  *         PASS
+selftest_wrongradius    *  tool      FAIL   # the point of the self-test
+selftest_wrongradius    *  *         PASS
+
+# The two pocket cases used to segfault here, and it was not a fillet bug: the
+# pocket's apex sat exactly in the plane of the block's top face, so the model
+# pinched to a point at that vertex, and CGAL's convex decomposition — which
+# every dilation goes through — dies on such a vertex. Reproducible in eight
+# lines with no fillet node present, and unrelated to the pocket's face count:
+#
+#   minkowski() {
+#     difference() {
+#       translate([-30,-30,0]) cube([60,60,60]);
+#       cylinder(r1 = 30, r2 = 0, h = 60, $fn = 3);   // apex at z = 60
+#     }
+#     cube(12, center = true);
+#   }
+#
+# Move the apex a millimetre either way and it is clean, so the cases now leave
+# material above it (CAP) and the crash is gone for good.
+#
+# What is left is not about the fillet either. Corner cells exist now and these
+# pockets close correctly — pinned exactly, against a shrink-and-grow reference,
+# in FilletCompare_test.cc. What CGAL will not dilate is the mesh, and these two
+# lines have twice said why and twice been wrong about which tangency it was.
+# First the tool's arcs against the walls they ride; that was measured and fixed
+# and did not move these. Then nine triangles of about 1e-13 at the one height
+# each slant bead is cut back at, from the corner cell being hulled against a
+# section of the bead it closes — its faces left the bead's at a fraction of a
+# degree, which on a spike is as little as two faces can differ by. The corner
+# cell no longer reaches down a chain with that chain's own section, and those
+# are gone too: the smallest triangle in this tool is 8.1e-07 where it was
+# 2.4e-13, three million times up and pinned in FilletCompare_test.cc.
+#
+# CGAL still refuses, and what it says has moved with the geometry rather than
+# staying put, which is the evidence that each fix reached what it was aimed at.
+# The Nef conversion of the tool used to throw; it now succeeds, and the refusal
+# has moved downstream into the convex decomposition, which reports two facets
+# sharing a halfedge. That is a third thing, in a kernel these tools are not
+# built for, and no measurement here has yet said it is the operator's. The two
+# apex lines below are the same shape seen by a check that cannot express it.
+case_junction3_pocket   *  sandwich  FAIL
+case_junction4_pocket   *  sandwich  FAIL
+
+# These two are red because "sandwich" cannot pass on a sharp apex, not because
+# the apex is wrong. The check asks that the result stay within the tool's own
+# size of the model, and rounding a point moves the surface by far more than the
+# radius: a ball of 6 seated in a 30 x 60 cone tops out 18.7 below the tip, so
+# the correct answer is three radii from the model. That is the coarseness a
+# reference-free check is documented to have. The exact comparison lives in
+# FilletCompare_test.cc, where both apexes are checked against the true rounded
+# solid; here the contour stack is what to look at, and a section below the
+# corner comes out a circle because it is the corner ball cut by a plane.
+case_junction3_apex     small  sandwich  FAIL
+case_junction4_apex     small  sandwich  FAIL
+
+# Same two kinds of red, on the cases from junction-cases.md.
+#
+# The sheared valence-5 pair is the apex and pocket story again and nothing new:
+# the skew is there so the picture SHOWS several distinct corner centres instead
+# of one, which a symmetric cone cannot. Correctness of those corners is pinned
+# exactly in FilletCompare_test.cc; here the apex cannot pass "sandwich" and the
+# pocket cannot be dilated at all.
+case_junction5_apex_skew    small  sandwich  FAIL
+case_junction5_pocket_skew  small  sandwich  FAIL
+
+# The flat apex is a probe: the corner solve's determinant guard should NOT fire
+# at 1e-2, and it does not — the corner is built and the result is a clean solid.
+# It is red because what is flat here is also sharp: the rim is a 1.9-degree
+# knife edge, and rounding one sets the surface back by r/tan(t/2), some sixty
+# radii at this size. Correct, and nowhere near within "size" of the model. Like
+# the two lines above it, this is the check failing to express the answer, so it
+# will still be here when the operator is finished.
+case_junction_flat_apex     small  sandwich  FAIL
+
+# The needle used to sit here twice over: its beads stopped eighty radii below
+# the apex, and dilating a 3 x 120 spike through CGAL took longer than any bound
+# worth setting, so the check never returned a verdict. Both are gone. The size
+# gate refuses the three slant creases — the spike is thinner than the tool for
+# its last 27 mm — so only the base beads are built, the tip is left alone, and
+# what the check has to dilate is small enough to finish. The runout fallback
+# that the under-fill was waiting for exists, and is exercised in
+# FilletBuilder_test.cc, which calls the builder without the gate in front.
+
+# The equal-radius tee is the pocket cases' failure a third time, and the one
+# place it can be shown to be the kernel rather than the geometry. Where the two
+# seam ellipses cross, the cylinders share a tangent plane, and four spines run
+# out onto that tangency; the triangles that leaves are too small to survive CGAL
+# quantising its input, so the dilation "sandwich" needs cannot be taken.
+#
+# The applied result itself is fine, and identical either way round: with the
+# branch along X and with it along Y the operator reports the same 852 edges and
+# the same 80 selected creases, and both results come back NoError, genus 0. Only
+# the dilation differs, because rotating the branch moves where the near-tangent
+# slivers land relative to the quantising grid. A check that one orientation
+# passes and its mirror image fails is measuring the kernel, not the solid. The
+# case keeps the orientation whose picture is legible.
+case_pipe_tee_equal     small  sandwich  FAIL
+
+# Nothing is listed for the two curved-crease cases any more, and what closed
+# them was not the harness. Both were red because CGAL would not dilate their
+# applied result, and the reason was in the solid: the tool's cells are cut at
+# stations and met there on a coincident face, which the boolean resolved into a
+# flap of zero thickness. A dilation goes through a convex decomposition, and a
+# decomposition will not take a solid that touches itself. With the seams covered
+# the two bosses and the dome at both sizes dilate and match.
+
+# Nothing is listed for the brush case any more. The tool clips its spine
+# against the brush and caps the bead flat and square to the crease, which is
+# what the reference builds by intersecting the finished bead with the same box.
+# Only the "tool" check could ever have told the two apart: a bead that runs on
+# past the brush is still within size of the model, which is the coarseness
+# "sandwich" is documented to have.
+
+# Nothing is listed for "drops" any more: a size the feature cannot carry is
+# refused with a warning, one crease at a time, so all five drop variants pass.
+# What each of them is refused FOR differs, which is the point of having five —
+# the L's oversized fillet and chamfer would leave the faces they are meant to
+# meet, while the cube's round and bevel and the hole mouth are each competing
+# with a feature that reaches back the other way.

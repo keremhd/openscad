@@ -1,0 +1,10 @@
+ECHO: fillet: radius 2.5 blended 12 edge(s) (0 concave, 12 convex); 48 verts, 92 tris in file c6_over_round_cube.scad, line 8
+ECHO: fillet: corners tube=0 capTri=8 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=0 none=0 in file c6_over_round_cube.scad, line 8
+Geometries in cache: 2
+Geometry cache size in bytes: 5600
+CGAL Polyhedrons in cache: 0
+CGAL cache size in bytes: 0
+Total rendering time: 0:00:00.000
+Top level object is a 3D object (PolySet):
+   Convex:       no
+   Triangles:     92

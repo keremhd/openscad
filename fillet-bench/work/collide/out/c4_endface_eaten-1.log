@@ -1,0 +1,10 @@
+ECHO: fillet: radius 1 blended 90 edge(s) (6 concave, 84 convex); 296 verts, 588 tris in file c4_endface_eaten.scad, line 8
+ECHO: fillet: corners tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=72 none=0 in file c4_endface_eaten.scad, line 8
+Geometries in cache: 3
+Geometry cache size in bytes: 30264
+CGAL Polyhedrons in cache: 1
+CGAL cache size in bytes: 4750
+Total rendering time: 0:00:00.003
+Top level object is a 3D object (PolySet):
+   Convex:       no
+   Triangles:    588

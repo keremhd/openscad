@@ -44,6 +44,13 @@ public:
   int getPathSegmentCount() const { return std::max(static_cast<int>(fn), 3); }
 
   /**
+   * Upper bound (in degrees) on the dihedral angle of any circular seam this
+   * discretizer can emit: the $fn seam when $fn is set, bounded by $fa
+   * otherwise.
+   */
+  double getMaxSeamAngle() const { return std::max(fa, fn > 0 ? 360.0 / fn : 0.0); }
+
+  /**
    * Returns the number of slices for a linear_extrude with twist.
    *
    * @param r_sqr Largest 2D delta from origin of all vertices, squared.

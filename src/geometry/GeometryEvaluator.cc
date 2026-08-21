@@ -14,6 +14,7 @@
 #include "core/ColorNode.h"
 #include "core/CsgOpNode.h"
 #include "core/CurveDiscretizer.h"
+#include "core/FilletNode.h"
 #include "core/LinearExtrudeNode.h"
 #include "core/ModuleInstantiation.h"
 #include "core/OffsetNode.h"
@@ -36,6 +37,7 @@
 #include "geometry/Polygon2d.h"
 #include "geometry/boolean_utils.h"
 #include "geometry/cgal/cgal.h"
+#include "geometry/fillet/FilletBlend.h"
 #include "geometry/linalg.h"
 #include "geometry/linear_extrude.h"
 #include "geometry/roof_ss.h"
@@ -53,6 +55,9 @@
 #include "geometry/cgal/cgalutils.h"
 #endif
 #ifdef ENABLE_MANIFOLD
+#include <manifold/manifold.h>
+
+#include "geometry/manifold/ManifoldGeometry.h"
 #include "geometry/manifold/manifoldutils.h"
 #endif
 
@@ -977,6 +982,66 @@ Response GeometryEvaluator::visit(State& state, const CgalAdvNode& node)
       }
       default: assert(false && "not implemented");
       }
+    } else {
+      geom = smartCacheGet(node, state.preferNef());
+    }
+    addToParent(state, node, geom);
+    node.progress_report();
+  }
+  return Response::ContinueTraversal;
+}
+
+/*!
+   input: List of 3D objects (child 0 = model, children 1+ = selection brushes)
+   output: the finished blended solid (fillet arc or chamfer cut), both signs in
+           one pass
+   operation:
+    o Extract child 0's mesh, classify its edges, and edit the mesh directly along
+      the selected creases: concave edges gain a blend strip (material added),
+      convex edges are bevelled back (material removed). Children 1+ are
+      unioned into one selection brush; where it is present, only the stretches of
+      crease inside it are built.
+ */
+Response GeometryEvaluator::visit(State& state, const FilletNode& node)
+{
+  if (state.isPrefix() && isSmartCached(node)) return Response::PruneTraversal;
+  if (state.isPostfix()) {
+    std::shared_ptr<const Geometry> geom;
+    if (!isSmartCached(node)) {
+      // Collect children (child 0 = target); forcing their evaluation is
+      // inherent to any mesh-inspecting fillet operator.
+      Geometry::Geometries children = collectChildren3D(node);
+#ifdef ENABLE_MANIFOLD
+      if (!children.empty() && children.front().second) {
+        auto target = ManifoldUtils::createManifoldFromGeometry(children.front().second);
+
+        // Children 1+ are selection brushes, unioned into one volume. They are
+        // ordinary CSG, which is what makes negative selection free: a
+        // difference() of two brushes keeps an edge sharp with no new syntax.
+        std::shared_ptr<const ManifoldGeometry> brush;
+        std::vector<manifold::Manifold> brushParts;
+        for (auto it = std::next(children.begin()); it != children.end(); ++it) {
+          if (!it->second) continue;
+          auto part = ManifoldUtils::createManifoldFromGeometry(it->second);
+          if (part && !part->isEmpty()) brushParts.push_back(part->getManifold());
+        }
+        if (brushParts.size() == 1) {
+          brush = std::make_shared<ManifoldGeometry>(std::move(brushParts.front()));
+        } else if (brushParts.size() > 1) {
+          brush = std::make_shared<ManifoldGeometry>(
+            manifold::Manifold::BatchBoolean(brushParts, manifold::OpType::Add));
+        }
+
+        // The operator consumes its children and returns the finished blended
+        // solid: a direct topological bevel of the target, adding material on
+        // concave edges and removing it on convex ones in one pass. No boolean
+        // composition here — the sign is just where the blend strip lands.
+        geom = buildBlend(node, target, brush);
+      }
+#else
+      LOG(message_group::Warning, node.modinst->location(), this->tree.getDocumentPath(),
+          "fillet tools require the Manifold backend");
+#endif
     } else {
       geom = smartCacheGet(node, state.preferNef());
     }

@@ -1,0 +1,36 @@
+model	r	corners	refused	warn	mesh	folds
+c1_thin_wall	9/10	tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=102 none=0	built	0	VALID v=386 e=1152 f=768 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c1_thin_wall	99/100	tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=98 none=0	built	0	VALID v=374 e=1116 f=744 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	3
+c1_thin_wall	101/100	tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=87 none=0	built	0	VALID v=341 e=1017 f=678 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	5
+c1_thin_wall	11/10	tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=84 none=0	built	0	VALID v=332 e=990 f=660 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	5
+c2_parallel_creases	19/10	tube=8 capTri=16 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=68 none=0	built	0	VALID v=380 e=1134 f=756 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c2_parallel_creases	199/100	tube=8 capTri=16 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=68 none=0	built	0	VALID v=380 e=1134 f=756 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c2_parallel_creases	201/100	tube=0 capTri=16 cap=0 coons=0 saddle=4 flat=0 fan=4 weld=50 none=0	built	0	VALID v=302 e=900 f=600 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	2
+c2_parallel_creases	21/10	tube=0 capTri=16 cap=0 coons=0 saddle=4 flat=0 fan=4 weld=50 none=0	built	0	VALID v=302 e=900 f=600 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	2
+c3_thin_web	149/100	tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=64 none=0	built	0	VALID v=273 e=813 f=542 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c3_thin_web	151/100	tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=58 none=0	built	0	VALID v=255 e=759 f=506 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	4
+c3_thin_web	11/4	tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=30 none=0	built	0	VALID v=255 e=759 f=506 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	4
+c3_thin_web	29/10	tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=28 none=0	built	0	VALID v=247 e=735 f=490 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	4
+c4_endface_eaten	24/10	tube=2 capTri=10 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=28 none=0	built	0	VALID v=167 e=495 f=330 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	3
+c4_endface_eaten	26/10	tube=0 capTri=10 cap=0 coons=2 saddle=0 flat=0 fan=0 weld=28 none=0	built	0	VALID v=257 e=765 f=510 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	3
+c4_endface_eaten	27/10	tube=0 capTri=10 cap=0 coons=2 saddle=0 flat=0 fan=0 weld=24 none=0	built	0	VALID v=241 e=717 f=478 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	3
+c4_endface_eaten	28/10	tube=0 capTri=10 cap=0 coons=2 saddle=0 flat=0 fan=0 weld=22 none=0	built	0	VALID v=233 e=693 f=462 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	3
+c5_narrow_slot	149/100	tube=4 capTri=12 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=62 none=0	built	0	VALID v=298 e=888 f=592 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c5_narrow_slot	151/100	tube=0 capTri=12 cap=0 coons=0 saddle=0 flat=0 fan=4 weld=52 none=0	built	0	VALID v=248 e=738 f=492 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	2
+c5_narrow_slot	16/10	tube=0 capTri=12 cap=0 coons=0 saddle=0 flat=0 fan=4 weld=52 none=0	built	0	VALID v=248 e=738 f=492 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	2
+c6_over_round_cube	29/10	tube=0 capTri=8 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=0 none=0	built	0	VALID v=80 e=234 f=156 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c6_over_round_cube	31/10	tube=0 capTri=8 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=0 none=0	built	0	VALID v=80 e=234 f=156 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c6_over_round_cube	45/10	tube=0 capTri=8 cap=0 coons=0 saddle=0 flat=0 fan=0 weld=0 none=0	built	0	VALID v=120 e=354 f=236 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+c6_over_round_cube	6	none	REFUSED	1	VALID v=8 e=18 f=12 comp=1 bnd=0 nonman=0 nmvert=0 chi=2 genus=0 tol=1e-06	0
+png/c1_thin_wall-1.png
+png/c1_thin_wall-2.png
+png/c2_parallel_creases-2.png
+png/c2_parallel_creases-7_2.png
+png/c3_thin_web-3_2.png
+png/c3_thin_web-3.png
+png/c4_endface_eaten-5_2.png
+png/c4_endface_eaten-11_4.png
+png/c5_narrow_slot-3_2.png
+png/c5_narrow_slot-5_2.png
+png/c6_over_round_cube-3.png
+png/c6_over_round_cube-4.png

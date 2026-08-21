@@ -1,0 +1,10 @@
+ECHO: fillet: radius 1.5 blended 20 edge(s) (1 concave, 19 convex); 78 verts, 152 tris in file c3_thin_web.scad, line 8
+ECHO: fillet: corners tube=0 capTri=10 cap=0 coons=0 saddle=2 flat=0 fan=0 weld=2 none=0 in file c3_thin_web.scad, line 8
+Geometries in cache: 3
+Geometry cache size in bytes: 9336
+CGAL Polyhedrons in cache: 1
+CGAL cache size in bytes: 4750
+Total rendering time: 0:00:00.009
+Top level object is a 3D object (PolySet):
+   Convex:       no
+   Triangles:    152

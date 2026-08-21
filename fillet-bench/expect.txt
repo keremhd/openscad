@@ -1,0 +1,70 @@
+# model                fn      notes
+#
+# fn is the fragment count the model actually achieves at stock defaults, from
+#   fragments = ceil(max(min(360/$fa, 2*pi*r/$fs), 5))
+# with $fa = 12 and $fs = 2, taken at the model's dominant radius. A2 check 1
+# renders the model bare and again with $fn forced to this number: the same
+# solid must come back, with the same warnings.
+#
+# fn = "-" means the model carries no curvature, so A2 is vacuous for it and
+# only A1 and A3 apply. "skip" means the model carries two facet scales at once,
+# where no single forced $fn reproduces the stock render at all. "arc" is "-"
+# with the $fn axis swept anyway: the SOURCE is planar, so there is no second
+# tile and A2 is still vacuous, but the blend's own arcs are tessellated from $fn
+# like anything else, and a model marked "arc" has a fault band there worth
+# walking. None of the three earns a second tile, so tile ids do not move.
+#
+tee                     16
+tee_oblique             16
+tee_small               10      $fs binds hardest here
+tee_large               30      above ~19 mm dia, $fa takes over
+cross                   19
+boss_plate              26
+two_bosses              26
+pipe_into_face          19
+dome                    30      sphere d=24
+hole_plate              22
+bevel_boss              29
+cyl_control             30      CONTROL, expect clean
+lbracket                -
+box_step                -
+rib                     -
+thin_slab               -
+pocket                  -
+chamfer_box             -
+brush_one_edge          -
+cube_control            -       CONTROL, expect clean
+mixed_fn                skip    CONTROL, expect clean; two facet scales in one mesh
+rib_into_boss           26      cylinder r=8; the curved-arrival seam vertex
+refused_neighbour       arc     A3; refuses 5 creases next to built ones. "arc": planar
+#                               source, so it earns no second tile, but its FILLET has a
+#                               fault band on the $fn axis -- at $fn 10 and 12 the blend
+#                               leaves 5 non-manifold edges and refuses outright, and at
+#                               14 and 16 it builds a pinched solid. Nothing swept it
+#                               until that band was found by hand, because "-" had kept
+#                               the axis unwalked; "arc" walks it.
+shallow_crease          -       documentation case; the min_angle exhibit, two solids per tile
+#
+# The torus-gate boundary family, sheet 6's models, promoted into the corpus.
+# They were staged outside it while unmeasured; each is now VALID at every cell
+# of the sweep's own fn and radius axes, so the gate is walked by the sweep and
+# not only by one contact-sheet render. Appended rather than sorted in, because
+# a tile id is only stable while this file keeps its order.
+#
+# All eleven are planar sources, so "-" for the same reason lbracket carries it.
+# That is a statement about the MODEL: the fillet's own arcs do honour $fn (at
+# R = 6, elbow_big forced to $fn = 19 returns the stock-default solid exactly),
+# and the two models whose source does carry curvature are marked "skip" because
+# they carry two facet scales at once and no single $fn reproduces stock.
+#
+elbow_big               -       CONTROL, lbracket at 3x size and 3x radius
+elbow_crowded           -       arms 6 thick against 2R = 5.8
+elbow_curved_endface    skip    cylinder r=9.5 (30 facets) + fillet R=2 (7): two scales
+elbow_curved_wall       skip    cylinder r=60 (30 facets) + fillet R=2 (7): two scales
+elbow_dihedral120       -       120deg trough, leaning wall
+elbow_dihedral60        -       60deg trough, square end face
+elbow_facet_endface     -       end face kinks 10deg at the crease
+elbow_oblique50         -       crease meets the end face at 50deg
+elbow_oblique75         -       crease meets the end face at 75deg
+elbow_rot30             -       CONTROL, square elbow rotated 30deg about z
+elbow_thin_arm          -       arm 3 thick against 2R = 4
